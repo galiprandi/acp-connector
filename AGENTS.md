@@ -61,3 +61,33 @@ To release a new version:
 ## Config
 
 Single `.config.jsonc` file in cwd. See `.config.example.jsonc` for all options.
+
+## Architecture
+
+```
+src/
+├── index.js       — CLI entrypoint (setup or run)
+├── bridge.js      — orchestrates all components
+├── acp-client.js  — spawns ACP agent, handles protocol + sessions
+├── bot.js         — Telegram bot, message queue, stream batching
+├── cron.js        — scheduled prompt injection
+├── routines.js    — named prompts + /cron, /routine, /run commands
+├── http.js        — optional HTTP API (/health, /prompt)
+├── config.js      — JSONC config loader/saver
+└── setup.js       — interactive setup wizard
+```
+
+### Data flow
+
+1. Input sources (Telegram, cron, HTTP) enqueue prompts via `bot.enqueuePrompt()`
+2. Queue is processed one at a time (ACP `session/prompt` is blocking)
+3. Agent responses stream back via `session.nextUpdate()`
+4. `bot._handleUpdate()` batches chunks and edits a single Telegram message
+5. Permissions are forwarded as inline buttons (or auto-approved)
+
+### Key principles
+
+- **Thin bridge**: no agent loop, no model provider, no tool ecosystem
+- **Agent-agnostic**: no hardcoded agent references anywhere
+- **Config is truth**: all state in `.config.jsonc`, persisted by routines
+- **Serialized queue**: one prompt at a time, no concurrent prompts

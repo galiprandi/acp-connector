@@ -1,44 +1,45 @@
 {
   // ACP agent command — any ACP-compatible agent
   "agentCmd": "devin acp",
-  
+
   // Working directory for the agent subprocess (default: cwd)
   "agentCwd": ".",
-  
+
   // Telegram
   "telegramToken": "YOUR_BOT_TOKEN",
   "allowedChatIds": [123456789],
-  
+
   // ACP session (optional — omit to create a new session each run)
   // "sessionId": "some-session-id",
-  
+
   // MCP/session config path (optional)
   // "sessionConfigPath": "acp_session.jsonc",
-  
+
   // Show agent thoughts in Telegram (default: false)
   "showThoughts": false,
-  
+
   // Stream responses with message edits (default: true)
   "streaming": true,
-  
+
   // Log level: "error" | "info" | "debug" (default: "info")
   "logLevel": "info",
-  
-  // Scheduled jobs
+
+  // Scheduled jobs — can also be managed via /cron commands in Telegram
   "cron": [
-    // {
-    //   "name": "briefing",
-    //   "schedule": "0 9 * * *",
-    //   "prompt": "hacé el briefing del día",
-    //   "chatId": 123456789
-    // }
+    {
+      "name": "daily-briefing",
+      "schedule": "0 9 * * *",
+      "prompt": "summarize today's calendar and unread emails",
+      "chatId": 123456789
+    }
   ],
-  
-  // Named reusable prompts
+
+  // Named reusable prompts — can also be managed via /routine commands
   "routines": [
-    // { "name": "briefing", "prompt": "hacé el briefing del día" }
+    { "name": "briefing", "prompt": "summarize today's calendar and unread emails" },
+    { "name": "review", "prompt": "review the latest PRs on my repos" }
   ],
-  
+
   // HTTP server (optional, default off)
   // "http": {
   //   "enabled": true,
