@@ -4,14 +4,17 @@
   "description": "Thin bridge connecting messaging platforms to any ACP-compatible coding agent",
   "type": "module",
   "bin": {
-    "acp-connector": "src/index.js"
+    "acp-connector": "dist/index.js"
   },
   "scripts": {
-    "start": "node src/index.js",
-    "setup": "node src/index.js setup",
+    "build": "tsc",
+    "start": "tsx src/index.ts",
+    "setup": "tsx src/index.ts setup",
+    "dev": "tsx watch src/index.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
+    "typecheck": "tsc --noEmit",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
     "format": "biome format --write .",
@@ -39,7 +42,7 @@
     "node": ">=20"
   },
   "files": [
-    "src/",
+    "dist/",
     "README.md",
     "AGENTS.md",
     ".config.example.jsonc"
@@ -53,9 +56,14 @@
   "devDependencies": {
     "@biomejs/biome": "^2.5.12",
     "@commitlint/config-conventional": "^21.2.2",
+    "@types/node": "^26.4.1",
+    "@types/node-cron": "^3.0.11",
+    "@types/node-telegram-bot-api": "^0.64.15",
     "@vitest/coverage-v8": "^5.0.0",
     "commitlint": "^21.2.2",
     "husky": "^9.1.7",
+    "tsx": "^4.23.13",
+    "typescript": "^7.0.2",
     "vitest": "^5.0.0"
   }
 }

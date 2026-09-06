@@ -1,39 +1,28 @@
-import { loadConfig, saveConfig } from './config.js';
+import type { Routine } from './config';
+import { loadConfig, saveConfig } from './config';
+import type { CronManager } from './cron';
 
-/**
- * @typedef {Object} Routine
- * @property {string} name
- * @property {string} prompt
- */
+interface RoutineManagerOpts {
+  routines: Routine[];
+  cronManager: CronManager;
+  enqueue: (text: string, chatId?: number) => void;
+  sendMessage: (chatId: number, text: string) => Promise<void>;
+}
 
-/**
- * Manages named reusable prompts and bridge commands.
- * Handles /cron, /routine, /run commands from Telegram.
- */
 export class RoutineManager {
-  /**
-   * @param {Object} opts
-   * @param {Routine[]} opts.routines
-   * @param {import('./cron.js').CronManager} opts.cronManager
-   * @param {Function} opts.enqueue - (text, chatId) => void
-   * @param {Function} opts.sendMessage - (chatId, text) => Promise
-   * @param {number[]} opts.allowedChatIds
-   */
-  constructor({ routines, cronManager, enqueue, sendMessage, allowedChatIds }) {
+  private routines: Routine[];
+  private cronManager: CronManager;
+  private enqueue: (text: string, chatId?: number) => void;
+  private sendMessage: (chatId: number, text: string) => Promise<void>;
+
+  constructor({ routines, cronManager, enqueue, sendMessage }: RoutineManagerOpts) {
     this.routines = routines || [];
     this.cronManager = cronManager;
     this.enqueue = enqueue;
     this.sendMessage = sendMessage;
-    this.allowedChatIds = allowedChatIds || [];
   }
 
-  /**
-   * Handle a bridge command from Telegram.
-   * @param {string} text
-   * @param {number} chatId
-   * @returns {Promise<boolean>} - true if handled
-   */
-  async handleCommand(text, chatId) {
+  async handleCommand(text: string, chatId: number): Promise<boolean> {
     if (!text.startsWith('/')) return false;
 
     const parts = text.slice(1).split(/\s+/);
@@ -52,7 +41,7 @@ export class RoutineManager {
     }
   }
 
-  async _handleCron(args, chatId) {
+  private async _handleCron(args: string, chatId: number): Promise<boolean> {
     const [subcommand, ...rest] = args.split(/\s+/);
     const restStr = rest.join(' ');
 
@@ -84,7 +73,7 @@ export class RoutineManager {
     }
   }
 
-  async _cronList(chatId) {
+  private async _cronList(chatId: number): Promise<boolean> {
     const jobs = this.cronManager.list();
     if (jobs.length === 0) {
       await this.sendMessage(chatId, 'No cron jobs configured.');
@@ -98,8 +87,7 @@ export class RoutineManager {
     return true;
   }
 
-  async _cronAdd(restStr, chatId) {
-    // Format: <schedule: 5 tokens> <prompt>
+  private async _cronAdd(restStr: string, chatId: number): Promise<boolean> {
     const tokens = restStr.split(/\s+/);
     if (tokens.length < 6) {
       await this.sendMessage(
@@ -126,7 +114,7 @@ export class RoutineManager {
     return true;
   }
 
-  async _cronRemove(restStr, chatId) {
+  private async _cronRemove(restStr: string, chatId: number): Promise<boolean> {
     const name = restStr.trim();
     if (!name) {
       await this.sendMessage(chatId, 'Usage: /cron remove `<name>`');
@@ -142,7 +130,7 @@ export class RoutineManager {
     return true;
   }
 
-  async _cronToggle(restStr, chatId) {
+  private async _cronToggle(restStr: string, chatId: number): Promise<boolean> {
     const name = restStr.trim();
     if (!name) {
       await this.sendMessage(chatId, 'Usage: /cron toggle `<name>`');
@@ -157,7 +145,7 @@ export class RoutineManager {
     return true;
   }
 
-  async _cronRun(restStr, chatId) {
+  private async _cronRun(restStr: string, chatId: number): Promise<boolean> {
     const name = restStr.trim();
     if (!name) {
       await this.sendMessage(chatId, 'Usage: /cron run `<name>`');
@@ -172,7 +160,7 @@ export class RoutineManager {
     return true;
   }
 
-  async _handleRoutine(args, chatId) {
+  private async _handleRoutine(args: string, chatId: number): Promise<boolean> {
     const [subcommand, ...rest] = args.split(/\s+/);
     const restStr = rest.join(' ');
 
@@ -198,7 +186,7 @@ export class RoutineManager {
     }
   }
 
-  async _routineList(chatId) {
+  private async _routineList(chatId: number): Promise<boolean> {
     if (this.routines.length === 0) {
       await this.sendMessage(chatId, 'No routines configured.');
       return true;
@@ -208,7 +196,7 @@ export class RoutineManager {
     return true;
   }
 
-  async _routineAdd(restStr, chatId) {
+  private async _routineAdd(restStr: string, chatId: number): Promise<boolean> {
     const spaceIdx = restStr.indexOf(' ');
     if (spaceIdx < 0) {
       await this.sendMessage(chatId, 'Usage: /routine add `<name> <prompt>`');
@@ -228,7 +216,7 @@ export class RoutineManager {
     return true;
   }
 
-  async _routineRemove(restStr, chatId) {
+  private async _routineRemove(restStr: string, chatId: number): Promise<boolean> {
     const name = restStr.trim();
     if (!name) {
       await this.sendMessage(chatId, 'Usage: /routine remove `<name>`');
@@ -245,7 +233,7 @@ export class RoutineManager {
     return true;
   }
 
-  async _handleRun(args, chatId) {
+  private async _handleRun(args: string, chatId: number): Promise<boolean> {
     const name = args.trim();
     if (!name) {
       await this.sendMessage(chatId, 'Usage: /run `<name>`');
@@ -263,7 +251,7 @@ export class RoutineManager {
     return true;
   }
 
-  _persist() {
+  private _persist(): void {
     const config = loadConfig();
     if (!config) return;
     config.routines = this.routines;

@@ -55,7 +55,7 @@ const mockHttpServer = {
 let lastAcpInstance = null;
 let lastBotInstance = null;
 
-vi.mock('../src/acp-client.js', () => ({
+vi.mock('../src/acp-client.ts', () => ({
   AcpClient: class MockAcpClient {
     start = mockAcpClient.start;
     kill = mockAcpClient.kill;
@@ -70,7 +70,7 @@ vi.mock('../src/acp-client.js', () => ({
     }
   },
 }));
-vi.mock('../src/bot.js', () => ({
+vi.mock('../src/bot.ts', () => ({
   BridgeBot: class MockBridgeBot {
     start = mockBot.start;
     stop = mockBot.stop;
@@ -83,7 +83,7 @@ vi.mock('../src/bot.js', () => ({
     }
   },
 }));
-vi.mock('../src/cron.js', () => ({
+vi.mock('../src/cron.ts', () => ({
   CronManager: class MockCronManager {
     start = mockCronManager.start;
     stop = mockCronManager.stop;
@@ -94,7 +94,7 @@ vi.mock('../src/cron.js', () => ({
     run = mockCronManager.run;
   },
 }));
-vi.mock('../src/routines.js', () => ({
+vi.mock('../src/routines.ts', () => ({
   RoutineManager: class MockRoutineManager {
     handleCommand = mockRoutineManager.handleCommand;
   },

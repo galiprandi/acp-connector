@@ -1,7 +1,50 @@
+import type { IncomingMessage, Server, ServerResponse } from 'node:http';
 import { createServer } from 'node:http';
 
 const DEFAULT_MAX_BODY = 1024 * 1024; // 1MB
 const DEFAULT_RATE_LIMIT = 60; // requests per minute
+
+/**
+ * Health object returned by the `getHealth` callback.
+ */
+export interface HealthStatus {
+  status: string;
+  [key: string]: unknown;
+}
+
+/**
+ * Enqueue callback signature: `(text, chatId?) => void`.
+ */
+export type EnqueueFn = (text: string, chatId?: number) => void;
+
+/**
+ * Health callback signature: `() => HealthStatus`.
+ */
+export type GetHealthFn = () => HealthStatus;
+
+/**
+ * Options for constructing an {@link HttpServer}.
+ */
+export interface HttpServerOptions {
+  /** Whether the server is enabled. */
+  enabled?: boolean;
+  /** Bind address (default 127.0.0.1). */
+  host?: string;
+  /** Port to listen on. */
+  port?: number;
+  /** Bearer token for auth. */
+  authToken?: string | null;
+  /** Forward headers to agent (Authorization always stripped). */
+  forwardHeaders?: boolean;
+  /** Max body size in bytes. */
+  maxBodySize?: number;
+  /** Max requests per minute. */
+  rateLimit?: number;
+  /** `(text, chatId?) => void` — enqueue a prompt. */
+  enqueue: EnqueueFn;
+  /** `() => HealthStatus` — provide health info. */
+  getHealth?: GetHealthFn | null;
+}
 
 /**
  * Optional HTTP server for external prompt injection and health checks.
@@ -14,17 +57,20 @@ const DEFAULT_RATE_LIMIT = 60; // requests per minute
  * - Rate limit (default 60 req/min)
  */
 export class HttpServer {
+  enabled: boolean;
+  host: string;
+  port: number;
+  authToken: string | null;
+  forwardHeaders: boolean;
+  maxBodySize: number;
+  rateLimit: number;
+  enqueue: EnqueueFn;
+  getHealth: GetHealthFn;
+  private _server: Server | null = null;
+  private _requestTimes: number[] = [];
+
   /**
-   * @param {Object} opts
-   * @param {boolean} [opts.enabled]
-   * @param {string} [opts.host] - bind address (default 127.0.0.1)
-   * @param {number} [opts.port]
-   * @param {string} [opts.authToken] - bearer token for auth
-   * @param {boolean} [opts.forwardHeaders] - forward headers to agent (Authorization always stripped)
-   * @param {number} [opts.maxBodySize] - max body size in bytes
-   * @param {number} [opts.rateLimit] - max requests per minute
-   * @param {Function} opts.enqueue - (text, chatId?) => void
-   * @param {Function} [opts.getHealth] - () => Object
+   * @param opts Constructor options. See {@link HttpServerOptions}.
    */
   constructor({
     enabled = false,
@@ -36,7 +82,7 @@ export class HttpServer {
     rateLimit = DEFAULT_RATE_LIMIT,
     enqueue,
     getHealth = null,
-  }) {
+  }: HttpServerOptions) {
     this.enabled = enabled;
     this.host = host;
     this.port = port;
@@ -46,14 +92,12 @@ export class HttpServer {
     this.rateLimit = rateLimit;
     this.enqueue = enqueue;
     this.getHealth = getHealth || (() => ({ status: 'ok' }));
-    this._server = null;
-    this._requestTimes = [];
   }
 
-  start() {
+  start(): Promise<void> {
     if (!this.enabled) return Promise.resolve();
 
-    this._server = createServer(async (req, res) => {
+    this._server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
       res.setHeader('Content-Type', 'application/json');
 
       try {
@@ -79,7 +123,7 @@ export class HttpServer {
         }
 
         if (req.method === 'POST') {
-          const parsedUrl = new URL(req.url, `http://${this.host}:${this.port}`);
+          const parsedUrl = new URL(req.url ?? '/', `http://${this.host}:${this.port}`);
           if (parsedUrl.pathname === '/prompt') {
             await this._handlePrompt(req, res);
             return;
@@ -90,21 +134,22 @@ export class HttpServer {
         res.end(JSON.stringify({ error: 'not found' }));
       } catch (err) {
         res.writeHead(500);
-        res.end(JSON.stringify({ error: err.message }));
+        res.end(JSON.stringify({ error: (err as Error).message }));
       }
     });
 
-    return new Promise((resolve) => {
-      this._server.listen(this.port, this.host, () => {
-        const addr = this._server.address();
-        const actualPort = addr?.port || this.port;
+    return new Promise<void>((resolve) => {
+      this._server?.listen(this.port, this.host, () => {
+        const addr = this._server?.address();
+        const actualPort =
+          (addr && typeof addr === 'object' && 'port' in addr ? addr.port : null) ?? this.port;
         console.log(`🌐 HTTP server on ${this.host}:${actualPort}`);
         resolve();
       });
     });
   }
 
-  async _handlePrompt(req, res) {
+  async _handlePrompt(req: IncomingMessage, res: ServerResponse): Promise<void> {
     try {
       // Check Content-Length before reading
       const contentLength = parseInt(req.headers['content-length'] || '0', 10);
@@ -123,16 +168,14 @@ export class HttpServer {
 
       // Try to parse as JSON for backward compat (text + chatId fields)
       let promptText = body;
-      let chatId;
+      let chatId: number | undefined;
 
       try {
-        const data = JSON.parse(body);
+        const data = JSON.parse(body) as { text?: string; chatId?: number | string };
         if (typeof data.text === 'string') {
-          // text field exists — use it (even if empty, will be validated below)
           promptText = data.text;
-          chatId = data.chatId;
+          chatId = typeof data.chatId === 'number' ? data.chatId : undefined;
         }
-        // If no text field, use raw body as prompt
       } catch {
         // Not JSON — use raw body as prompt
       }
@@ -144,7 +187,7 @@ export class HttpServer {
       }
 
       // Build prompt with query params as context
-      const url = new URL(req.url, `http://${this.host}:${this.port}`);
+      const url = new URL(req.url ?? '/', `http://${this.host}:${this.port}`);
       const params = url.searchParams;
       const paramEntries = [...params.entries()];
 
@@ -172,17 +215,17 @@ export class HttpServer {
       res.end(JSON.stringify({ ok: true }));
     } catch (err) {
       res.writeHead(400);
-      res.end(JSON.stringify({ error: err.message }));
+      res.end(JSON.stringify({ error: (err as Error).message }));
     }
   }
 
-  _checkAuth(req) {
+  _checkAuth(req: IncomingMessage): boolean {
     const auth = req.headers.authorization;
     if (!auth) return false;
     return auth === `Bearer ${this.authToken}`;
   }
 
-  _isRateLimited() {
+  _isRateLimited(): boolean {
     const now = Date.now();
     const oneMinuteAgo = now - 60000;
 
@@ -197,12 +240,12 @@ export class HttpServer {
     return false;
   }
 
-  _readBody(req) {
-    return new Promise((resolve, reject) => {
+  _readBody(req: IncomingMessage): Promise<string> {
+    return new Promise<string>((resolve, reject) => {
       let data = '';
       let size = 0;
       let tooLarge = false;
-      req.on('data', (chunk) => {
+      req.on('data', (chunk: Buffer) => {
         size += chunk.length;
         if (size > this.maxBodySize) {
           tooLarge = true;
@@ -219,7 +262,7 @@ export class HttpServer {
     });
   }
 
-  stop() {
+  stop(): void {
     if (this._server) {
       this._server.close();
       this._server = null;

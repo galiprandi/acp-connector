@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { loadConfig, saveConfig } from '../src/config.js';
+import { loadConfig, saveConfig } from '../src/config.ts';
 
 const validConfig = {
   agentCmd: 'acp-agent serve',

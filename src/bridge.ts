@@ -1,14 +1,11 @@
-import { AcpClient } from './acp-client.js';
-import { BridgeBot } from './bot.js';
-import { loadConfig } from './config.js';
-import { CronManager } from './cron.js';
-import { HttpServer } from './http.js';
-import { RoutineManager } from './routines.js';
+import { AcpClient } from './acp-client';
+import { BridgeBot } from './bot';
+import { type BridgeConfig, loadConfig } from './config';
+import { CronManager } from './cron';
+import { HttpServer } from './http';
+import { RoutineManager } from './routines';
 
-/**
- * Print an ASCII box banner with the "acp-connector" title.
- */
-function printBanner() {
+function printBanner(): void {
   const title = 'acp-connector';
   const inner = `  ${title}  `;
   const top = `┌${'─'.repeat(inner.length)}┐`;
@@ -19,15 +16,12 @@ function printBanner() {
   console.log(bot);
 }
 
-/**
- * Main bridge entrypoint. Loads config, starts ACP, Telegram, cron, HTTP.
- */
-export async function run() {
-  let config;
+export async function run(): Promise<void> {
+  let config: BridgeConfig | null;
   try {
     config = loadConfig();
   } catch (err) {
-    console.error(`Invalid config: ${err.message}`);
+    console.error(`Invalid config: ${(err as Error).message}`);
     process.exit(1);
   }
   if (!config) {
@@ -37,7 +31,6 @@ export async function run() {
 
   printBanner();
 
-  // Create ACP client
   const acp = new AcpClient({
     agentCmd: config.agentCmd,
     agentCwd: config.agentCwd,
@@ -45,7 +38,6 @@ export async function run() {
     sessionId: config.sessionId,
   });
 
-  // Create bot (needs ACP for permission handling)
   const bot = new BridgeBot({
     acp,
     telegramToken: config.telegramToken,
@@ -55,26 +47,21 @@ export async function run() {
     streaming: config.streaming,
   });
 
-  // Create cron manager
   const cronManager = new CronManager({
     jobs: config.cron || [],
     allowedChatIds: config.allowedChatIds,
     enqueue: (text, chatId) => bot.enqueuePrompt(text, chatId),
   });
 
-  // Create routine manager
   const routineManager = new RoutineManager({
     routines: config.routines || [],
     cronManager,
     enqueue: (text, chatId) => bot.enqueuePrompt(text, chatId),
     sendMessage: (chatId, text) => bot.sendMessage(chatId, text),
-    allowedChatIds: config.allowedChatIds,
   });
 
-  // Wire bridge commands
   bot.onCommand = (text, chatId) => routineManager.handleCommand(text, chatId);
 
-  // Create HTTP server
   const httpServer = new HttpServer({
     enabled: config.http?.enabled || false,
     host: config.http?.host || '127.0.0.1',
@@ -91,27 +78,20 @@ export async function run() {
     }),
   });
 
-  // Wire permission handler
-  acp.onPermission = (params) => bot._handlePermission(params);
+  // biome-ignore lint/suspicious/noExplicitAny: SDK permission types are complex
+  acp.onPermission = (params: any) => bot._handlePermission(params);
 
-  // Start ACP
   try {
     await acp.start();
   } catch (err) {
-    console.error('Failed to start ACP:', err.message);
+    console.error('Failed to start ACP:', (err as Error).message);
     process.exit(1);
   }
 
-  // Start bot
   await bot.start();
-
-  // Start cron
   cronManager.start();
-
-  // Start HTTP
   await httpServer.start();
 
-  // Print status
   const mode = acp.modes?.currentModeId || 'default';
   console.log('');
   console.log(`  🆔  Session:  ${acp.sessionId}${config.sessionId ? ' (restored)' : ''}`);
@@ -121,7 +101,7 @@ export async function run() {
   if (config.sessionConfigPath) {
     console.log(`  📋  Config:   ${config.sessionConfigPath}`);
   }
-  if (config.cron?.length > 0) {
+  if (config.cron && config.cron.length > 0) {
     console.log(`  ⏰  Cron:     ${config.cron.length} job(s)`);
   }
   if (config.http?.enabled) {
@@ -131,8 +111,7 @@ export async function run() {
   console.log('  ─────────────────────────────────');
   console.log('');
 
-  // Graceful shutdown
-  const shutdown = (sig) => {
+  const shutdown = (sig: string) => {
     console.log(`\n${sig} received, shutting down...`);
     httpServer.stop();
     cronManager.stop();
@@ -143,6 +122,5 @@ export async function run() {
   process.on('SIGINT', () => shutdown('SIGINT'));
   process.on('SIGTERM', () => shutdown('SIGTERM'));
 
-  // Keep process alive
   setInterval(() => {}, 1 << 30);
 }

@@ -4,7 +4,7 @@ Thin bridge connecting messaging platforms to any ACP-compatible coding agent vi
 
 ## Stack
 
-- Node.js ES modules
+- TypeScript (ES modules)
 - pnpm
 - @agentclientprotocol/sdk, node-telegram-bot-api, node-cron
 - Biome (lint + format)
@@ -13,10 +13,12 @@ Thin bridge connecting messaging platforms to any ACP-compatible coding agent vi
 
 ## Commands
 
-- `pnpm start` — run the bridge
-- `node src/index.js setup` — interactive setup wizard
+- `pnpm start` — run the bridge (via tsx)
+- `pnpm build` — compile TS to dist/
+- `pnpm setup` — interactive setup wizard
 - `pnpm test` — run tests
 - `pnpm test:coverage` — run tests with coverage
+- `pnpm typecheck` — type-check without emitting
 - `pnpm lint` — check lint + format
 - `pnpm lint:fix` — auto-fix lint + format issues
 
@@ -66,15 +68,15 @@ Single `.config.jsonc` file in cwd. See `.config.example.jsonc` for all options.
 
 ```
 src/
-├── index.js       — CLI entrypoint (setup or run)
-├── bridge.js      — orchestrates all components
-├── acp-client.js  — spawns ACP agent, handles protocol + sessions
-├── bot.js         — Telegram bot, message queue, stream batching
-├── cron.js        — scheduled prompt injection
-├── routines.js    — named prompts + /cron, /routine, /run commands
-├── http.js        — optional HTTP API (/health, /prompt)
-├── config.js      — JSONC config loader/saver
-└── setup.js       — interactive setup wizard
+├── index.ts       — CLI entrypoint (setup or run)
+├── bridge.ts      — orchestrates all components
+├── acp-client.ts  — spawns ACP agent, handles protocol + sessions
+├── bot.ts         — Telegram bot, message queue, stream batching, PlatformBot interface
+├── cron.ts        — scheduled prompt injection
+├── routines.ts    — named prompts + /cron, /routine, /run commands
+├── http.ts        — optional HTTP API (/health, /prompt)
+├── config.ts      — JSONC config loader/saver
+└── setup.ts       — interactive setup wizard
 ```
 
 ### Data flow

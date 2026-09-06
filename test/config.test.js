@@ -1,7 +1,7 @@
 import { existsSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { defaultConfigPath, loadConfig, saveConfig } from '../src/config.js';
+import { defaultConfigPath, loadConfig, saveConfig } from '../src/config.ts';
 
 const tmpConfigPath = resolve(process.cwd(), '.config.jsonc');
 

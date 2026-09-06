@@ -14,7 +14,7 @@ vi.mock('node-cron', () => ({
   },
 }));
 
-const { CronManager } = await import('../src/cron.js');
+const { CronManager } = await import('../src/cron.ts');
 
 function createManager(jobs = [], overrides = {}) {
   const enqueue = vi.fn();

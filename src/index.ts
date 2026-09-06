@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-import { run } from './bridge.js';
-import { setup } from './setup.js';
+import { run } from './bridge';
+import { setup } from './setup';
 
 const command = process.argv[2];
 

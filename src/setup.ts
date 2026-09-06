@@ -1,19 +1,11 @@
-import { createInterface } from 'node:readline';
-import { saveConfig } from './config.js';
+import { createInterface, type Interface } from 'node:readline';
+import { type BridgeConfig, saveConfig } from './config';
 
-/**
- * @param {import('node:readline').Interface} rl
- * @param {string} prompt
- * @returns {Promise<string>}
- */
-function ask(rl, prompt) {
+function ask(rl: Interface, prompt: string): Promise<string> {
   return new Promise((resolve) => rl.question(prompt, (answer) => resolve(answer.trim())));
 }
 
-/**
- * Interactive setup wizard. Prompts for required fields and fills defaults.
- */
-export async function setup() {
+export async function setup(): Promise<void> {
   const rl = createInterface({ input: process.stdin, output: process.stdout });
 
   console.log('acp-connector setup');
@@ -24,7 +16,6 @@ export async function setup() {
   console.log('  • An ACP-compatible agent installed on this machine');
   console.log('═══════════════════════════════════════════════════════════\n');
 
-  // Telegram bot token
   console.log('Step 1: Telegram bot\n');
   console.log('Create a bot by messaging @BotFather on Telegram:');
   console.log('  1. Send /newbot to @BotFather');
@@ -37,7 +28,6 @@ export async function setup() {
     process.exit(1);
   }
 
-  // Agent command
   console.log('\nStep 2: Your coding agent\n');
   console.log('Which agent do you want to control? Any ACP-compatible agent works.');
   console.log('Common options:');
@@ -54,7 +44,6 @@ export async function setup() {
     process.exit(1);
   }
 
-  // Chat ID
   console.log('\nStep 3: Your Telegram chat\n');
   console.log('This is who the bot is allowed to talk to (security: only you).');
   console.log('To find your chat ID:');
@@ -69,14 +58,12 @@ export async function setup() {
     process.exit(1);
   }
 
-  // Optional: session config
   console.log('\nStep 4: MCP servers (optional)\n');
   console.log('If your agent needs MCP servers (filesystem, GitHub, etc.),');
   console.log('point to a JSONC file with the server config.');
   console.log("Press Enter to skip if you don't need this.\n");
   const sessionConfigPath = await ask(rl, 'Path to MCP config file (or Enter to skip): ');
 
-  // Optional: show thoughts
   console.log('\nStep 5: Agent thoughts (optional)\n');
   console.log('Some agents share their reasoning ("thoughts") before responding.');
   console.log('Do you want to see those in Telegram, or just the final response?\n');
@@ -86,7 +73,7 @@ export async function setup() {
 
   rl.close();
 
-  saveConfig({
+  const config: BridgeConfig = {
     agentCmd,
     agentCwd: process.cwd(),
     telegramToken,
@@ -97,7 +84,9 @@ export async function setup() {
     logLevel: 'info',
     cron: [],
     routines: [],
-  });
+  };
+
+  saveConfig(config);
 
   console.log('\n✅ Done! Saved .config.jsonc in this directory.');
   console.log('\nNow start the bridge:');

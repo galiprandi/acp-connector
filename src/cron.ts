@@ -1,26 +1,55 @@
-import cron from 'node-cron';
+import cron, { type ScheduledTask } from 'node-cron';
 
 /**
- * @typedef {Object} CronJob
- * @property {string} name
- * @property {string} schedule
- * @property {string} prompt
- * @property {number} [chatId]
- * @property {boolean} [enabled]
+ * A scheduled prompt injection job.
  */
+export interface CronJob {
+  name: string;
+  schedule: string;
+  prompt: string;
+  chatId?: number;
+  enabled?: boolean;
+}
+
+/**
+ * Logger callback used by CronManager.
+ */
+type LogFn = (msg: string) => void;
+
+/**
+ * Enqueue callback: enqueues a prompt text for a given chat id.
+ */
+type EnqueueFn = (text: string, chatId: number) => void;
+
+/**
+ * Constructor options for CronManager.
+ */
+export interface CronManagerOptions {
+  jobs: CronJob[];
+  allowedChatIds: number[];
+  enqueue: EnqueueFn;
+  onLog?: LogFn | null;
+}
+
+interface CronTaskEntry {
+  task: ScheduledTask;
+  job: CronJob;
+}
 
 /**
  * Manages scheduled prompt injection into the bridge queue.
  */
 export class CronManager {
+  jobs: CronJob[];
+  allowedChatIds: number[];
+  enqueue: EnqueueFn;
+  onLog: LogFn;
+  private _tasks: Map<string, CronTaskEntry>;
+
   /**
-   * @param {Object} opts
-   * @param {CronJob[]} opts.jobs
-   * @param {number[]} opts.allowedChatIds
-   * @param {Function} opts.enqueue - (text, chatId) => void
-   * @param {Function} [opts.onLog]
+   * @param opts jobs, allowedChatIds, enqueue, and optional onLog.
    */
-  constructor({ jobs, allowedChatIds, enqueue, onLog = null }) {
+  constructor({ jobs, allowedChatIds, enqueue, onLog = null }: CronManagerOptions) {
     this.jobs = jobs || [];
     this.allowedChatIds = allowedChatIds || [];
     this.enqueue = enqueue;
@@ -28,13 +57,13 @@ export class CronManager {
     this._tasks = new Map();
   }
 
-  start() {
+  start(): void {
     for (const job of this.jobs) {
       this._startJob(job);
     }
   }
 
-  _startJob(job) {
+  private _startJob(job: CronJob): void {
     if (job.enabled === false) {
       this.onLog(`⏰ cron "${job.name}" disabled, skipping`);
       return;
@@ -67,10 +96,9 @@ export class CronManager {
 
   /**
    * Add a new job, start it, and return it.
-   * @param {CronJob} job
-   * @returns {CronJob | null}
+   * @returns the added job, or null if a job with the same name already exists.
    */
-  add(job) {
+  add(job: CronJob): CronJob | null {
     if (this._tasks.has(job.name)) {
       this.onLog(`⏰ cron "${job.name}" already exists`);
       return null;
@@ -82,10 +110,9 @@ export class CronManager {
 
   /**
    * Remove a job by name and stop it.
-   * @param {string} name
-   * @returns {boolean}
+   * @returns true if the job was found and removed, false otherwise.
    */
-  remove(name) {
+  remove(name: string): boolean {
     const entry = this._tasks.get(name);
     if (entry) {
       entry.task.stop();
@@ -101,10 +128,9 @@ export class CronManager {
 
   /**
    * Toggle a job's enabled state.
-   * @param {string} name
-   * @returns {boolean} - new enabled state
+   * @returns the new enabled state, or false if the job was not found.
    */
-  toggle(name) {
+  toggle(name: string): boolean {
     const idx = this.jobs.findIndex((j) => j.name === name);
     if (idx < 0) return false;
 
@@ -127,10 +153,9 @@ export class CronManager {
 
   /**
    * Run a job immediately.
-   * @param {string} name
-   * @returns {boolean}
+   * @returns true if the job was found and run, false otherwise.
    */
-  run(name) {
+  run(name: string): boolean {
     const job = this.jobs.find((j) => j.name === name);
     if (!job) return false;
 
@@ -144,13 +169,12 @@ export class CronManager {
 
   /**
    * Get all jobs.
-   * @returns {CronJob[]}
    */
-  list() {
+  list(): CronJob[] {
     return [...this.jobs];
   }
 
-  stop() {
+  stop(): void {
     for (const { task } of this._tasks.values()) {
       task.stop();
     }

@@ -70,7 +70,7 @@ vi.mock('node:stream', async (importOriginal) => {
   };
 });
 
-const { AcpClient } = await import('../src/acp-client.js');
+const { AcpClient } = await import('../src/acp-client.ts');
 
 // --- Tests ------------------------------------------------------------------
 

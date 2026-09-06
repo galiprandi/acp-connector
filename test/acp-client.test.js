@@ -72,7 +72,7 @@ vi.mock('node:stream', async (importOriginal) => {
   };
 });
 
-const { AcpClient } = await import('../src/acp-client.js');
+const { AcpClient } = await import('../src/acp-client.ts');
 
 const tmpSessionConfig = resolve(process.cwd(), 'test-session.jsonc');
 

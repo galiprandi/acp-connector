@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-const { HttpServer } = await import('../src/http.js');
+const { HttpServer } = await import('../src/http.ts');
 
 function createServer(overrides = {}) {
   const enqueue = vi.fn();
