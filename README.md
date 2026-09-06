@@ -1,6 +1,6 @@
 # acp-connector
 
-> 🌉 Thin bridge between Telegram and any ACP-compatible coding agent.
+> 🔌 Thin bridge between Telegram and any ACP-compatible coding agent.
 
 <div align="center">
   <p>
