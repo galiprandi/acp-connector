@@ -77,7 +77,12 @@ export async function run() {
   // Create HTTP server
   const httpServer = new HttpServer({
     enabled: config.http?.enabled || false,
+    host: config.http?.host || '127.0.0.1',
     port: config.http?.port || 7780,
+    authToken: config.http?.auth?.token || null,
+    forwardHeaders: config.http?.forwardHeaders || false,
+    maxBodySize: config.http?.maxBodySize || 1024 * 1024,
+    rateLimit: config.http?.rateLimit || 60,
     enqueue: (text, chatId) => bot.enqueuePrompt(text, chatId),
     getHealth: () => ({
       status: 'ok',
@@ -104,7 +109,7 @@ export async function run() {
   cronManager.start();
 
   // Start HTTP
-  httpServer.start();
+  await httpServer.start();
 
   // Print status
   const mode = acp.modes?.currentModeId || 'default';

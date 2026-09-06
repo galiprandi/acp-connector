@@ -35,7 +35,7 @@ describe('HttpServer', () => {
 
   it('GET /health returns 200 with health info', async () => {
     const { server, getHealth } = createServer();
-    server.start();
+    await server.start();
     const res = await fetchServer(server, 'GET', '/health');
     expect(res.status).toBe(200);
     expect(res.body.status).toBe('ok');
@@ -45,7 +45,7 @@ describe('HttpServer', () => {
 
   it('POST /prompt enqueues a prompt', async () => {
     const { server, enqueue } = createServer();
-    server.start();
+    await server.start();
     const res = await fetchServer(server, 'POST', '/prompt', { text: 'hello', chatId: 123 });
     expect(res.status).toBe(200);
     expect(res.body.ok).toBe(true);
@@ -53,18 +53,18 @@ describe('HttpServer', () => {
     server.stop();
   });
 
-  it('POST /prompt with no text returns 400', async () => {
-    const { server } = createServer();
-    server.start();
-    const res = await fetchServer(server, 'POST', '/prompt', {});
-    expect(res.status).toBe(400);
-    expect(res.body.error).toBe('text is required');
+  it('POST /prompt with JSON body but no text field uses raw body as prompt', async () => {
+    const { server, enqueue } = createServer();
+    await server.start();
+    const res = await fetchServer(server, 'POST', '/prompt', { foo: 'bar' });
+    expect(res.status).toBe(200);
+    expect(enqueue).toHaveBeenCalledOnce();
     server.stop();
   });
 
   it('unknown route returns 404', async () => {
     const { server } = createServer();
-    server.start();
+    await server.start();
     const res = await fetchServer(server, 'GET', '/unknown');
     expect(res.status).toBe(404);
     server.stop();
@@ -72,7 +72,7 @@ describe('HttpServer', () => {
 
   it('stop() closes the server', async () => {
     const { server } = createServer();
-    server.start();
+    await server.start();
     server.stop();
     expect(server._server).toBeNull();
   });

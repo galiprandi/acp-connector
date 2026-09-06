@@ -57,7 +57,7 @@ describe('HttpServer edge cases', () => {
 
   it('POST /prompt with no body returns 400', async () => {
     const { server, enqueue } = createServer();
-    server.start();
+    await server.start();
     cleanup.push(() => server.stop());
     const res = await fetchServer(server, 'POST', '/prompt', null);
     expect(res.status).toBe(400);
@@ -65,39 +65,37 @@ describe('HttpServer edge cases', () => {
     expect(enqueue).not.toHaveBeenCalled();
   });
 
-  it('POST /prompt with invalid JSON returns 400', async () => {
+  it('POST /prompt with invalid JSON uses raw body as prompt', async () => {
     const { server, enqueue } = createServer();
-    server.start();
+    await server.start();
     cleanup.push(() => server.stop());
-    const res = await fetchServer(server, 'POST', '/prompt', '{ not valid json,,, }');
-    expect(res.status).toBe(400);
-    expect(res.body.error).toBeTruthy();
-    expect(enqueue).not.toHaveBeenCalled();
+    const res = await fetchServer(server, 'POST', '/prompt', 'plain text not json');
+    expect(res.status).toBe(200);
+    expect(res.body.ok).toBe(true);
+    expect(enqueue).toHaveBeenCalledWith('plain text not json', undefined);
   });
 
   it('POST /prompt with empty text returns 400', async () => {
     const { server, enqueue } = createServer();
-    server.start();
+    await server.start();
     cleanup.push(() => server.stop());
     const res = await fetchServer(server, 'POST', '/prompt', { text: '' });
     expect(res.status).toBe(400);
-    expect(res.body.error).toBe('text is required');
     expect(enqueue).not.toHaveBeenCalled();
   });
 
   it('POST /prompt with whitespace-only text returns 400', async () => {
     const { server, enqueue } = createServer();
-    server.start();
+    await server.start();
     cleanup.push(() => server.stop());
     const res = await fetchServer(server, 'POST', '/prompt', { text: '   ' });
     expect(res.status).toBe(400);
-    expect(res.body.error).toBe('text is required');
     expect(enqueue).not.toHaveBeenCalled();
   });
 
-  it('POST /prompt with text but no chatId enqueues with undefined (default)', async () => {
+  it('POST /prompt with text but no chatId enqueues with undefined', async () => {
     const { server, enqueue } = createServer();
-    server.start();
+    await server.start();
     cleanup.push(() => server.stop());
     const res = await fetchServer(server, 'POST', '/prompt', { text: 'hello' });
     expect(res.status).toBe(200);
@@ -107,7 +105,7 @@ describe('HttpServer edge cases', () => {
 
   it('GET /unknown route returns 404', async () => {
     const { server } = createServer();
-    server.start();
+    await server.start();
     cleanup.push(() => server.stop());
     const res = await fetchServer(server, 'GET', '/unknown');
     expect(res.status).toBe(404);
@@ -116,16 +114,16 @@ describe('HttpServer edge cases', () => {
 
   it('POST /unknown route returns 404', async () => {
     const { server } = createServer();
-    server.start();
+    await server.start();
     cleanup.push(() => server.stop());
     const res = await fetchServer(server, 'POST', '/unknown', { foo: 'bar' });
     expect(res.status).toBe(404);
     expect(res.body.error).toBe('not found');
   });
 
-  it('double stop() is idempotent and does not throw', () => {
+  it('double stop() is idempotent and does not throw', async () => {
     const { server } = createServer();
-    server.start();
+    await server.start();
     expect(() => {
       server.stop();
       server.stop();
@@ -135,7 +133,7 @@ describe('HttpServer edge cases', () => {
 
   it('health check with no agent session (default getHealth) returns 200 ok', async () => {
     const { server } = createServer({ getHealth: null });
-    server.start();
+    await server.start();
     cleanup.push(() => server.stop());
     const res = await fetchServer(server, 'GET', '/health');
     expect(res.status).toBe(200);
@@ -150,7 +148,7 @@ describe('HttpServer edge cases', () => {
       uptime: 123,
     }));
     const { server } = createServer({ getHealth });
-    server.start();
+    await server.start();
     cleanup.push(() => server.stop());
     const res = await fetchServer(server, 'GET', '/health');
     expect(res.status).toBe(200);
@@ -162,13 +160,12 @@ describe('HttpServer edge cases', () => {
     const { server } = createServer({ enabled: false });
     server.start();
     expect(server._server).toBeNull();
-    // stop should be a no-op and not throw
     expect(() => server.stop()).not.toThrow();
   });
 
   it('POST /prompt with large body (>10KB) is accepted', async () => {
     const { server, enqueue } = createServer();
-    server.start();
+    await server.start();
     cleanup.push(() => server.stop());
     const big = 'x'.repeat(11 * 1024);
     const res = await fetchServer(server, 'POST', '/prompt', { text: big });
@@ -180,7 +177,7 @@ describe('HttpServer edge cases', () => {
 
   it('POST /prompt with extra fields ignores them and enqueues text', async () => {
     const { server, enqueue } = createServer();
-    server.start();
+    await server.start();
     cleanup.push(() => server.stop());
     const res = await fetchServer(server, 'POST', '/prompt', {
       text: 'hello',
@@ -194,20 +191,185 @@ describe('HttpServer edge cases', () => {
     expect(enqueue).toHaveBeenCalledWith('hello', 42);
   });
 
-  it('POST /prompt with non-string text (number) returns 400', async () => {
+  it('POST /prompt with non-string text uses raw body as prompt', async () => {
     const { server, enqueue } = createServer();
-    server.start();
+    await server.start();
     cleanup.push(() => server.stop());
     const res = await fetchServer(server, 'POST', '/prompt', { text: 123 });
-    expect(res.status).toBe(400);
-    expect(enqueue).not.toHaveBeenCalled();
+    // text is not a string, so raw body is used as prompt
+    expect(res.status).toBe(200);
+    expect(enqueue).toHaveBeenCalledOnce();
   });
 
   it('GET /health does not call enqueue', async () => {
     const { server, enqueue } = createServer();
-    server.start();
+    await server.start();
     cleanup.push(() => server.stop());
     await fetchServer(server, 'GET', '/health');
     expect(enqueue).not.toHaveBeenCalled();
+  });
+
+  // New feature tests: query params as context
+
+  it('POST /prompt with query params adds context to prompt', async () => {
+    const { server, enqueue } = createServer();
+    await server.start();
+    cleanup.push(() => server.stop());
+    const res = await fetchServer(server, 'POST', '/prompt?origin=outlook&from=boss', {
+      text: 'urgent email',
+    });
+    expect(res.status).toBe(200);
+    expect(enqueue).toHaveBeenCalledOnce();
+    expect(enqueue.mock.calls[0][0]).toBe('[origin=outlook, from=boss] urgent email');
+  });
+
+  it('POST /prompt without query params sends text as-is', async () => {
+    const { server, enqueue } = createServer();
+    await server.start();
+    cleanup.push(() => server.stop());
+    const res = await fetchServer(server, 'POST', '/prompt', { text: 'hello' });
+    expect(res.status).toBe(200);
+    expect(enqueue).toHaveBeenCalledWith('hello', undefined);
+  });
+
+  it('POST /prompt with raw body + query params adds context', async () => {
+    const { server, enqueue } = createServer();
+    await server.start();
+    cleanup.push(() => server.stop());
+    const res = await fetchServer(
+      server,
+      'POST',
+      '/prompt?source=github&action=push',
+      '{"repo":"acp-connector"}'
+    );
+    expect(res.status).toBe(200);
+    expect(enqueue.mock.calls[0][0]).toBe('[source=github, action=push] {"repo":"acp-connector"}');
+  });
+
+  // Auth tests
+
+  it('POST /prompt without auth token when configured returns 401', async () => {
+    const { server, enqueue } = createServer({ authToken: 'my-secret' });
+    await server.start();
+    cleanup.push(() => server.stop());
+    const res = await fetchServer(server, 'POST', '/prompt', { text: 'hello' });
+    expect(res.status).toBe(401);
+    expect(enqueue).not.toHaveBeenCalled();
+  });
+
+  it('POST /prompt with wrong bearer token returns 401', async () => {
+    const { server, enqueue } = createServer({ authToken: 'my-secret' });
+    await server.start();
+    cleanup.push(() => server.stop());
+    const res = await fetchServer(
+      server,
+      'POST',
+      '/prompt',
+      { text: 'hello' },
+      {
+        Authorization: 'Bearer wrong-token',
+      }
+    );
+    expect(res.status).toBe(401);
+    expect(enqueue).not.toHaveBeenCalled();
+  });
+
+  it('POST /prompt with correct bearer token enqueues', async () => {
+    const { server, enqueue } = createServer({ authToken: 'my-secret' });
+    await server.start();
+    cleanup.push(() => server.stop());
+    const res = await fetchServer(
+      server,
+      'POST',
+      '/prompt',
+      { text: 'hello' },
+      {
+        Authorization: 'Bearer my-secret',
+      }
+    );
+    expect(res.status).toBe(200);
+    expect(enqueue).toHaveBeenCalledWith('hello', undefined);
+  });
+
+  it('GET /health with auth token configured requires auth', async () => {
+    const { server } = createServer({ authToken: 'my-secret' });
+    await server.start();
+    cleanup.push(() => server.stop());
+    const res = await fetchServer(server, 'GET', '/health');
+    expect(res.status).toBe(401);
+  });
+
+  it('Authorization header is never forwarded to agent', async () => {
+    const { server, enqueue } = createServer({
+      authToken: 'my-secret',
+      forwardHeaders: true,
+    });
+    await server.start();
+    cleanup.push(() => server.stop());
+    const res = await fetchServer(
+      server,
+      'POST',
+      '/prompt',
+      { text: 'hello' },
+      {
+        Authorization: 'Bearer my-secret',
+        'X-Custom': 'custom-value',
+      }
+    );
+    expect(res.status).toBe(200);
+    const prompt = enqueue.mock.calls[0][0];
+    expect(prompt).not.toContain('my-secret');
+    expect(prompt).not.toContain('Bearer');
+    expect(prompt).toContain('custom-value');
+  });
+
+  // Rate limit tests
+
+  it('rate limit returns 429 after exceeding limit', async () => {
+    const { server } = createServer({ rateLimit: 3 });
+    await server.start();
+    cleanup.push(() => server.stop());
+    // Send 3 requests (should pass)
+    for (let i = 0; i < 3; i++) {
+      const res = await fetchServer(server, 'POST', '/prompt', { text: `msg${i}` });
+      expect(res.status).toBe(200);
+    }
+    // 4th request should be rate limited
+    const res = await fetchServer(server, 'POST', '/prompt', { text: 'msg4' });
+    expect(res.status).toBe(429);
+  });
+
+  // Body size limit tests
+
+  it('body exceeding maxBodySize returns 413', async () => {
+    const { server, enqueue } = createServer({ maxBodySize: 100 });
+    await server.start();
+    cleanup.push(() => server.stop());
+    const big = 'x'.repeat(200);
+    const res = await fetchServer(server, 'POST', '/prompt', { text: big });
+    expect(res.status).toBe(413);
+    expect(enqueue).not.toHaveBeenCalled();
+  });
+
+  // Forward headers tests
+
+  it('forwardHeaders disabled by default', async () => {
+    const { server, enqueue } = createServer();
+    await server.start();
+    cleanup.push(() => server.stop());
+    await fetchServer(server, 'POST', '/prompt', { text: 'hello' }, { 'X-Custom': 'custom-value' });
+    const prompt = enqueue.mock.calls[0][0];
+    expect(prompt).not.toContain('X-Custom');
+    expect(prompt).not.toContain('headers');
+  });
+
+  it('forwardHeaders enabled includes custom headers in prompt', async () => {
+    const { server, enqueue } = createServer({ forwardHeaders: true });
+    await server.start();
+    cleanup.push(() => server.stop());
+    await fetchServer(server, 'POST', '/prompt', { text: 'hello' }, { 'X-Custom': 'custom-value' });
+    const prompt = enqueue.mock.calls[0][0];
+    expect(prompt).toContain('x-custom');
+    expect(prompt).toContain('custom-value');
   });
 });

@@ -13,12 +13,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Cron scheduler (`src/cron.js`) — scheduled prompts with add/remove/toggle/run
 - Routine manager (`src/routines.js`) — named prompts with `/cron`, `/routine`, `/run` commands
 - HTTP server (`src/http.js`) — optional `/health` and `/prompt` endpoints
+  - Query params as context: `POST /prompt?origin=outlook&from=boss` → `[origin=outlook, from=boss] <body>`
+  - Raw body support: if no `text` field, entire body is used as prompt
+  - Bearer token auth (optional)
+  - Body size limit (default 1MB, 413 on exceed)
+  - Rate limiting (default 60 req/min, 429 on exceed)
+  - `forwardHeaders` option (Authorization always stripped)
+  - Defaults to `127.0.0.1` (localhost only)
 - Bridge wiring (`src/bridge.js`) — orchestrates all components with graceful shutdown
 - Setup wizard with step-by-step guidance, agent examples, and next steps
 - `/start` and `/help` built-in commands with full command reference
 - Bridge commands (`/run`, `/cron`, `/routine`) work from Telegram, cron, and HTTP
 - Config validation with clear field-specific errors
-- 177 tests across 13 test files (96 edge-case tests included)
+- 189 tests across 13 test files (108 edge-case tests included)
 - Professional README with architecture diagram, full config reference, and troubleshooting
 - Biome lint + format, commitlint, husky pre-commit hooks
 
@@ -27,6 +34,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Config is the single source of truth (`.config.jsonc`)
 - Config loader/saver accepts optional path parameter (testable)
 - Cron parser takes 5-token schedule (was 1-token, broke multi-field cron)
+- HTTP `/prompt` accepts raw body when no `text` field (backward compatible)
 
 ### Fixed
 - ACP client: spawn failure (ENOENT) never rejected `start()`

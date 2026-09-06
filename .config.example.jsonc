@@ -43,6 +43,13 @@
   // HTTP server (optional, default off)
   // "http": {
   //   "enabled": true,
-  //   "port": 7780
+  //   "host": "127.0.0.1",       // bind address (default localhost)
+  //   "port": 7780,
+  //   "auth": {
+  //     "token": "your-secret"    // bearer token (optional)
+  //   },
+  //   "forwardHeaders": false,    // forward request headers to agent (Authorization always stripped)
+  //   "maxBodySize": 1048576,     // 1MB
+  //   "rateLimit": 60             // requests per minute
   // }
 }
