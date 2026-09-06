@@ -78,9 +78,12 @@ export class HttpServer {
           return;
         }
 
-        if (req.method === 'POST' && req.url.startsWith('/prompt')) {
-          await this._handlePrompt(req, res);
-          return;
+        if (req.method === 'POST') {
+          const parsedUrl = new URL(req.url, `http://${this.host}:${this.port}`);
+          if (parsedUrl.pathname === '/prompt') {
+            await this._handlePrompt(req, res);
+            return;
+          }
         }
 
         res.writeHead(404);
