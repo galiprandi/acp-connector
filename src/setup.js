@@ -25,7 +25,7 @@ export async function setup() {
     process.exit(1);
   }
 
-  const agentCmd = await ask(rl, 'Agent command (required, e.g. "devin acp"): ');
+  const agentCmd = await ask(rl, 'Agent command (required, e.g. "acp-agent serve"): ');
   if (!agentCmd) {
     console.error('Agent command is required.');
     rl.close();

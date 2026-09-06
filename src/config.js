@@ -23,7 +23,7 @@ import { resolve } from 'node:path';
 
 /**
  * @typedef {Object} BridgeConfig
- * @property {string} agentCmd - Command to launch the ACP agent (e.g. "devin acp")
+ * @property {string} agentCmd - Command to launch the ACP agent (e.g. "acp-agent serve")
  * @property {string} [agentCwd] - Working directory for the agent (default: cwd)
  * @property {string} telegramToken - Telegram bot token
  * @property {number[]} allowedChatIds - Allowed Telegram chat IDs

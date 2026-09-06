@@ -17,11 +17,11 @@ describe('config', () => {
   it('loads a simple config', () => {
     writeFileSync(
       tmpConfigPath,
-      JSON.stringify({ agentCmd: 'devin acp', telegramToken: 'tok', allowedChatIds: [123] })
+      JSON.stringify({ agentCmd: 'acp-agent serve', telegramToken: 'tok', allowedChatIds: [123] })
     );
     const cfg = loadConfig();
     expect(cfg).not.toBeNull();
-    expect(cfg.agentCmd).toBe('devin acp');
+    expect(cfg.agentCmd).toBe('acp-agent serve');
     expect(cfg.allowedChatIds).toEqual([123]);
   });
 
@@ -30,14 +30,14 @@ describe('config', () => {
       tmpConfigPath,
       `{
   // agent command
-  "agentCmd": "devin acp",
+  "agentCmd": "acp-agent serve",
   "telegramToken": "tok",
   "allowedChatIds": [123]
 }`
     );
     const cfg = loadConfig();
     expect(cfg).not.toBeNull();
-    expect(cfg.agentCmd).toBe('devin acp');
+    expect(cfg.agentCmd).toBe('acp-agent serve');
   });
 
   it('strips block comments', () => {
@@ -45,21 +45,21 @@ describe('config', () => {
       tmpConfigPath,
       `{
   /* block comment */
-  "agentCmd": "devin acp",
+  "agentCmd": "acp-agent serve",
   "telegramToken": "tok",
   "allowedChatIds": [123]
 }`
     );
     const cfg = loadConfig();
     expect(cfg).not.toBeNull();
-    expect(cfg.agentCmd).toBe('devin acp');
+    expect(cfg.agentCmd).toBe('acp-agent serve');
   });
 
   it('strips trailing commas', () => {
     writeFileSync(
       tmpConfigPath,
       `{
-  "agentCmd": "devin acp",
+  "agentCmd": "acp-agent serve",
   "telegramToken": "tok",
   "allowedChatIds": [123,],
 }`
@@ -84,10 +84,10 @@ describe('config', () => {
   });
 
   it('saveConfig writes valid JSON', () => {
-    saveConfig({ agentCmd: 'devin acp', telegramToken: 'tok', allowedChatIds: [123] });
+    saveConfig({ agentCmd: 'acp-agent serve', telegramToken: 'tok', allowedChatIds: [123] });
     const cfg = loadConfig();
     expect(cfg).not.toBeNull();
-    expect(cfg.agentCmd).toBe('devin acp');
+    expect(cfg.agentCmd).toBe('acp-agent serve');
   });
 
   it('defaultConfigPath resolves to cwd', () => {

@@ -58,7 +58,7 @@ function parseJSONC(text) {
 export class AcpClient {
   /**
    * @param {Object} opts
-   * @param {string} opts.agentCmd - Full command to launch the agent (e.g. "devin acp")
+   * @param {string} opts.agentCmd - Full command to launch the agent (e.g. "acp-agent serve")
    * @param {string} [opts.agentCwd] - Working directory for the subprocess
    * @param {string} [opts.sessionConfigPath] - Path to MCP/session config jsonc
    * @param {string} [opts.sessionId] - Session ID to load/resume

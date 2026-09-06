@@ -96,7 +96,7 @@ describe('AcpClient', () => {
   });
 
   it('creates a new session when no sessionId provided', async () => {
-    const client = new AcpClient({ agentCmd: 'devin acp' });
+    const client = new AcpClient({ agentCmd: 'acp-agent serve' });
     await client.start();
     expect(mockCtx.buildSession).toHaveBeenCalled();
     expect(mockCtx.request).not.toHaveBeenCalledWith('session/load', expect.anything());
@@ -104,7 +104,7 @@ describe('AcpClient', () => {
   });
 
   it('calls session/load when sessionId provided and loadSession capability is true', async () => {
-    const client = new AcpClient({ agentCmd: 'devin acp', sessionId: 'existing-session' });
+    const client = new AcpClient({ agentCmd: 'acp-agent serve', sessionId: 'existing-session' });
     await client.start();
     expect(mockCtx.request).toHaveBeenCalledWith(
       'session/load',
@@ -126,7 +126,7 @@ describe('AcpClient', () => {
       }
       return {};
     });
-    const client = new AcpClient({ agentCmd: 'devin acp', sessionId: 'existing-session' });
+    const client = new AcpClient({ agentCmd: 'acp-agent serve', sessionId: 'existing-session' });
     await client.start();
     expect(mockCtx.request).toHaveBeenCalledWith(
       'session/resume',
@@ -141,12 +141,12 @@ describe('AcpClient', () => {
       }
       return {};
     });
-    const client = new AcpClient({ agentCmd: 'devin acp', sessionId: 'existing-session' });
+    const client = new AcpClient({ agentCmd: 'acp-agent serve', sessionId: 'existing-session' });
     await expect(client.start()).rejects.toThrow('does not support session/resume or session/load');
   });
 
   it('auto-approves permission when no onPermission callback', async () => {
-    const client = new AcpClient({ agentCmd: 'devin acp' });
+    const client = new AcpClient({ agentCmd: 'acp-agent serve' });
     const result = await client._handlePermission({
       options: [{ kind: 'allow', optionId: 'opt1' }],
     });
@@ -156,14 +156,14 @@ describe('AcpClient', () => {
 
   it('delegates permission to onPermission callback', async () => {
     const onPermission = vi.fn(async () => ({ outcome: { outcome: 'cancelled' } }));
-    const client = new AcpClient({ agentCmd: 'devin acp', onPermission });
+    const client = new AcpClient({ agentCmd: 'acp-agent serve', onPermission });
     const result = await client._handlePermission({ options: [] });
     expect(onPermission).toHaveBeenCalled();
     expect(result.outcome.outcome).toBe('cancelled');
   });
 
   it('kill() disposes session and kills process', async () => {
-    const client = new AcpClient({ agentCmd: 'devin acp' });
+    const client = new AcpClient({ agentCmd: 'acp-agent serve' });
     await client.start();
     client.kill();
     expect(mockSession.dispose).toHaveBeenCalled();
@@ -171,14 +171,14 @@ describe('AcpClient', () => {
   });
 
   it('prompt() delegates to session.prompt', async () => {
-    const client = new AcpClient({ agentCmd: 'devin acp' });
+    const client = new AcpClient({ agentCmd: 'acp-agent serve' });
     await client.start();
     await client.prompt('hello');
     expect(mockSession.prompt).toHaveBeenCalledWith('hello');
   });
 
   it('nextUpdate() delegates to session.nextUpdate', async () => {
-    const client = new AcpClient({ agentCmd: 'devin acp' });
+    const client = new AcpClient({ agentCmd: 'acp-agent serve' });
     await client.start();
     await client.nextUpdate();
     expect(mockSession.nextUpdate).toHaveBeenCalled();
@@ -187,7 +187,7 @@ describe('AcpClient', () => {
   it('loads session config from sessionConfigPath', async () => {
     writeFileSync(tmpSessionConfig, '{"cwd": "/tmp", "mcpServers": []}');
     const client = new AcpClient({
-      agentCmd: 'devin acp',
+      agentCmd: 'acp-agent serve',
       sessionConfigPath: tmpSessionConfig,
       sessionId: 'existing-session',
     });
