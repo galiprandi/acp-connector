@@ -1,43 +1,101 @@
 # acp-connector
 
-> Control any ACP-compatible coding agent from Telegram, cron, or HTTP.
+> 🌉 Thin bridge between Telegram and any ACP-compatible coding agent.
 
-[![npm version](https://img.shields.io/npm/v/acp-connector.svg)](https://www.npmjs.com/package/acp-connector)
-[![license](https://img.shields.io/npm/l/acp-connector.svg)](https://github.com/galiprandi/acp-connector/blob/main/LICENSE)
-[![node](https://img.shields.io/node/v/acp-connector.svg)](https://nodejs.org)
+<div align="center">
+  <p>
+    <a href="https://www.npmjs.com/package/acp-connector">
+      <img src="https://img.shields.io/npm/v/acp-connector?style=for-the-badge&logo=npm&color=CB3837" alt="NPM Version"/>
+    </a>
+    <a href="https://github.com/galiprandi/acp-connector">
+      <img src="https://img.shields.io/github/stars/galiprandi/acp-connector?style=for-the-badge&logo=github&color=181717" alt="GitHub Stars"/>
+    </a>
+    <a href="https://github.com/galiprandi/acp-connector/actions">
+      <img src="https://img.shields.io/github/actions/workflow/status/galiprandi/acp-connector/ci.yml?style=for-the-badge&logo=githubactions&color=2088FF" alt="CI Status"/>
+    </a>
+    <a href="https://github.com/galiprandi/acp-connector/blob/main/LICENSE">
+      <img src="https://img.shields.io/npm/l/acp-connector?style=for-the-badge&color=blue" alt="License"/>
+    </a>
+  </p>
+</div>
 
----
+## 🧠 Overview
 
-## What is this?
-
-`acp-connector` is a thin bridge that connects messaging platforms to any [Agent Client Protocol](https://agentclientprotocol.com/) (ACP) compatible coding agent. It's agent-agnostic: you configure the command to launch your agent, and the bridge handles the rest.
-
-**Telegram** is the first-class interface. You send messages, the bridge forwards them to your ACP agent, and the agent's responses stream back to your chat in real time. The bridge also supports **scheduled prompts** (cron jobs) and an optional **HTTP API** for programmatic access.
+**acp-connector** is a lightweight, agent-agnostic bridge that connects [Agent Client Protocol](https://agentclientprotocol.com/) (ACP) compatible coding agents to Telegram. It forwards your messages to the agent and streams responses back — no terminal required.
 
 The bridge is intentionally thin. It doesn't implement its own agent loop, model provider, or tool ecosystem. It launches your agent, passes prompts through, and relays responses back. That's it.
 
-### Why?
+**Key features:**
+- 🤖 Works with any ACP agent (Devin, Claude Code, Codex, Gemini CLI, OpenCode, etc.)
+- 💬 Telegram as the primary interface with streaming responses
+- ⏰ Cron scheduler for recurring prompts
+- 🔁 Routines for reusable named prompts
+- 🌐 Optional HTTP API for programmatic access
+- 🔐 Bearer token auth, rate limiting, body size limits
+- 🧠 Agent thoughts forwarding (optional)
+- 📋 Permission requests as inline buttons
 
-Because your coding agent already knows how to code. You just need a way to talk to it from anywhere. Telegram is on every phone, every watch, every desktop. Your agent is on your machine. `acp-connector` connects them.
+***
 
----
+## 🚀 Installation
 
-## Quick start
+```bash
+# Run directly with npx (no install needed)
+npx acp-connector setup
+
+# Or install globally
+npm install -g acp-connector
+# or
+pnpm add -g acp-connector
+# or
+yarn global add acp-connector
+```
+
+Then start the bridge:
+
+```bash
+acp-connector
+```
+
+***
+
+## ⚡ Quick start
 
 ```bash
 # 1. Create a Telegram bot via @BotFather, get the token
-# 2. Run setup
+# 2. Run the setup wizard
 npx acp-connector setup
 
 # 3. Start the bridge
 npx acp-connector
 ```
 
-That's it. Send a message to your bot on Telegram and your agent will respond.
+Send a message to your bot on Telegram. Your agent will respond. That's it.
 
----
+***
 
-## How it works
+## 📚 Table of Contents
+
+- [Overview](#-overview)
+- [Installation](#-installation)
+- [Quick start](#-quick-start)
+- [How it works](#-how-it-works)
+- [Configuration](#-configuration)
+  - [Cron jobs](#cron-jobs)
+  - [Routines](#routines)
+  - [HTTP API](#http-api)
+- [Supported agents](#-supported-agents)
+- [Telegram commands](#-telegram-commands)
+- [Permissions](#-permissions)
+- [Session persistence](#-session-persistence)
+- [Self-hosting](#-self-hosting)
+- [Troubleshooting](#-troubleshooting)
+- [Contributing](#-contributing)
+- [License](#-license)
+
+***
+
+## 🏗 How it works
 
 ```
 ┌──────────┐     ┌──────────────┐     ┌─────────────┐
@@ -63,9 +121,9 @@ That's it. Send a message to your bot on Telegram and your agent will respond.
 5. Agent responses **stream back** to Telegram with live message edits
 6. **Permissions** are forwarded as inline buttons (or auto-approved)
 
----
+***
 
-## Configuration
+## ⚙️ Configuration
 
 All configuration lives in a single `.config.jsonc` file in your working directory. The setup wizard creates it for you, or you can write it manually.
 
@@ -86,82 +144,7 @@ See [`.config.example.jsonc`](.config.example.jsonc) for the full reference.
 | `routines` | `Routine[]` | no | `[]` | Named reusable prompts |
 | `http` | `HttpConfig` | no | off | HTTP server config (see below) |
 
-### CronJob
-
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `name` | `string` | yes | Unique job name |
-| `schedule` | `string` | yes | Cron expression (e.g. `"0 9 * * *"`) |
-| `prompt` | `string` | yes | Prompt to send to the agent |
-| `chatId` | `number` | no | Chat to send the response to (default: first allowed) |
-| `enabled` | `boolean` | no | `true` (set `false` to pause) |
-
-### Routine
-
-| Field | Type | Description |
-|---|---|---|
-| `name` | `string` | Unique routine name |
-| `prompt` | `string` | Prompt text |
-
-### HttpConfig
-
-| Field | Type | Default | Description |
-|---|---|---|---|
-| `enabled` | `boolean` | `false` | Start the HTTP server |
-| `port` | `number` | `7780` | Port to listen on |
-
----
-
-## Supported agents
-
-Any agent that implements the [Agent Client Protocol](https://agentclientprotocol.com/) works. Configure it via `agentCmd`:
-
-| Agent | Example `agentCmd` |
-|---|---|
-| [Devin](https://devin.ai) | `devin acp` |
-| [Claude Code](https://claude.ai/code) | `claude acp` |
-| [Codex](https://openai.com/codex) | `codex acp` |
-| [Gemini CLI](https://github.com/google-gemini/gemini-cli) | `gemini acp` |
-| [OpenCode](https://github.com/sst/opencode) | `opencode acp` |
-| Any ACP agent | `<your-agent> acp` |
-
----
-
-## Telegram commands
-
-The bridge intercepts these commands before forwarding to the agent:
-
-### Cron management
-
-| Command | Description |
-|---|---|
-| `/cron` | Show cron help |
-| `/cron list` | List all cron jobs |
-| `/cron add <schedule> <prompt>` | Add a new cron job |
-| `/cron remove <name>` | Remove a cron job |
-| `/cron toggle <name>` | Pause/activate a job |
-| `/cron run <name>` | Run a job immediately |
-
-### Routine management
-
-| Command | Description |
-|---|---|
-| `/routine` | Show routine help |
-| `/routine list` | List all routines |
-| `/routine add <name> <prompt>` | Add a reusable prompt |
-| `/routine remove <name>` | Remove a routine |
-
-### Execution
-
-| Command | Description |
-|---|---|
-| `/run <name>` | Execute a routine by name |
-
-Any other message (including unknown `/commands`) is forwarded directly to the agent.
-
----
-
-## Cron jobs
+### Cron jobs
 
 Schedule prompts to run automatically. Configure in `.config.jsonc` or manage via Telegram commands.
 
@@ -184,11 +167,17 @@ Or from Telegram:
 /cron add 0 9 * * * summarize today's calendar and unread emails
 ```
 
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | `string` | yes | Unique job name |
+| `schedule` | `string` | yes | Cron expression (e.g. `"0 9 * * *"`) |
+| `prompt` | `string` | yes | Prompt to send to the agent |
+| `chatId` | `number` | no | Chat to send the response to (default: first allowed) |
+| `enabled` | `boolean` | no | `true` (set `false` to pause) |
+
 All changes persist to `.config.jsonc` automatically.
 
----
-
-## Routines
+### Routines
 
 Named reusable prompts. Define them in config or create via Telegram.
 
@@ -207,9 +196,12 @@ Run from Telegram:
 /run briefing
 ```
 
----
+| Field | Type | Description |
+|---|---|---|
+| `name` | `string` | Unique routine name |
+| `prompt` | `string` | Prompt text |
 
-## HTTP API
+### HTTP API
 
 Optional. Enable in config:
 
@@ -217,12 +209,27 @@ Optional. Enable in config:
 {
   "http": {
     "enabled": true,
-    "port": 7780
+    "host": "127.0.0.1",
+    "port": 7780,
+    "auth": {
+      "token": "your-secret"
+    },
+    "forwardHeaders": false,
+    "maxBodySize": 1048576,
+    "rateLimit": 60
   }
 }
 ```
 
-### Endpoints
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `enabled` | `boolean` | `false` | Start the HTTP server |
+| `host` | `string` | `"127.0.0.1"` | Bind address (use `"0.0.0.0"` for LAN access) |
+| `port` | `number` | `7780` | Port to listen on |
+| `auth.token` | `string` | `null` | Bearer token for auth (optional) |
+| `forwardHeaders` | `boolean` | `false` | Forward request headers to agent (`Authorization` always stripped) |
+| `maxBodySize` | `number` | `1048576` | Max body size in bytes (1MB) |
+| `rateLimit` | `number` | `60` | Max requests per minute |
 
 #### `GET /health`
 
@@ -236,10 +243,31 @@ curl http://localhost:7780/health
 
 #### `POST /prompt`
 
+Send a prompt with structured JSON:
+
 ```bash
 curl -X POST http://localhost:7780/prompt \
   -H "Content-Type: application/json" \
   -d '{"text": "fix the failing tests", "chatId": 123456789}'
+```
+
+Or send a raw body with query params as context:
+
+```bash
+curl -X POST "http://localhost:7780/prompt?origin=outlook&from=boss" \
+  -H "Content-Type: application/json" \
+  -d '{"from": "boss@company.com", "subject": "URGENT"}'
+```
+
+The agent receives: `[origin=outlook, from=boss] {"from": "boss@company.com", "subject": "URGENT"}`
+
+With auth:
+
+```bash
+curl -X POST http://localhost:7780/prompt \
+  -H "Authorization: Bearer your-secret" \
+  -H "Content-Type: application/json" \
+  -d '{"text": "hello"}'
 ```
 
 ```json
@@ -248,18 +276,67 @@ curl -X POST http://localhost:7780/prompt \
 
 The prompt enters the same queue as Telegram messages. If `chatId` is omitted, the first allowed chat ID is used.
 
----
+***
 
-## Permissions
+## 🤖 Supported agents
+
+Any agent that implements the [Agent Client Protocol](https://agentclientprotocol.com/) works. Configure it via `agentCmd`:
+
+| Agent | Example `agentCmd` |
+|---|---|
+| [Devin](https://devin.ai) | `devin acp` |
+| [Claude Code](https://claude.ai/code) | `claude acp` |
+| [Codex](https://openai.com/codex) | `codex acp` |
+| [Gemini CLI](https://github.com/google-gemini/gemini-cli) | `gemini acp` |
+| [OpenCode](https://github.com/sst/opencode) | `opencode acp` |
+| Any ACP agent | `<your-agent> acp` |
+
+***
+
+## 💬 Telegram commands
+
+The bridge intercepts these commands before forwarding to the agent:
+
+### Cron management
+
+| Command | Description |
+|---|---|
+| `/cron list` | List all cron jobs |
+| `/cron add <schedule> <prompt>` | Add a new cron job |
+| `/cron remove <name>` | Remove a cron job |
+| `/cron toggle <name>` | Pause/activate a job |
+| `/cron run <name>` | Run a job immediately |
+
+### Routine management
+
+| Command | Description |
+|---|---|
+| `/routine list` | List all routines |
+| `/routine add <name> <prompt>` | Add a reusable prompt |
+| `/routine remove <name>` | Remove a routine |
+
+### Execution
+
+| Command | Description |
+|---|---|
+| `/run <name>` | Execute a routine by name |
+| `/start` | Show welcome message with command list |
+| `/help` | Show welcome message with command list |
+
+Any other message (including unknown `/commands`) is forwarded directly to the agent.
+
+***
+
+## 🔐 Permissions
 
 ACP agents may request permission before executing certain actions (file writes, shell commands, etc.). The bridge handles this in two ways:
 
 1. **Auto-approve**: If your `agentCmd` includes `dangerous`, `bypass`, or `yolo`, all permissions are auto-approved silently.
 2. **Inline buttons**: Otherwise, the permission request is forwarded to Telegram with "Permitir" / "Denegar" buttons. Tap to approve or deny.
 
----
+***
 
-## Session persistence
+## 💾 Session persistence
 
 To resume a session across restarts, set `sessionId` in your config:
 
@@ -271,9 +348,9 @@ To resume a session across restarts, set `sessionId` in your config:
 
 The bridge will call `session/load` or `session/resume` (depending on agent capabilities) on startup. Omit this field to create a new session each time.
 
----
+***
 
-## Self-hosting
+## 🖥 Self-hosting
 
 ### systemd
 
@@ -301,9 +378,9 @@ pm2 save
 pm2 startup
 ```
 
----
+***
 
-## Troubleshooting
+## 🐛 Troubleshooting
 
 ### `Conflict: terminated by other getUpdates request`
 
@@ -327,19 +404,19 @@ If you configured `sessionConfigPath`, verify the file exists and is valid JSONC
 
 The bridge batches stream edits (800ms) to avoid rate limits. If you still hit limits, disable streaming (`"streaming": false`) to send one message per response instead.
 
----
+***
 
-## Contributing
+## 🤝 Contributing
 
 See [AGENTS.md](AGENTS.md) for development setup, commit conventions, and release process.
 
 - **Commits**: [Conventional Commits](https://www.conventionalcommits.org/) enforced by commitlint
 - **Linting**: [Biome](https://biomejs.dev/)
-- **Tests**: [Vitest](https://vitest.dev/) — `pnpm test`
+- **Tests**: [Vitest](https://vitest.dev/) — `pnpm test` (219 tests)
 - **PRs**: CI runs lint + tests + commitlint on every PR
 
----
+***
 
-## License
+## 📄 License
 
 [MIT](LICENSE)
