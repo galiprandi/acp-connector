@@ -96,6 +96,7 @@ interface AcpClientOptions {
  */
 interface SessionClientContext {
   request: ClientContext['request'];
+  notify: ClientContext['notify'];
   buildSession: ClientContext['buildSession'];
   attachSession: (response: NewSessionResponse) => ActiveSession;
 }
@@ -118,6 +119,7 @@ export class AcpClient {
   sessionId: string | null;
   modes: SessionModeState | null | undefined;
   promptCapabilities: PromptCapabilities | null;
+  private _ctx: SessionClientContext | null;
   private _keepAlive: Promise<void> | null;
   private _disconnect: (() => void) | null;
   private _sessionReady: Promise<void> | null;
@@ -147,6 +149,7 @@ export class AcpClient {
     this.sessionId = null;
     this.modes = null;
     this.promptCapabilities = null;
+    this._ctx = null;
     this._keepAlive = null;
     this._disconnect = null;
     this._sessionReady = null;
@@ -217,6 +220,7 @@ export class AcpClient {
       )
       .connectWith(stream, async (rawCtx) => {
         const ctx = rawCtx as unknown as SessionClientContext;
+        this._ctx = ctx;
         const initResult: InitializeResponse = await ctx.request(acp.methods.agent.initialize, {
           protocolVersion: acp.PROTOCOL_VERSION,
           clientCapabilities: {},
@@ -301,6 +305,14 @@ export class AcpClient {
   async nextUpdate(): Promise<ActiveSessionMessage> {
     if (!this.session) throw new Error('ACP session not started');
     return this.session.nextUpdate();
+  }
+
+  async cancel(): Promise<void> {
+    if (!this.session) throw new Error('ACP session not started');
+    if (!this._ctx) throw new Error('ACP context not available');
+    await this._ctx.notify(acp.methods.agent.session.cancel, {
+      sessionId: this.session.sessionId,
+    });
   }
 
   kill(): void {

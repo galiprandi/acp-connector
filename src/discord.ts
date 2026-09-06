@@ -225,6 +225,23 @@ export class DiscordBot implements PlatformBot {
   }
 
   private async _handleBuiltinCommand(text: string, channelId: string): Promise<boolean> {
+    if (text === '/stop') {
+      const channel = this.client.channels.cache.get(channelId) as TextChannel;
+      if (!this.busy) {
+        await channel?.send('Nothing to stop.');
+        return true;
+      }
+      try {
+        await this.acp.cancel();
+        this.queue = [];
+        await channel?.send('⏹ Stopped.');
+        console.log('⏹ stop requested');
+      } catch (err) {
+        await channel?.send(`Stop failed: ${(err as Error).message}`);
+      }
+      return true;
+    }
+
     if (text !== '/start' && text !== '/help') return false;
     (this.client.channels.cache.get(channelId) as TextChannel)?.send(
       [
@@ -233,6 +250,8 @@ export class DiscordBot implements PlatformBot {
         "Send any message and I'll forward it to your coding agent.",
         '',
         '**Commands:**',
+        '  /stop — cancel the current task',
+        '',
         '  /cron list — list scheduled jobs',
         '  /cron add `<schedule> <prompt>` — add a job',
         '  /cron remove `<name>` — remove a job',

@@ -28,6 +28,7 @@ function createMockAcp() {
       if (updates.length > 0) return updates.shift();
       return { kind: 'stop', stopReason: 'end_turn' };
     }),
+    cancel: vi.fn(async () => {}),
     _pushUpdate: (update) => updates.push(update),
     _updates: updates,
   };
@@ -282,5 +283,54 @@ describe('BridgeBot', () => {
     const { bot } = createBot();
     bot.stop();
     expect(mockBot.stopPolling).toHaveBeenCalled();
+  });
+
+  it('/stop when idle responds nothing to stop', async () => {
+    const { bot, acp } = createBot();
+    await bot.start();
+    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    await handler({ chat: { id: 123 }, text: '/stop' });
+    expect(mockBot.sendMessage).toHaveBeenCalledWith(123, 'Nothing to stop.');
+    expect(acp.cancel).not.toHaveBeenCalled();
+  });
+
+  it('/stop when busy cancels the agent', async () => {
+    const { bot, acp } = createBot();
+    await bot.start();
+    // Start a prompt to make the bot busy
+    acp.nextUpdate.mockReturnValue(new Promise(() => {})); // never resolves
+    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    await handler({ chat: { id: 123 }, text: 'long task' });
+    await vi.waitFor(() => expect(bot.busy).toBe(true));
+    await handler({ chat: { id: 123 }, text: '/stop' });
+    expect(acp.cancel).toHaveBeenCalled();
+    expect(mockBot.sendMessage).toHaveBeenCalledWith(123, '⏹ Stopped.');
+  });
+
+  it('/stop clears the queue', async () => {
+    const { bot, acp } = createBot();
+    await bot.start();
+    acp.nextUpdate.mockReturnValue(new Promise(() => {}));
+    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    await handler({ chat: { id: 123 }, text: 'first' });
+    await vi.waitFor(() => expect(bot.busy).toBe(true));
+    // Queue more items
+    await handler({ chat: { id: 123 }, text: 'second' });
+    await handler({ chat: { id: 123 }, text: 'third' });
+    expect(bot.queue.length).toBe(2);
+    await handler({ chat: { id: 123 }, text: '/stop' });
+    expect(bot.queue.length).toBe(0);
+  });
+
+  it('/stop on cancel error sends error message', async () => {
+    const { bot, acp } = createBot();
+    await bot.start();
+    acp.nextUpdate.mockReturnValue(new Promise(() => {}));
+    acp.cancel.mockRejectedValueOnce(new Error('agent unreachable'));
+    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    await handler({ chat: { id: 123 }, text: 'task' });
+    await vi.waitFor(() => expect(bot.busy).toBe(true));
+    await handler({ chat: { id: 123 }, text: '/stop' });
+    expect(mockBot.sendMessage).toHaveBeenCalledWith(123, 'Stop failed: agent unreachable');
   });
 });

@@ -251,6 +251,22 @@ export class BridgeBot implements PlatformBot {
   }
 
   private async _handleBuiltinCommand(text: string, chatId: number): Promise<boolean> {
+    if (text === '/stop') {
+      if (!this.busy) {
+        this.bot.sendMessage(chatId, 'Nothing to stop.');
+        return true;
+      }
+      try {
+        await this.acp.cancel();
+        this.queue = [];
+        this.bot.sendMessage(chatId, '⏹ Stopped.');
+        console.log('⏹ stop requested');
+      } catch (err) {
+        this.bot.sendMessage(chatId, `Stop failed: ${(err as Error).message}`);
+      }
+      return true;
+    }
+
     if (text !== '/start' && text !== '/help') return false;
     this.bot.sendMessage(
       chatId,
@@ -260,6 +276,8 @@ export class BridgeBot implements PlatformBot {
         "Send any message and I'll forward it to your coding agent.",
         '',
         '*Commands:*',
+        '  /stop — cancel the current task',
+        '',
         '  /cron list — list scheduled jobs',
         '  /cron add `<schedule> <prompt>` — add a job',
         '  /cron remove `<name>` — remove a job',

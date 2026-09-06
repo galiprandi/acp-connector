@@ -363,10 +363,13 @@ The bridge intercepts these commands before forwarding to the agent:
 | Command | Description |
 |---|---|
 | `/run <name>` | Execute a routine by name |
+| `/stop` | Cancel the current task (sends `session/cancel` to the agent) |
 | `/start` | Show welcome message with command list |
 | `/help` | Show welcome message with command list |
 
 Any other message (including unknown `/commands`) is forwarded directly to the agent.
+
+`/stop` cancels the in-progress prompt turn and clears the pending queue. The agent receives a `session/cancel` notification and should respond with a `cancelled` stop reason.
 
 ***
 

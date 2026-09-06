@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.3.0] - 2026-09-06
 
 ### Added
+- `/stop` command — cancels the current task via ACP `session/cancel`, clears the queue
 - Media handling — photos, documents, stickers, videos, files from Telegram and Discord
   - Images: if agent supports `image` capability → base64 `ImageContent`
   - Other files: `ResourceLink` with `file://` URI (all agents MUST support)

@@ -53,6 +53,7 @@ function createMockAcp() {
       if (updates.length > 0) return updates.shift();
       return { kind: 'stop', stopReason: 'end_turn' };
     }),
+    cancel: vi.fn(async () => {}),
     _pushUpdate: (update) => updates.push(update),
     _updates: updates,
   };
@@ -341,5 +342,40 @@ describe('DiscordBot', () => {
     await handler(makeMessage('123', '/custom'));
     expect(onCommand).toHaveBeenCalledWith('/custom', '123');
     expect(acp.prompt).not.toHaveBeenCalled();
+  });
+
+  it('/stop when idle responds nothing to stop', async () => {
+    const { bot, acp } = createBot();
+    await bot.start();
+    const handler = mockClient.on.mock.calls.find((c) => c[0] === 'messageCreate')[1];
+    await handler(makeMessage('123', '/stop'));
+    expect(mockChannel.send).toHaveBeenCalledWith('Nothing to stop.');
+    expect(acp.cancel).not.toHaveBeenCalled();
+  });
+
+  it('/stop when busy cancels the agent', async () => {
+    const { bot, acp } = createBot();
+    await bot.start();
+    acp.nextUpdate.mockReturnValue(new Promise(() => {}));
+    const handler = mockClient.on.mock.calls.find((c) => c[0] === 'messageCreate')[1];
+    await handler(makeMessage('123', 'long task'));
+    await vi.waitFor(() => expect(bot.busy).toBe(true));
+    await handler(makeMessage('123', '/stop'));
+    expect(acp.cancel).toHaveBeenCalled();
+    expect(mockChannel.send).toHaveBeenCalledWith('⏹ Stopped.');
+  });
+
+  it('/stop clears the queue', async () => {
+    const { bot, acp } = createBot();
+    await bot.start();
+    acp.nextUpdate.mockReturnValue(new Promise(() => {}));
+    const handler = mockClient.on.mock.calls.find((c) => c[0] === 'messageCreate')[1];
+    await handler(makeMessage('123', 'first'));
+    await vi.waitFor(() => expect(bot.busy).toBe(true));
+    await handler(makeMessage('123', 'second'));
+    await handler(makeMessage('123', 'third'));
+    expect(bot.queue.length).toBe(2);
+    await handler(makeMessage('123', '/stop'));
+    expect(bot.queue.length).toBe(0);
   });
 });
