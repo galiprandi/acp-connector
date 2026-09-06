@@ -78,6 +78,8 @@ export class AcpClient {
     this._keepAlive = null;
     this._disconnect = null;
     this._sessionReady = null;
+    this._started = false;
+    this._killed = false;
   }
 
   _loadSessionConfig() {
@@ -92,6 +94,9 @@ export class AcpClient {
   }
 
   async start() {
+    if (this._started) return;
+    this._started = true;
+
     this.proc = spawn(this.agentCmd, {
       stdio: ['pipe', 'pipe', 'pipe'],
       shell: true,
@@ -107,6 +112,10 @@ export class AcpClient {
 
     this.proc.on('exit', () => {
       if (this._disconnect) this._disconnect();
+    });
+
+    this.proc.on('error', (err) => {
+      if (this._sessionReject) this._sessionReject(err);
     });
 
     const input = Writable.toWeb(this.proc.stdin);
@@ -194,6 +203,8 @@ export class AcpClient {
   }
 
   kill() {
+    if (this._killed) return;
+    this._killed = true;
     if (this.session) this.session.dispose();
     if (this._disconnect) this._disconnect();
     if (this.proc) this.proc.kill();

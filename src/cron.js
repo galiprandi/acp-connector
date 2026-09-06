@@ -40,6 +40,11 @@ export class CronManager {
       return;
     }
 
+    if (!job.prompt) {
+      this.onLog(`⏰ cron "${job.name}" empty prompt, skipping`);
+      return;
+    }
+
     if (!cron.validate(job.schedule)) {
       this.onLog(`⏰ cron "${job.name}" invalid schedule: ${job.schedule}`);
       return;

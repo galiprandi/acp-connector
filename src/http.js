@@ -35,8 +35,13 @@ export class HttpServer {
       if (req.method === 'POST' && req.url === '/prompt') {
         try {
           const body = await this._readBody(req);
+          if (body.trim() === '') {
+            res.writeHead(400);
+            res.end(JSON.stringify({ error: 'empty request body' }));
+            return;
+          }
           const data = JSON.parse(body);
-          if (!data.text) {
+          if (typeof data.text !== 'string' || data.text.trim() === '') {
             res.writeHead(400);
             res.end(JSON.stringify({ error: 'text is required' }));
             return;

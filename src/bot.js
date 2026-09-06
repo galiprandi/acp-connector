@@ -104,6 +104,12 @@ export class BridgeBot {
       return;
     }
 
+    // Built-in commands
+    if (await this._handleBuiltinCommand(text, chatId)) return;
+
+    // Ignore empty text
+    if (!text || text.trim() === '') return;
+
     // Bridge commands (handled by onCommand if registered)
     if (text.startsWith('/') && this.onCommand) {
       const handled = await this.onCommand(text, chatId);
@@ -119,12 +125,50 @@ export class BridgeBot {
 
   /**
    * Enqueue a prompt from an external source (cron, http, routines).
+   * If the text is a bridge command (starts with /), it's handled by onCommand
+   * instead of being sent to the agent.
    * @param {string} text
    * @param {number} chatId
    */
-  enqueuePrompt(text, chatId) {
+  async enqueuePrompt(text, chatId) {
+    if (await this._handleBuiltinCommand(text, chatId)) return;
+    if (text.startsWith('/') && this.onCommand) {
+      const handled = await this.onCommand(text, chatId);
+      if (handled) return;
+    }
     this.queue.push({ chatId, text });
     this._processQueue();
+  }
+
+  async _handleBuiltinCommand(text, chatId) {
+    if (text !== '/start' && text !== '/help') return false;
+    this.bot.sendMessage(
+      chatId,
+      [
+        '👋 *acp-connector*',
+        '',
+        "Send any message and I'll forward it to your coding agent.",
+        '',
+        '*Commands:*',
+        '  /cron list — list scheduled jobs',
+        '  /cron add `<schedule> <prompt>` — add a job',
+        '  /cron remove `<name>` — remove a job',
+        '  /cron toggle `<name>` — pause/activate',
+        '  /cron run `<name>` — run now',
+        '',
+        '  /routine list — list routines',
+        '  /routine add `<name> <prompt>` — add a routine',
+        '  /routine remove `<name>` — remove a routine',
+        '',
+        '  /run `<name>` — run a routine',
+        '',
+        'Any other text is sent to the agent.',
+        '',
+        '📖 Docs: https://github.com/galiprandi/acp-connector#readme',
+      ].join('\n'),
+      { parse_mode: 'Markdown' }
+    );
+    return true;
   }
 
   async _processQueue() {
@@ -297,6 +341,11 @@ export class BridgeBot {
       if (allowOpt) {
         return { outcome: { outcome: 'selected', optionId: allowOpt.optionId } };
       }
+      return { outcome: { outcome: 'cancelled' } };
+    }
+
+    // No options — cancel immediately
+    if (!params.options || params.options.length === 0) {
       return { outcome: { outcome: 'cancelled' } };
     }
 

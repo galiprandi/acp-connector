@@ -99,17 +99,17 @@ export class RoutineManager {
   }
 
   async _cronAdd(restStr, chatId) {
-    // Format: <schedule> <prompt>
-    const spaceIdx = restStr.indexOf(' ');
-    if (spaceIdx < 0) {
+    // Format: <schedule: 5 tokens> <prompt>
+    const tokens = restStr.split(/\s+/);
+    if (tokens.length < 6) {
       await this.sendMessage(
         chatId,
-        'Usage: /cron add `<schedule> <prompt>`\nExample: /cron add `0 9 * * *` do the briefing'
+        'Usage: /cron add `<schedule> <prompt>`\nExample: /cron add `0 9 * * *` do the briefing\nSchedule is 5 fields: minute hour day month weekday'
       );
       return true;
     }
-    const schedule = restStr.slice(0, spaceIdx);
-    const prompt = restStr.slice(spaceIdx + 1);
+    const schedule = tokens.slice(0, 5).join(' ');
+    const prompt = tokens.slice(5).join(' ');
     const name = `cron-${Date.now()}`;
 
     const job = this.cronManager.add({ name, schedule, prompt, chatId });

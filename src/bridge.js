@@ -23,7 +23,13 @@ function printBanner() {
  * Main bridge entrypoint. Loads config, starts ACP, Telegram, cron, HTTP.
  */
 export async function run() {
-  const config = loadConfig();
+  let config;
+  try {
+    config = loadConfig();
+  } catch (err) {
+    console.error(`Invalid config: ${err.message}`);
+    process.exit(1);
+  }
   if (!config) {
     console.error('No .config.jsonc found. Run: npx acp-connector setup');
     process.exit(1);
