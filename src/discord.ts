@@ -18,16 +18,16 @@ const STREAM_BATCH_MS = 800;
 interface DiscordBotOpts {
   acp: AcpClient;
   token: string;
-  allowedChannelIds: number[];
+  allowedChannelIds: string[];
   agentCmd: string;
   showThoughts?: boolean;
   streaming?: boolean;
-  onCommand?: ((text: string, chatId: number) => Promise<boolean>) | null;
-  onPrompt?: ((text: string, chatId: number) => void) | null;
+  onCommand?: ((text: string, chatId: string) => Promise<boolean>) | null;
+  onPrompt?: ((text: string, chatId: string) => void) | null;
 }
 
 interface QueueItem {
-  channelId: number;
+  channelId: string;
   text: string;
 }
 
@@ -58,12 +58,12 @@ interface PermissionPending {
 export class DiscordBot implements PlatformBot {
   private acp: AcpClient;
   private token: string;
-  private allowedChannelIds: Set<number>;
+  private allowedChannelIds: Set<string>;
   private agentCmd: string;
   private showThoughts: boolean;
   private streaming: boolean;
-  onCommand: ((text: string, chatId: number) => Promise<boolean>) | null;
-  private onPrompt: ((text: string, chatId: number) => void) | null;
+  onCommand: ((text: string, chatId: string) => Promise<boolean>) | null;
+  private onPrompt: ((text: string, chatId: string) => void) | null;
   private client: Client;
   private queue: QueueItem[];
   private busy: boolean;
@@ -71,7 +71,7 @@ export class DiscordBot implements PlatformBot {
   private streamBuffer: string;
   private streamTimer: NodeJS.Timeout | null;
   private streamDirty: boolean;
-  private currentChannelId: number | null;
+  private currentChannelId: string | null;
   private permissionPending: PermissionPending | null;
 
   constructor({
@@ -86,7 +86,7 @@ export class DiscordBot implements PlatformBot {
   }: DiscordBotOpts) {
     this.acp = acp;
     this.token = token;
-    this.allowedChannelIds = new Set(allowedChannelIds);
+    this.allowedChannelIds = new Set(allowedChannelIds.map(String));
     this.agentCmd = agentCmd;
     this.showThoughts = showThoughts;
     this.streaming = streaming;
@@ -123,7 +123,7 @@ export class DiscordBot implements PlatformBot {
     this.client.on(Events.Error, (err) => console.error('Discord error:', err.message));
   }
 
-  private _isAllowed(channelId: number): boolean {
+  private _isAllowed(channelId: string): boolean {
     return this.allowedChannelIds.has(channelId);
   }
 
@@ -141,7 +141,7 @@ export class DiscordBot implements PlatformBot {
   private async _onMessage(msg: Message): Promise<void> {
     if (msg.author.bot) return;
 
-    const channelId = Number(msg.channel.id);
+    const channelId = msg.channel.id;
     const text = msg.content || '';
 
     if (!this._isAllowed(channelId)) {
@@ -153,7 +153,7 @@ export class DiscordBot implements PlatformBot {
             '',
             'To allow this channel, add it to acp-connector.jsonc:',
             '',
-            `  "discord": { "allowedChannelIds": [${channelId}] }`,
+            `  "discord": { "allowedChannelIds": ["${channelId}"] }`,
             '',
             'Then restart the bridge.',
           ].join('\n')
@@ -178,20 +178,21 @@ export class DiscordBot implements PlatformBot {
     this._processQueue();
   }
 
-  async enqueuePrompt(text: string, chatId?: number): Promise<void> {
+  async enqueuePrompt(text: string, chatId?: number | string): Promise<void> {
     if (!chatId) return;
-    if (await this._handleBuiltinCommand(text, chatId)) return;
+    const channelId = String(chatId);
+    if (await this._handleBuiltinCommand(text, channelId)) return;
     if (text.startsWith('/') && this.onCommand) {
-      const handled = await this.onCommand(text, chatId);
+      const handled = await this.onCommand(text, channelId);
       if (handled) return;
     }
-    this.queue.push({ channelId: chatId, text });
+    this.queue.push({ channelId, text });
     this._processQueue();
   }
 
-  private async _handleBuiltinCommand(text: string, channelId: number): Promise<boolean> {
+  private async _handleBuiltinCommand(text: string, channelId: string): Promise<boolean> {
     if (text !== '/start' && text !== '/help') return false;
-    (this.client.channels.cache.get(String(channelId)) as TextChannel)?.send(
+    (this.client.channels.cache.get(channelId) as TextChannel)?.send(
       [
         '👋 **acp-connector**',
         '',
@@ -252,14 +253,12 @@ export class DiscordBot implements PlatformBot {
       if (!this.streamBuffer && this.currentChannelId) {
         const stopReason = message?.stopReason;
         if (stopReason && stopReason !== 'end_turn') {
-          const channel = this.client.channels.cache.get(
-            String(this.currentChannelId)
-          ) as TextChannel;
+          const channel = this.client.channels.cache.get(this.currentChannelId) as TextChannel;
           await channel?.send(`[${stopReason}]`);
         }
       }
     } catch (err) {
-      const channel = this.client.channels.cache.get(String(channelId)) as TextChannel;
+      const channel = this.client.channels.cache.get(channelId) as TextChannel;
       await channel?.send(`Error: ${(err as Error).message}`);
     }
 
@@ -344,7 +343,7 @@ export class DiscordBot implements PlatformBot {
 
     try {
       if (!this.currentMessage) {
-        const channel = this.client.channels.cache.get(String(channelId)) as TextChannel;
+        const channel = this.client.channels.cache.get(channelId) as TextChannel;
         this.currentMessage = await channel?.send(text);
       } else {
         await this.currentMessage.edit(text);
@@ -359,7 +358,7 @@ export class DiscordBot implements PlatformBot {
     const channelId = this.currentChannelId;
     if (!channelId || text.length <= DISCORD_MAX_LEN) return;
 
-    const channel = this.client.channels.cache.get(String(channelId)) as TextChannel;
+    const channel = this.client.channels.cache.get(channelId) as TextChannel;
     if (!channel) return;
 
     for (let i = DISCORD_MAX_LEN; i < text.length; i += DISCORD_MAX_LEN) {
@@ -407,7 +406,7 @@ export class DiscordBot implements PlatformBot {
     console.log(`🔐 permiso: ${desc.slice(0, 60)}`);
 
     try {
-      const channel = this.client.channels.cache.get(String(channelId)) as TextChannel;
+      const channel = this.client.channels.cache.get(channelId) as TextChannel;
       if (!channel) {
         const allowOpt = params.options?.find(
           // biome-ignore lint/suspicious/noExplicitAny: SDK option type
@@ -471,8 +470,8 @@ export class DiscordBot implements PlatformBot {
 
   private async _onInteraction(interaction: ButtonInteraction): Promise<void> {
     if (!interaction.isButton()) return;
-    const channelId = Number(interaction.channel?.id);
-    if (!this._isAllowed(channelId)) return;
+    const channelId = interaction.channel?.id;
+    if (!channelId || !this._isAllowed(channelId)) return;
 
     const data = interaction.customId || '';
     if (data.startsWith('perm_') && this.permissionPending) {
@@ -494,7 +493,7 @@ export class DiscordBot implements PlatformBot {
     }
   }
 
-  async sendMessage(channelId: number, text: string): Promise<void> {
+  async sendMessage(channelId: number | string, text: string): Promise<void> {
     const channel = this.client.channels.cache.get(String(channelId)) as TextChannel;
     await channel?.send(text);
   }

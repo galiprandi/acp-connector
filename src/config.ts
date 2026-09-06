@@ -33,7 +33,7 @@ export interface TelegramPlatformConfig {
 
 export interface DiscordPlatformConfig {
   token: string;
-  allowedChannelIds: number[];
+  allowedChannelIds: string[];
 }
 
 export interface PlatformsConfig {

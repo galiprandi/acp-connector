@@ -7,8 +7,8 @@ const STREAM_BATCH_MS = 800;
 export interface PlatformBot {
   start(): Promise<void>;
   stop(): void;
-  enqueuePrompt(text: string, chatId?: number): Promise<void>;
-  sendMessage(chatId: number, text: string): Promise<void>;
+  enqueuePrompt(text: string, chatId?: number | string): Promise<void>;
+  sendMessage(chatId: number | string, text: string): Promise<void>;
 }
 
 interface BridgeBotOpts {

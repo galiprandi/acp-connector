@@ -65,7 +65,7 @@ function createBot(overrides = {}) {
   const bot = new DiscordBot({
     acp,
     token: 'test-token',
-    allowedChannelIds: [123],
+    allowedChannelIds: ['123'],
     agentCmd: 'acp-agent serve',
     ...overrides,
   });
@@ -99,10 +99,10 @@ describe('DiscordBot', () => {
   });
 
   it('rejects unauthorized channel ID', async () => {
-    const { bot } = createBot({ allowedChannelIds: [123] });
+    const { bot } = createBot({ allowedChannelIds: ['123'] });
     await bot.start();
     const handler = mockClient.on.mock.calls.find((c) => c[0] === 'messageCreate')[1];
-    await handler(makeMessage(999, 'hello'));
+    await handler(makeMessage('999', 'hello'));
     expect(mockChannel.send).not.toHaveBeenCalledWith('hello');
   });
 
@@ -110,7 +110,7 @@ describe('DiscordBot', () => {
     const { bot } = createBot({ allowedChannelIds: [] });
     await bot.start();
     const handler = mockClient.on.mock.calls.find((c) => c[0] === 'messageCreate')[1];
-    await handler(makeMessage(999, 'hello'));
+    await handler(makeMessage('999', 'hello'));
     expect(mockChannel.send).toHaveBeenCalledWith(
       expect.stringContaining('Your channel ID is: 999')
     );
@@ -120,7 +120,7 @@ describe('DiscordBot', () => {
     const { bot, acp } = createBot();
     await bot.start();
     const handler = mockClient.on.mock.calls.find((c) => c[0] === 'messageCreate')[1];
-    await handler(makeMessage(123, 'hello', true));
+    await handler(makeMessage('123', 'hello', true));
     expect(acp.prompt).not.toHaveBeenCalled();
   });
 
@@ -128,7 +128,7 @@ describe('DiscordBot', () => {
     const { bot, acp } = createBot();
     await bot.start();
     const handler = mockClient.on.mock.calls.find((c) => c[0] === 'messageCreate')[1];
-    await handler(makeMessage(123, 'hello agent'));
+    await handler(makeMessage('123', 'hello agent'));
     expect(acp.prompt).toHaveBeenCalledWith('hello agent');
   });
 
@@ -136,7 +136,7 @@ describe('DiscordBot', () => {
     const { bot, acp } = createBot();
     await bot.start();
     const handler = mockClient.on.mock.calls.find((c) => c[0] === 'messageCreate')[1];
-    await handler(makeMessage(123, '/help'));
+    await handler(makeMessage('123', '/help'));
     expect(acp.prompt).not.toHaveBeenCalled();
     expect(mockChannel.send).toHaveBeenCalledWith(expect.stringContaining('acp-connector'));
   });
@@ -145,14 +145,14 @@ describe('DiscordBot', () => {
     const { bot, acp } = createBot();
     await bot.start();
     const handler = mockClient.on.mock.calls.find((c) => c[0] === 'messageCreate')[1];
-    await handler(makeMessage(123, ''));
+    await handler(makeMessage('123', ''));
     expect(acp.prompt).not.toHaveBeenCalled();
   });
 
   it('enqueues prompts from external sources', async () => {
     const { bot, acp } = createBot();
     await bot.start();
-    await bot.enqueuePrompt('cron task', 123);
+    await bot.enqueuePrompt('cron task', '123');
     expect(acp.prompt).toHaveBeenCalledWith('cron task');
   });
 
@@ -169,7 +169,7 @@ describe('DiscordBot', () => {
     });
 
     const handler = mockClient.on.mock.calls.find((c) => c[0] === 'messageCreate')[1];
-    await handler(makeMessage(123, 'hi'));
+    await handler(makeMessage('123', 'hi'));
 
     // Flush stream timer
     await vi.advanceTimersByTimeAsync(800);
@@ -190,7 +190,7 @@ describe('DiscordBot', () => {
     });
 
     const handler = mockClient.on.mock.calls.find((c) => c[0] === 'messageCreate')[1];
-    await handler(makeMessage(123, 'hi'));
+    await handler(makeMessage('123', 'hi'));
 
     expect(acp.prompt).toHaveBeenCalledWith('hi');
   });
@@ -203,7 +203,7 @@ describe('DiscordBot', () => {
     await bot.start();
 
     const handler = mockClient.on.mock.calls.find((c) => c[0] === 'messageCreate')[1];
-    await handler(makeMessage(123, 'hi'));
+    await handler(makeMessage('123', 'hi'));
 
     await vi.waitFor(() => {
       expect(mockChannel.send).toHaveBeenCalledWith(
@@ -249,7 +249,7 @@ describe('DiscordBot', () => {
     );
 
     const handler = mockClient.on.mock.calls.find((c) => c[0] === 'messageCreate')[1];
-    handler(makeMessage(123, 'hi'));
+    handler(makeMessage('123', 'hi'));
 
     // Wait for prompt to be called (queue is processing)
     await vi.waitFor(() => expect(acp.prompt).toHaveBeenCalled());
@@ -279,7 +279,7 @@ describe('DiscordBot', () => {
     });
 
     const handler = mockClient.on.mock.calls.find((c) => c[0] === 'messageCreate')[1];
-    await handler(makeMessage(123, 'hi'));
+    await handler(makeMessage('123', 'hi'));
 
     // Should not have sent 'thinking' — only empty or nothing
     const calls = mockChannel.send.mock.calls;
@@ -300,7 +300,7 @@ describe('DiscordBot', () => {
     });
 
     const handler = mockClient.on.mock.calls.find((c) => c[0] === 'messageCreate')[1];
-    await handler(makeMessage(123, 'hi'));
+    await handler(makeMessage('123', 'hi'));
 
     await vi.advanceTimersByTimeAsync(800);
     await vi.runAllTimersAsync();
@@ -314,7 +314,7 @@ describe('DiscordBot', () => {
     acp.nextUpdate = vi.fn(async () => ({ kind: 'stop', stopReason: 'max_tokens' }));
 
     const handler = mockClient.on.mock.calls.find((c) => c[0] === 'messageCreate')[1];
-    await handler(makeMessage(123, 'hi'));
+    await handler(makeMessage('123', 'hi'));
 
     await vi.waitFor(() => {
       expect(mockChannel.send).toHaveBeenCalledWith('[max_tokens]');
@@ -329,7 +329,7 @@ describe('DiscordBot', () => {
 
   it('sendMessage sends to the channel', async () => {
     const { bot } = createBot();
-    await bot.sendMessage(123, 'hello from cron');
+    await bot.sendMessage('123', 'hello from cron');
     expect(mockChannel.send).toHaveBeenCalledWith('hello from cron');
   });
 
@@ -338,8 +338,8 @@ describe('DiscordBot', () => {
     const { bot, acp } = createBot({ onCommand });
     await bot.start();
     const handler = mockClient.on.mock.calls.find((c) => c[0] === 'messageCreate')[1];
-    await handler(makeMessage(123, '/custom'));
-    expect(onCommand).toHaveBeenCalledWith('/custom', 123);
+    await handler(makeMessage('123', '/custom'));
+    expect(onCommand).toHaveBeenCalledWith('/custom', '123');
     expect(acp.prompt).not.toHaveBeenCalled();
   });
 });

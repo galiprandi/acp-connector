@@ -67,20 +67,19 @@ export async function setup(): Promise<void> {
   console.log('  4. Invite the bot to your server with the OAuth2 URL Generator\n');
   const discordToken = await ask(rl, 'Paste your Discord bot token (or Enter to skip): ');
 
-  let discordChannelId: number | null = null;
+  let discordChannelId: string | null = null;
   if (discordToken) {
     console.log('\nTo find a channel ID:');
     console.log('  1. Enable Developer Mode in Discord (Settings > Advanced)');
     console.log('  2. Right-click the channel you want the bot to use');
     console.log('  3. Click "Copy Channel ID"\n');
     const channelIdStr = await ask(rl, 'Enter your Discord channel ID: ');
-    const channelId = Number(channelIdStr);
-    if (!channelIdStr || Number.isNaN(channelId)) {
-      console.error('\n❌ A valid numeric channel ID is required for Discord.');
+    if (!channelIdStr) {
+      console.error('\n❌ A channel ID is required for Discord.');
       rl.close();
       process.exit(1);
     }
-    discordChannelId = channelId;
+    discordChannelId = channelIdStr;
   }
 
   if (!telegramToken && !discordToken) {

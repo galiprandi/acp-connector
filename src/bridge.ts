@@ -69,7 +69,7 @@ export async function run(): Promise<void> {
     const bot = new DiscordBot({
       acp,
       token: dc.token,
-      allowedChannelIds: dc.allowedChannelIds,
+      allowedChannelIds: dc.allowedChannelIds.map(String),
       agentCmd: config.agentCmd,
       showThoughts: config.showThoughts,
       streaming: config.streaming,
@@ -79,7 +79,8 @@ export async function run(): Promise<void> {
   }
 
   // Use first bot's allowed IDs for cron (legacy: assumes single platform)
-  const cronAllowedIds = tg?.allowedChatIds || dc?.allowedChannelIds || [];
+  // Discord channel IDs are strings (Snowflakes exceed JS safe integer range)
+  const cronAllowedIds: number[] = tg?.allowedChatIds || (dc?.allowedChannelIds || []).map(Number);
 
   const cronManager = new CronManager({
     jobs: config.cron || [],
