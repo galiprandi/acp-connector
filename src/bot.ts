@@ -1,5 +1,7 @@
+import type { ContentBlock } from '@agentclientprotocol/sdk';
 import TelegramBot from 'node-telegram-bot-api';
 import type { AcpClient } from './acp-client';
+import type { MediaHandler } from './media';
 
 const TG_MAX_LEN = 4096;
 const STREAM_BATCH_MS = 800;
@@ -18,6 +20,7 @@ interface BridgeBotOpts {
   agentCmd: string;
   showThoughts?: boolean;
   streaming?: boolean;
+  mediaHandler?: MediaHandler | null;
   onCommand?: ((text: string, chatId: number) => Promise<boolean>) | null;
   onPrompt?: ((text: string, chatId: number) => void) | null;
 }
@@ -25,6 +28,7 @@ interface BridgeBotOpts {
 interface QueueItem {
   chatId: number;
   text: string;
+  blocks?: ContentBlock[];
 }
 
 interface PermissionResponse {
@@ -54,6 +58,7 @@ export class BridgeBot implements PlatformBot {
   private agentCmd: string;
   private showThoughts: boolean;
   private streaming: boolean;
+  private mediaHandler: MediaHandler | null;
   onCommand: ((text: string, chatId: number) => Promise<boolean>) | null;
   private onPrompt: ((text: string, chatId: number) => void) | null;
   private bot: TelegramBot;
@@ -73,6 +78,7 @@ export class BridgeBot implements PlatformBot {
     agentCmd,
     showThoughts = false,
     streaming = true,
+    mediaHandler = null,
     onCommand = null,
     onPrompt = null,
   }: BridgeBotOpts) {
@@ -81,6 +87,7 @@ export class BridgeBot implements PlatformBot {
     this.agentCmd = agentCmd;
     this.showThoughts = showThoughts;
     this.streaming = streaming;
+    this.mediaHandler = mediaHandler;
     this.onCommand = onCommand;
     this.onPrompt = onPrompt;
 
@@ -147,7 +154,11 @@ export class BridgeBot implements PlatformBot {
       !text &&
       (msg.photo || msg.voice || msg.sticker || msg.document || msg.video || msg.audio)
     ) {
-      this.bot.sendMessage(chatId, 'solo texto por ahora');
+      if (!this.mediaHandler) {
+        this.bot.sendMessage(chatId, 'Media no soportado');
+        return;
+      }
+      await this._handleMedia(msg, chatId);
       return;
     }
 
@@ -176,6 +187,67 @@ export class BridgeBot implements PlatformBot {
     }
     this.queue.push({ chatId, text });
     this._processQueue();
+  }
+
+  private async _handleMedia(msg: TelegramBot.Message, chatId: number): Promise<void> {
+    if (!this.mediaHandler) return;
+
+    let fileId: string | null = null;
+    let mimeType = 'application/octet-stream';
+    let ext = 'bin';
+
+    if (msg.photo && msg.photo.length > 0) {
+      // Use highest resolution
+      const photo = msg.photo[msg.photo.length - 1];
+      fileId = photo.file_id;
+      mimeType = 'image/jpeg';
+      ext = 'jpg';
+    } else if (msg.document) {
+      fileId = msg.document.file_id;
+      mimeType = msg.document.mime_type || 'application/octet-stream';
+      ext = msg.document.file_name?.split('.').pop() || 'bin';
+    } else if (msg.sticker) {
+      fileId = msg.sticker.file_id;
+      mimeType = 'image/webp';
+      ext = 'webp';
+    } else if (msg.voice) {
+      fileId = msg.voice.file_id;
+      mimeType = msg.voice.mime_type || 'audio/ogg';
+      ext = 'ogg';
+    } else if (msg.audio) {
+      fileId = msg.audio.file_id;
+      mimeType = msg.audio.mime_type || 'audio/mpeg';
+      ext = 'mp3';
+    } else if (msg.video) {
+      fileId = msg.video.file_id;
+      mimeType = msg.video.mime_type || 'video/mp4';
+      ext = 'mp4';
+    }
+
+    if (!fileId) return;
+
+    const caption = msg.caption || '';
+
+    try {
+      const link = await this.bot.getFileLink(fileId);
+      const downloadFn = async () => {
+        const res = await fetch(link);
+        return Buffer.from(await res.arrayBuffer());
+      };
+      const blocks = await this.mediaHandler.processMedia(
+        downloadFn,
+        mimeType,
+        ext,
+        caption || undefined
+      );
+      const preview = caption ? `📷 ${caption.slice(0, 60)}` : `📷 ${mimeType}`;
+      console.log(`👤 ${preview}`);
+      this.queue.push({ chatId, text: caption || `[📄 file]`, blocks });
+      this._processQueue();
+    } catch (err) {
+      console.error('Media download failed:', (err as Error).message);
+      this.bot.sendMessage(chatId, `Error downloading media: ${(err as Error).message}`);
+    }
   }
 
   private async _handleBuiltinCommand(text: string, chatId: number): Promise<boolean> {
@@ -213,7 +285,7 @@ export class BridgeBot implements PlatformBot {
     if (this.busy || this.queue.length === 0) return;
 
     // biome-ignore lint/style/noNonNullAssertion: queue is non-empty (checked above)
-    const { chatId, text } = this.queue.shift()!;
+    const { chatId, text, blocks } = this.queue.shift()!;
     this.busy = true;
     this.streamBuffer = '';
     this.currentMessageId = null;
@@ -223,7 +295,7 @@ export class BridgeBot implements PlatformBot {
     if (this.onPrompt) this.onPrompt(text, chatId);
 
     try {
-      this.acp.prompt(text);
+      this.acp.prompt(blocks || text);
 
       // biome-ignore lint/suspicious/noExplicitAny: SDK update types are complex and dynamic
       let message: any = null;

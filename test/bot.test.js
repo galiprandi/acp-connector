@@ -88,7 +88,7 @@ describe('BridgeBot', () => {
     await bot.start();
     const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
     await handler({ chat: { id: 123 }, photo: [{ file_id: 'x' }] });
-    expect(mockBot.sendMessage).toHaveBeenCalledWith(123, 'solo texto por ahora');
+    expect(mockBot.sendMessage).toHaveBeenCalledWith(123, 'Media no soportado');
     expect(acp.prompt).not.toHaveBeenCalled();
   });
 

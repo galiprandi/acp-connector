@@ -1,3 +1,4 @@
+import type { ContentBlock } from '@agentclientprotocol/sdk';
 import {
   ActionRowBuilder,
   ButtonBuilder,
@@ -11,6 +12,7 @@ import {
 } from 'discord.js';
 import type { AcpClient } from './acp-client';
 import type { PlatformBot } from './bot';
+import type { MediaHandler } from './media';
 
 const DISCORD_MAX_LEN = 2000;
 const STREAM_BATCH_MS = 800;
@@ -22,6 +24,7 @@ interface DiscordBotOpts {
   agentCmd: string;
   showThoughts?: boolean;
   streaming?: boolean;
+  mediaHandler?: MediaHandler | null;
   onCommand?: ((text: string, chatId: string) => Promise<boolean>) | null;
   onPrompt?: ((text: string, chatId: string) => void) | null;
 }
@@ -29,6 +32,7 @@ interface DiscordBotOpts {
 interface QueueItem {
   channelId: string;
   text: string;
+  blocks?: ContentBlock[];
 }
 
 interface PermissionResponse {
@@ -49,6 +53,7 @@ export class DiscordBot implements PlatformBot {
   private agentCmd: string;
   private showThoughts: boolean;
   private streaming: boolean;
+  private mediaHandler: MediaHandler | null;
   onCommand: ((text: string, chatId: string) => Promise<boolean>) | null;
   private onPrompt: ((text: string, chatId: string) => void) | null;
   private client: Client;
@@ -68,6 +73,7 @@ export class DiscordBot implements PlatformBot {
     agentCmd,
     showThoughts = false,
     streaming = true,
+    mediaHandler = null,
     onCommand = null,
     onPrompt = null,
   }: DiscordBotOpts) {
@@ -77,6 +83,7 @@ export class DiscordBot implements PlatformBot {
     this.agentCmd = agentCmd;
     this.showThoughts = showThoughts;
     this.streaming = streaming;
+    this.mediaHandler = mediaHandler;
     this.onCommand = onCommand;
     this.onPrompt = onPrompt;
 
@@ -151,6 +158,12 @@ export class DiscordBot implements PlatformBot {
 
     if (await this._handleBuiltinCommand(text, channelId)) return;
 
+    // Handle attachments (images, files)
+    if (msg.attachments && msg.attachments.size > 0 && this.mediaHandler) {
+      await this._handleDiscordMedia(msg, channelId);
+      return;
+    }
+
     if (!text || text.trim() === '') return;
 
     if (text.startsWith('/') && this.onCommand) {
@@ -163,6 +176,36 @@ export class DiscordBot implements PlatformBot {
 
     this.queue.push({ channelId, text });
     this._processQueue();
+  }
+
+  private async _handleDiscordMedia(msg: Message, channelId: string): Promise<void> {
+    if (!this.mediaHandler) return;
+    const caption = msg.content || '';
+
+    try {
+      const allBlocks: ContentBlock[] = [];
+      for (const [, attachment] of msg.attachments) {
+        const mimeType = attachment.contentType || 'application/octet-stream';
+        const ext = attachment.name?.split('.').pop() || 'bin';
+        const downloadFn = async () => {
+          const res = await fetch(attachment.url);
+          return Buffer.from(await res.arrayBuffer());
+        };
+        const blocks = await this.mediaHandler.processMedia(downloadFn, mimeType, ext);
+        allBlocks.push(...blocks);
+      }
+      if (caption) {
+        allBlocks.push({ type: 'text', text: caption } as ContentBlock);
+      }
+      const preview = caption ? `📷 ${caption.slice(0, 60)}` : `📷 ${msg.attachments.size} file(s)`;
+      console.log(`👤 ${preview}`);
+      this.queue.push({ channelId, text: caption || '[📄 file]', blocks: allBlocks });
+      this._processQueue();
+    } catch (err) {
+      console.error('Discord media download failed:', (err as Error).message);
+      const channel = this.client.channels.cache.get(channelId) as TextChannel;
+      await channel?.send(`Error downloading media: ${(err as Error).message}`);
+    }
   }
 
   async enqueuePrompt(text: string, chatId?: number | string): Promise<void> {
@@ -210,7 +253,7 @@ export class DiscordBot implements PlatformBot {
     if (this.busy || this.queue.length === 0) return;
 
     // biome-ignore lint/style/noNonNullAssertion: queue is non-empty (checked above)
-    const { channelId, text } = this.queue.shift()!;
+    const { channelId, text, blocks } = this.queue.shift()!;
     this.busy = true;
     this.streamBuffer = '';
     this.currentMessage = null;
@@ -220,7 +263,7 @@ export class DiscordBot implements PlatformBot {
     if (this.onPrompt) this.onPrompt(text, channelId);
 
     try {
-      this.acp.prompt(text);
+      this.acp.prompt(blocks || text);
 
       // biome-ignore lint/suspicious/noExplicitAny: SDK update types are complex and dynamic
       let message: any = null;

@@ -6,11 +6,13 @@ import type {
   ActiveSessionMessage,
   AgentCapabilities,
   ClientContext,
+  ContentBlock,
   InitializeResponse,
   LoadSessionRequest,
   NewSessionRequest,
   NewSessionResponse,
   PermissionOption,
+  PromptCapabilities,
   PromptResponse,
   ProtocolVersion,
   RequestPermissionRequest,
@@ -115,6 +117,7 @@ export class AcpClient {
   protocolVersion: ProtocolVersion | null;
   sessionId: string | null;
   modes: SessionModeState | null | undefined;
+  promptCapabilities: PromptCapabilities | null;
   private _keepAlive: Promise<void> | null;
   private _disconnect: (() => void) | null;
   private _sessionReady: Promise<void> | null;
@@ -143,6 +146,7 @@ export class AcpClient {
     this.protocolVersion = null;
     this.sessionId = null;
     this.modes = null;
+    this.promptCapabilities = null;
     this._keepAlive = null;
     this._disconnect = null;
     this._sessionReady = null;
@@ -218,6 +222,7 @@ export class AcpClient {
           clientCapabilities: {},
         });
         this.protocolVersion = initResult.protocolVersion;
+        this.promptCapabilities = initResult.agentCapabilities?.promptCapabilities || null;
 
         let session: ActiveSession;
         if (this.resumeSessionId) {
@@ -288,7 +293,7 @@ export class AcpClient {
     return { outcome: { outcome: 'cancelled' } };
   }
 
-  async prompt(text: string): Promise<PromptResponse> {
+  async prompt(text: string | ContentBlock | ContentBlock[]): Promise<PromptResponse> {
     if (!this.session) throw new Error('ACP session not started');
     return this.session.prompt(text);
   }

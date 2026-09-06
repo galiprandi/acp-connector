@@ -26,6 +26,10 @@ export interface HttpConfig {
   rateLimit?: number;
 }
 
+export interface MediaConfig {
+  uploadsDir?: string;
+}
+
 export interface TelegramPlatformConfig {
   token: string;
   allowedChatIds: number[];
@@ -57,6 +61,7 @@ export interface BridgeConfig {
   cron?: CronJob[];
   routines?: Routine[];
   http?: HttpConfig;
+  media?: MediaConfig;
 }
 
 export const defaultConfigPath = resolve(process.cwd(), 'acp-connector.jsonc');

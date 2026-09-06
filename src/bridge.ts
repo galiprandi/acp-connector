@@ -5,6 +5,7 @@ import { type BridgeConfig, loadConfig } from './config';
 import { CronManager } from './cron';
 import { DiscordBot } from './discord';
 import { HttpServer } from './http';
+import { MediaHandler } from './media';
 import { RoutineManager } from './routines';
 
 function printBanner(): void {
@@ -156,6 +157,23 @@ export async function run(): Promise<void> {
   } catch (err) {
     console.error('Failed to start ACP:', (err as Error).message);
     process.exit(1);
+  }
+
+  // Create media handler now that we know agent capabilities
+  const supportsImage = acp.promptCapabilities?.image === true;
+  const mediaHandler = new MediaHandler({
+    uploadsDir: config.media?.uploadsDir || '/tmp/acp-connector-uploads',
+    supportsImage,
+  });
+  // Inject media handler into bots
+  for (const bot of bots) {
+    if (bot instanceof BridgeBot) {
+      // biome-ignore lint/suspicious/noExplicitAny: inject mediaHandler post-construction
+      (bot as any).mediaHandler = mediaHandler;
+    } else if (bot instanceof DiscordBot) {
+      // biome-ignore lint/suspicious/noExplicitAny: inject mediaHandler post-construction
+      (bot as any).mediaHandler = mediaHandler;
+    }
   }
 
   // Start all bots

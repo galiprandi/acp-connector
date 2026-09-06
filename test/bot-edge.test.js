@@ -181,28 +181,28 @@ describe('BridgeBot edge cases', () => {
     const { bot } = createBot();
     await bot.start();
     await sendMessage(bot, { chat: { id: 123 }, photo: [{ file_id: 'x' }] });
-    expect(mockBot.sendMessage).toHaveBeenCalledWith(123, 'solo texto por ahora');
+    expect(mockBot.sendMessage).toHaveBeenCalledWith(123, 'Media no soportado');
   });
 
   it('rejects voice messages', async () => {
     const { bot } = createBot();
     await bot.start();
     await sendMessage(bot, { chat: { id: 123 }, voice: { file_id: 'x' } });
-    expect(mockBot.sendMessage).toHaveBeenCalledWith(123, 'solo texto por ahora');
+    expect(mockBot.sendMessage).toHaveBeenCalledWith(123, 'Media no soportado');
   });
 
   it('rejects sticker messages', async () => {
     const { bot } = createBot();
     await bot.start();
     await sendMessage(bot, { chat: { id: 123 }, sticker: { file_id: 'x' } });
-    expect(mockBot.sendMessage).toHaveBeenCalledWith(123, 'solo texto por ahora');
+    expect(mockBot.sendMessage).toHaveBeenCalledWith(123, 'Media no soportado');
   });
 
   it('rejects document messages', async () => {
     const { bot } = createBot();
     await bot.start();
     await sendMessage(bot, { chat: { id: 123 }, document: { file_id: 'x' } });
-    expect(mockBot.sendMessage).toHaveBeenCalledWith(123, 'solo texto por ahora');
+    expect(mockBot.sendMessage).toHaveBeenCalledWith(123, 'Media no soportado');
   });
 
   it('rejects unauthorized chat', async () => {
