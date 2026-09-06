@@ -247,6 +247,7 @@ export class RoutineManager {
       );
       return true;
     }
+    console.log(`📝 routine "${name}" fired`);
     this.enqueue(routine.prompt, chatId);
     return true;
   }
