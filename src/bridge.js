@@ -6,9 +6,9 @@ import { loadConfig } from './config.js';
 function printBanner() {
   const title = 'acp-connector';
   const inner = `  ${title}  `;
-  const top = '┌' + '─'.repeat(inner.length) + '┐';
-  const mid = '│' + inner + '│';
-  const bot = '└' + '─'.repeat(inner.length) + '┘';
+  const top = `┌${'─'.repeat(inner.length)}┐`;
+  const mid = `│${inner}│`;
+  const bot = `└${'─'.repeat(inner.length)}┘`;
   console.log(top);
   console.log(mid);
   console.log(bot);

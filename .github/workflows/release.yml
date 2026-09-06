@@ -1,19 +1,21 @@
-name: CI
+name: Release
 
 on:
   push:
     branches: [main]
-  pull_request:
-    branches: [main]
 
 permissions:
-  contents: read
+  contents: write
+  id-token: write
+  pull-requests: write
 
 jobs:
-  check:
+  release:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: pnpm/action-setup@v4
         with:
@@ -24,15 +26,18 @@ jobs:
           node-version: 22
           cache: pnpm
 
+      - run: npm install -g npm@latest
+
       - run: pnpm install --frozen-lockfile
 
       - name: Lint
         run: pnpm lint
 
       - name: Test
-        run: pnpm test:coverage
+        run: pnpm test
 
-      - name: Commitlint
-        if: github.event_name == 'pull_request'
-        run: |
-          npx commitlint --from origin/main --to HEAD --verbose
+      - name: Release
+        run: npx semantic-release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}

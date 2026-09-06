@@ -8,9 +8,25 @@
   },
   "scripts": {
     "start": "node src/index.js",
-    "setup": "node src/index.js setup"
+    "setup": "node src/index.js setup",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write .",
+    "format": "biome format --write .",
+    "release": "semantic-release",
+    "release:dry": "semantic-release --dry-run",
+    "prepare": "husky"
   },
-  "keywords": ["acp", "agent-client-protocol", "telegram", "bridge", "ai", "coding-agent"],
+  "keywords": [
+    "acp",
+    "agent-client-protocol",
+    "telegram",
+    "bridge",
+    "ai",
+    "coding-agent"
+  ],
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -32,8 +48,22 @@
   ],
   "dependencies": {
     "@agentclientprotocol/sdk": "^1.4.0",
-    "node-telegram-bot-api": "^0.66.0",
+    "dotenv": "^16.4.0",
     "node-cron": "^4.0.0",
-    "dotenv": "^16.4.0"
+    "node-telegram-bot-api": "^0.66.0"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.12",
+    "@commitlint/config-conventional": "^21.2.2",
+    "@semantic-release/changelog": "^7.0.0",
+    "@semantic-release/git": "^11.0.1",
+    "@semantic-release/github": "^12.0.9",
+    "@semantic-release/npm": "^13.1.5",
+    "@vitest/coverage-v8": "^5.0.0",
+    "commitlint": "^21.2.2",
+    "conventional-changelog-conventionalcommits": "^10.4.0",
+    "husky": "^9.1.7",
+    "semantic-release": "^25.0.9",
+    "vitest": "^5.0.0"
   }
 }

@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 /**
@@ -110,5 +110,5 @@ export function loadConfig() {
  */
 export function saveConfig(config) {
   const json = JSON.stringify(config, null, 2);
-  writeFileSync(defaultConfigPath, json + '\n', 'utf8');
+  writeFileSync(defaultConfigPath, `${json}\n`, 'utf8');
 }

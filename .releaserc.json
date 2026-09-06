@@ -1,0 +1,45 @@
+{
+  "branches": [
+    { "name": "main", "channel": "latest" }
+  ],
+  "ci": true,
+  "plugins": [
+    "@semantic-release/commit-analyzer",
+    "@semantic-release/release-notes-generator",
+    "@semantic-release/changelog",
+    [
+      "@semantic-release/npm",
+      {
+        "npmPublish": true,
+        "tarballDir": "dist"
+      }
+    ],
+    [
+      "@semantic-release/git",
+      {
+        "assets": ["package.json", "package-lock.json", "CHANGELOG.md"],
+        "message": "chore(release): ${nextRelease.version} [skip ci]\n\n${nextRelease.notes}"
+      }
+    ],
+    [
+      "@semantic-release/github",
+      {
+        "assets": ["dist/*.tgz"]
+      }
+    ]
+  ],
+  "preset": "conventionalcommits",
+  "releaseRules": [
+    { "type": "feat", "release": "minor" },
+    { "type": "fix", "release": "patch" },
+    { "type": "perf", "release": "patch" },
+    { "type": "docs", "release": "patch" },
+    { "type": "refactor", "release": "patch" },
+    { "type": "test", "release": "patch" },
+    { "type": "chore", "release": false },
+    { "type": "build", "release": false },
+    { "type": "ci", "release": false },
+    { "type": "style", "release": false },
+    { "type": "revert", "release": "patch" }
+  ]
+}
