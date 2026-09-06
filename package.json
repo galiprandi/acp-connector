@@ -45,7 +45,7 @@
     "dist/",
     "README.md",
     "AGENTS.md",
-    ".config.example.jsonc"
+    "acp-connector.example.jsonc"
   ],
   "dependencies": {
     "@agentclientprotocol/sdk": "^1.4.0",

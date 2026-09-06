@@ -2,13 +2,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const validConfig = {
   agentCmd: 'acp-agent serve',
-  telegramToken: 'test-token',
-  allowedChatIds: [123],
+  platforms: {
+    telegram: {
+      token: 'test-token',
+      allowedChatIds: [123],
+    },
+  },
 };
 
 let mockConfig = null;
 
-vi.mock('../src/config.js', () => ({
+vi.mock('../src/config.ts', () => ({
   loadConfig: () => mockConfig,
 }));
 

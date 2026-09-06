@@ -62,7 +62,7 @@ To release a new version:
 
 ## Config
 
-Single `.config.jsonc` file in cwd. See `.config.example.jsonc` for all options.
+Single `acp-connector.jsonc` file in cwd. See `acp-connector.example.jsonc` for all options.
 
 ## Architecture
 
@@ -91,5 +91,5 @@ src/
 
 - **Thin bridge**: no agent loop, no model provider, no tool ecosystem
 - **Agent-agnostic**: no hardcoded agent references anywhere
-- **Config is truth**: all state in `.config.jsonc`, persisted by routines
+- **Config is truth**: all state in `acp-connector.jsonc`, persisted by routines
 - **Serialized queue**: one prompt at a time, no concurrent prompts

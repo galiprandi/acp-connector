@@ -2,7 +2,7 @@ import { existsSync, rmSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const tmpConfigPath = resolve(process.cwd(), '.config.jsonc');
+const tmpConfigPath = resolve(process.cwd(), 'acp-connector.jsonc');
 
 const mockLoadConfig = vi.fn(() => ({ routines: [], cron: [] }));
 const mockSaveConfig = vi.fn();

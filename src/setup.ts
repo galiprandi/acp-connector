@@ -10,7 +10,7 @@ export async function setup(): Promise<void> {
 
   console.log('acp-connector setup');
   console.log('═══════════════════════════════════════════════════════════');
-  console.log('This creates a .config.jsonc here so you can talk to your');
+  console.log('This creates a acp-connector.jsonc here so you can talk to your');
   console.log("coding agent from Telegram. You'll need:");
   console.log('  • A Telegram bot (create one with @BotFather)');
   console.log('  • An ACP-compatible agent installed on this machine');
@@ -76,8 +76,12 @@ export async function setup(): Promise<void> {
   const config: BridgeConfig = {
     agentCmd,
     agentCwd: process.cwd(),
-    telegramToken,
-    allowedChatIds: [chatId],
+    platforms: {
+      telegram: {
+        token: telegramToken,
+        allowedChatIds: [chatId],
+      },
+    },
     sessionConfigPath: sessionConfigPath || undefined,
     showThoughts,
     streaming: true,
@@ -88,7 +92,7 @@ export async function setup(): Promise<void> {
 
   saveConfig(config);
 
-  console.log('\n✅ Done! Saved .config.jsonc in this directory.');
+  console.log('\n✅ Done! Saved acp-connector.jsonc in this directory.');
   console.log('\nNow start the bridge:');
   console.log('  npx acp-connector');
   console.log('\nThen send a message to your bot on Telegram.');

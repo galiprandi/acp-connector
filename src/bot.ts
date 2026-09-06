@@ -147,7 +147,7 @@ export class BridgeBot implements PlatformBot {
           [
             `Your chat ID is: ${chatId}`,
             '',
-            'To allow this chat, add it to .config.jsonc:',
+            'To allow this chat, add it to acp-connector.jsonc:',
             '',
             `  "allowedChatIds": [${chatId}]`,
             '',

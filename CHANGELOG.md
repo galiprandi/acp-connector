@@ -31,7 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - All modules are agent-agnostic (no hardcoded agent references)
-- Config is the single source of truth (`.config.jsonc`)
+- Config is the single source of truth (`acp-connector.jsonc`)
 - Config loader/saver accepts optional path parameter (testable)
 - Cron parser takes 5-token schedule (was 1-token, broke multi-field cron)
 - HTTP `/prompt` accepts raw body when no `text` field (backward compatible)
@@ -76,7 +76,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Project scaffold: package.json, bin entry, ES modules
-- Config loader for `.config.jsonc` (JSONC parser with comment/trailing comma stripping)
+- Config loader for `acp-connector.jsonc` (JSONC parser with comment/trailing comma stripping)
 - Interactive setup wizard (`acp-connector setup`) — prompts for Telegram token, agent command, chat ID
 - Bridge entrypoint with startup banner and placeholder modules
 - Example config (`.config.example.jsonc`) with documented options

@@ -6,8 +6,12 @@ import { loadConfig, saveConfig } from '../src/config.ts';
 
 const validConfig = {
   agentCmd: 'acp-agent serve',
-  telegramToken: 'tok',
-  allowedChatIds: [123],
+  platforms: {
+    telegram: {
+      token: 'tok',
+      allowedChatIds: [123],
+    },
+  },
 };
 
 describe('config edge cases', () => {
@@ -16,7 +20,7 @@ describe('config edge cases', () => {
 
   beforeEach(() => {
     tmpDir = mkdtempSync(join(tmpdir(), 'acp-cfg-edge-'));
-    cfgPath = join(tmpDir, 'test.config.jsonc');
+    cfgPath = join(tmpDir, 'test.acp-connector.jsonc');
   });
 
   afterEach(() => {
@@ -56,14 +60,17 @@ describe('config edge cases', () => {
     expect(() => loadConfig(cfgPath)).toThrow(/agentCmd/i);
   });
 
-  it('missing required fields (no telegramToken) throws a validation error', () => {
-    writeCfg(JSON.stringify({ agentCmd: 'acp-agent serve', allowedChatIds: [123] }));
-    expect(() => loadConfig(cfgPath)).toThrow(/telegramToken/i);
+  it('missing required fields (no platforms or telegramToken) throws a validation error', () => {
+    writeCfg(JSON.stringify({ agentCmd: 'acp-agent serve' }));
+    expect(() => loadConfig(cfgPath)).toThrow(/platforms\.telegram|telegramToken/i);
   });
 
-  it('missing required fields (no allowedChatIds) throws a validation error', () => {
-    writeCfg(JSON.stringify({ agentCmd: 'acp-agent serve', telegramToken: 'tok' }));
-    expect(() => loadConfig(cfgPath)).toThrow(/allowedChatIds/i);
+  it('missing allowedChatIds in platforms.telegram defaults to empty array', () => {
+    writeCfg(
+      JSON.stringify({ agentCmd: 'acp-agent serve', platforms: { telegram: { token: 'tok' } } })
+    );
+    const cfg = loadConfig(cfgPath);
+    expect(cfg.platforms.telegram.allowedChatIds).toEqual([]);
   });
 
   it('extra unknown fields are preserved safely', () => {
@@ -144,7 +151,7 @@ describe('config edge cases', () => {
   });
 
   it('saveConfig writes to a path inside a non-existent nested dir fails predictably', () => {
-    const nested = join(tmpDir, 'sub', 'deep', 'test.config.jsonc');
+    const nested = join(tmpDir, 'sub', 'deep', 'test.acp-connector.jsonc');
     expect(() => saveConfig(validConfig, nested)).toThrow();
   });
 
@@ -152,10 +159,12 @@ describe('config edge cases', () => {
     expect(loadConfig(join(tmpDir, 'nope.jsonc'))).toBeNull();
   });
 
-  it('allowedChatIds as non-array throws validation error', () => {
+  it('legacy telegramToken without platforms migrates to platforms format', () => {
     writeCfg(
-      JSON.stringify({ agentCmd: 'acp-agent serve', telegramToken: 'tok', allowedChatIds: 123 })
+      JSON.stringify({ agentCmd: 'acp-agent serve', telegramToken: 'tok', allowedChatIds: [123] })
     );
-    expect(() => loadConfig(cfgPath)).toThrow(/allowedChatIds/i);
+    const cfg = loadConfig(cfgPath);
+    expect(cfg.platforms.telegram.token).toBe('tok');
+    expect(cfg.platforms.telegram.allowedChatIds).toEqual([123]);
   });
 });

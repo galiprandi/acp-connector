@@ -3,7 +3,12 @@ import { resolve } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { defaultConfigPath, loadConfig, saveConfig } from '../src/config.ts';
 
-const tmpConfigPath = resolve(process.cwd(), '.config.jsonc');
+const tmpConfigPath = resolve(process.cwd(), 'acp-connector.jsonc');
+
+const validConfig = {
+  agentCmd: 'acp-agent serve',
+  platforms: { telegram: { token: 'tok', allowedChatIds: [123] } },
+};
 
 describe('config', () => {
   afterEach(() => {
@@ -15,14 +20,11 @@ describe('config', () => {
   });
 
   it('loads a simple config', () => {
-    writeFileSync(
-      tmpConfigPath,
-      JSON.stringify({ agentCmd: 'acp-agent serve', telegramToken: 'tok', allowedChatIds: [123] })
-    );
+    writeFileSync(tmpConfigPath, JSON.stringify(validConfig));
     const cfg = loadConfig();
     expect(cfg).not.toBeNull();
     expect(cfg.agentCmd).toBe('acp-agent serve');
-    expect(cfg.allowedChatIds).toEqual([123]);
+    expect(cfg.platforms.telegram.allowedChatIds).toEqual([123]);
   });
 
   it('strips line comments', () => {
@@ -31,8 +33,7 @@ describe('config', () => {
       `{
   // agent command
   "agentCmd": "acp-agent serve",
-  "telegramToken": "tok",
-  "allowedChatIds": [123]
+  "platforms": { "telegram": { "token": "tok", "allowedChatIds": [123] } }
 }`
     );
     const cfg = loadConfig();
@@ -46,8 +47,7 @@ describe('config', () => {
       `{
   /* block comment */
   "agentCmd": "acp-agent serve",
-  "telegramToken": "tok",
-  "allowedChatIds": [123]
+  "platforms": { "telegram": { "token": "tok", "allowedChatIds": [123] } }
 }`
     );
     const cfg = loadConfig();
@@ -60,13 +60,12 @@ describe('config', () => {
       tmpConfigPath,
       `{
   "agentCmd": "acp-agent serve",
-  "telegramToken": "tok",
-  "allowedChatIds": [123,],
+  "platforms": { "telegram": { "token": "tok", "allowedChatIds": [123,] } },
 }`
     );
     const cfg = loadConfig();
     expect(cfg).not.toBeNull();
-    expect(cfg.allowedChatIds).toEqual([123]);
+    expect(cfg.platforms.telegram.allowedChatIds).toEqual([123]);
   });
 
   it('does not strip // inside strings', () => {
@@ -74,8 +73,7 @@ describe('config', () => {
       tmpConfigPath,
       `{
   "agentCmd": "https://example.com",
-  "telegramToken": "tok",
-  "allowedChatIds": [123]
+  "platforms": { "telegram": { "token": "tok", "allowedChatIds": [123] } }
 }`
     );
     const cfg = loadConfig();
@@ -84,13 +82,13 @@ describe('config', () => {
   });
 
   it('saveConfig writes valid JSON', () => {
-    saveConfig({ agentCmd: 'acp-agent serve', telegramToken: 'tok', allowedChatIds: [123] });
+    saveConfig(validConfig);
     const cfg = loadConfig();
     expect(cfg).not.toBeNull();
     expect(cfg.agentCmd).toBe('acp-agent serve');
   });
 
   it('defaultConfigPath resolves to cwd', () => {
-    expect(defaultConfigPath).toBe(resolve(process.cwd(), '.config.jsonc'));
+    expect(defaultConfigPath).toBe(resolve(process.cwd(), 'acp-connector.jsonc'));
   });
 });

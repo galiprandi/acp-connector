@@ -125,9 +125,9 @@ Send a message to your bot on Telegram. Your agent will respond. That's it.
 
 ## ⚙️ Configuration
 
-All configuration lives in a single `.config.jsonc` file in your working directory. The setup wizard creates it for you, or you can write it manually.
+All configuration lives in a single `acp-connector.jsonc` file in your working directory. The setup wizard creates it for you, or you can write it manually.
 
-See [`.config.example.jsonc`](.config.example.jsonc) for the full reference.
+See [`acp-connector.example.jsonc`](acp-connector.example.jsonc) for the full reference.
 
 | Option | Type | Required | Default | Description |
 |---|---|---|---|---|
@@ -146,7 +146,7 @@ See [`.config.example.jsonc`](.config.example.jsonc) for the full reference.
 
 ### Cron jobs
 
-Schedule prompts to run automatically. Configure in `.config.jsonc` or manage via Telegram commands.
+Schedule prompts to run automatically. Configure in `acp-connector.jsonc` or manage via Telegram commands.
 
 ```jsonc
 {
@@ -175,7 +175,7 @@ Or from Telegram:
 | `chatId` | `number` | no | Chat to send the response to (default: first allowed) |
 | `enabled` | `boolean` | no | `true` (set `false` to pause) |
 
-All changes persist to `.config.jsonc` automatically.
+All changes persist to `acp-connector.jsonc` automatically.
 
 ### Routines
 

@@ -26,11 +26,29 @@ export interface HttpConfig {
   rateLimit?: number;
 }
 
+export interface TelegramPlatformConfig {
+  token: string;
+  allowedChatIds: number[];
+}
+
+export interface DiscordPlatformConfig {
+  token: string;
+  allowedChannelIds: number[];
+}
+
+export interface PlatformsConfig {
+  telegram?: TelegramPlatformConfig;
+  discord?: DiscordPlatformConfig;
+}
+
 export interface BridgeConfig {
   agentCmd: string;
   agentCwd?: string;
-  telegramToken: string;
-  allowedChatIds: number[];
+  /** @deprecated use platforms.telegram.token */
+  telegramToken?: string;
+  /** @deprecated use platforms.telegram.allowedChatIds */
+  allowedChatIds?: number[];
+  platforms?: PlatformsConfig;
   sessionId?: string;
   sessionConfigPath?: string;
   showThoughts?: boolean;
@@ -41,12 +59,10 @@ export interface BridgeConfig {
   http?: HttpConfig;
 }
 
-export const defaultConfigPath = resolve(process.cwd(), '.config.jsonc');
+export const defaultConfigPath = resolve(process.cwd(), 'acp-connector.jsonc');
 
 const REQUIRED_FIELDS: Record<string, string> = {
   agentCmd: 'string',
-  telegramToken: 'string',
-  allowedChatIds: 'object',
 };
 
 function stripJsonc(text: string): string {
@@ -109,9 +125,29 @@ function validateConfig(config: unknown): asserts config is BridgeConfig {
       throw new Error(`config field "${field}" must be of type ${expectedType}`);
     }
   }
-  if (!Array.isArray(obj.allowedChatIds)) {
-    throw new Error('config field "allowedChatIds" must be an array');
+
+  // Must have either platforms.telegram or legacy telegramToken
+  const hasPlatforms = obj.platforms && typeof obj.platforms === 'object';
+  const hasLegacy = typeof obj.telegramToken === 'string';
+  if (!hasPlatforms && !hasLegacy) {
+    throw new Error('config must have either platforms.telegram.token or telegramToken');
   }
+}
+
+function migrateLegacyConfig(config: BridgeConfig): BridgeConfig {
+  if (config.telegramToken && !config.platforms?.telegram) {
+    console.warn('⚠️ telegramToken at root is deprecated. Move to platforms.telegram.token.');
+    config.platforms = config.platforms || {};
+    config.platforms.telegram = {
+      token: config.telegramToken,
+      allowedChatIds: config.allowedChatIds || [],
+    };
+  }
+  // Ensure allowedChatIds exists in platforms.telegram
+  if (config.platforms?.telegram && !config.platforms.telegram.allowedChatIds) {
+    config.platforms.telegram.allowedChatIds = [];
+  }
+  return config;
 }
 
 export function loadConfig(path: string = defaultConfigPath): BridgeConfig | null {
@@ -126,7 +162,7 @@ export function loadConfig(path: string = defaultConfigPath): BridgeConfig | nul
     throw new Error(`Invalid config JSON in ${path}: ${(err as Error).message}`);
   }
   validateConfig(parsed);
-  return parsed;
+  return migrateLegacyConfig(parsed);
 }
 
 export function saveConfig(config: BridgeConfig, path: string = defaultConfigPath): void {

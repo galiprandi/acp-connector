@@ -25,7 +25,7 @@ export async function run(): Promise<void> {
     process.exit(1);
   }
   if (!config) {
-    console.error('No .config.jsonc found. Run: npx acp-connector setup');
+    console.error('No acp-connector.jsonc found. Run: npx acp-connector setup');
     process.exit(1);
   }
 
@@ -38,10 +38,16 @@ export async function run(): Promise<void> {
     sessionId: config.sessionId,
   });
 
+  const tg = config.platforms?.telegram;
+  if (!tg) {
+    console.error('No Telegram platform configured. Run: npx acp-connector setup');
+    process.exit(1);
+  }
+
   const bot = new BridgeBot({
     acp,
-    telegramToken: config.telegramToken,
-    allowedChatIds: config.allowedChatIds,
+    telegramToken: tg.token,
+    allowedChatIds: tg.allowedChatIds,
     agentCmd: config.agentCmd,
     showThoughts: config.showThoughts,
     streaming: config.streaming,
@@ -49,7 +55,7 @@ export async function run(): Promise<void> {
 
   const cronManager = new CronManager({
     jobs: config.cron || [],
-    allowedChatIds: config.allowedChatIds,
+    allowedChatIds: tg.allowedChatIds,
     enqueue: (text, chatId) => bot.enqueuePrompt(text, chatId),
   });
 
@@ -96,7 +102,7 @@ export async function run(): Promise<void> {
   console.log('');
   console.log(`  🆔  Session:  ${acp.sessionId}${config.sessionId ? ' (restored)' : ''}`);
   console.log(`  ⚙️  Mode:     ${mode}`);
-  console.log(`  💬  Chats:    ${config.allowedChatIds.join(', ') || 'none (setup mode)'}`);
+  console.log(`  💬  Chats:    ${tg.allowedChatIds.join(', ') || 'none (setup mode)'}`);
   console.log(`  🖥️  Command:  ${config.agentCmd}`);
   if (config.sessionConfigPath) {
     console.log(`  📋  Config:   ${config.sessionConfigPath}`);

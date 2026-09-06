@@ -5,9 +5,18 @@
   // Working directory for the agent subprocess (default: cwd)
   "agentCwd": ".",
 
-  // Telegram
-  "telegramToken": "YOUR_BOT_TOKEN",
-  "allowedChatIds": [123456789],
+  // Platforms — at least one is required
+  "platforms": {
+    "telegram": {
+      "token": "YOUR_BOT_TOKEN",
+      "allowedChatIds": [123456789]
+    }
+    // Discord (optional, v0.2.0+)
+    // "discord": {
+    //   "token": "YOUR_DISCORD_BOT_TOKEN",
+    //   "allowedChannelIds": [123456789]
+    // }
+  },
 
   // ACP session (optional — omit to create a new session each run)
   // "sessionId": "some-session-id",
