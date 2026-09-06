@@ -439,6 +439,77 @@ pkill -f acp-connector
 2. Check the bridge console for errors
 3. Ensure your chat ID is in `allowedChatIds`
 
+## 🔌 MCP servers
+
+The bridge passes `sessionConfigPath` to the agent unchanged. MCP servers (stdio, HTTP, SSE, or ACP) are configured in that file — the bridge doesn't interpret them.
+
+### Stdio
+
+```jsonc
+{
+  "mcpServers": [
+    {
+      "type": "stdio",
+      "name": "filesystem",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/home/user"],
+      "env": []
+    }
+  ]
+}
+```
+
+### HTTP
+
+Requires the agent to advertise `mcp.http` capability.
+
+```jsonc
+{
+  "mcpServers": [
+    {
+      "type": "http",
+      "name": "my-api",
+      "url": "https://api.example.com/mcp",
+      "headers": [
+        { "name": "Authorization", "value": "Bearer your-token" }
+      ]
+    }
+  ]
+}
+```
+
+### SSE
+
+Requires the agent to advertise `mcp.sse` capability.
+
+```jsonc
+{
+  "mcpServers": [
+    {
+      "type": "sse",
+      "name": "events",
+      "url": "https://api.example.com/sse",
+      "headers": []
+    }
+  ]
+}
+```
+
+### Mixed
+
+You can combine multiple transports in the same config:
+
+```jsonc
+{
+  "mcpServers": [
+    { "type": "stdio", "name": "fs", "command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"], "env": [] },
+    { "type": "http", "name": "api", "url": "https://api.example.com/mcp", "headers": [] }
+  ]
+}
+```
+
+> The bridge does not validate MCP capabilities — if the agent doesn't support a transport, it will reject the session. Check your agent's `mcpCapabilities` in its docs.
+
 ### MCP servers not loading
 
 If you configured `sessionConfigPath`, verify the file exists and is valid JSONC. The bridge logs errors reading it but doesn't crash.
