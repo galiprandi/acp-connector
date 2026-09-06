@@ -72,7 +72,7 @@ describe('HttpServer edge cases', () => {
     const res = await fetchServer(server, 'POST', '/prompt', 'plain text not json');
     expect(res.status).toBe(200);
     expect(res.body.ok).toBe(true);
-    expect(enqueue).toHaveBeenCalledWith('plain text not json', undefined);
+    expect(enqueue).toHaveBeenCalledWith('plain text not json', undefined, undefined);
   });
 
   it('POST /prompt with empty text returns 400', async () => {
@@ -100,7 +100,7 @@ describe('HttpServer edge cases', () => {
     const res = await fetchServer(server, 'POST', '/prompt', { text: 'hello' });
     expect(res.status).toBe(200);
     expect(res.body.ok).toBe(true);
-    expect(enqueue).toHaveBeenCalledWith('hello', undefined);
+    expect(enqueue).toHaveBeenCalledWith('hello', undefined, undefined);
   });
 
   it('GET /unknown route returns 404', async () => {
@@ -188,7 +188,7 @@ describe('HttpServer edge cases', () => {
     });
     expect(res.status).toBe(200);
     expect(res.body.ok).toBe(true);
-    expect(enqueue).toHaveBeenCalledWith('hello', 42);
+    expect(enqueue).toHaveBeenCalledWith('hello', 42, undefined);
   });
 
   it('POST /prompt with non-string text uses raw body as prompt', async () => {
@@ -229,7 +229,7 @@ describe('HttpServer edge cases', () => {
     cleanup.push(() => server.stop());
     const res = await fetchServer(server, 'POST', '/prompt', { text: 'hello' });
     expect(res.status).toBe(200);
-    expect(enqueue).toHaveBeenCalledWith('hello', undefined);
+    expect(enqueue).toHaveBeenCalledWith('hello', undefined, undefined);
   });
 
   it('POST /prompt with raw body + query params adds context', async () => {
@@ -288,7 +288,7 @@ describe('HttpServer edge cases', () => {
       }
     );
     expect(res.status).toBe(200);
-    expect(enqueue).toHaveBeenCalledWith('hello', undefined);
+    expect(enqueue).toHaveBeenCalledWith('hello', undefined, undefined);
   });
 
   it('GET /health with auth token configured requires auth', async () => {
@@ -371,5 +371,92 @@ describe('HttpServer edge cases', () => {
     const prompt = enqueue.mock.calls[0][0];
     expect(prompt).toContain('x-custom');
     expect(prompt).toContain('custom-value');
+  });
+
+  it('POST /prompt with image file passes ContentBlocks', async () => {
+    const { server, enqueue } = createServer();
+    await server.start();
+    cleanup.push(() => server.stop());
+    await fetchServer(server, 'POST', '/prompt', {
+      text: 'analiza esta imagen',
+      files: [{ data: 'iVBORw0KGgo=', mimeType: 'image/png', filename: 'screenshot.png' }],
+    });
+    expect(enqueue).toHaveBeenCalledTimes(1);
+    const [, , blocks] = enqueue.mock.calls[0];
+    expect(Array.isArray(blocks)).toBe(true);
+    expect(blocks[0].type).toBe('image');
+    expect(blocks[0].data).toBe('iVBORw0KGgo=');
+    expect(blocks[0].mimeType).toBe('image/png');
+    // Text appended as last block
+    expect(blocks[1].type).toBe('text');
+    expect(blocks[1].text).toBe('analiza esta imagen');
+  });
+
+  it('POST /prompt with non-image file creates resource_link', async () => {
+    const { server, enqueue } = createServer();
+    await server.start();
+    cleanup.push(() => server.stop());
+    await fetchServer(server, 'POST', '/prompt', {
+      text: 'lee este PDF',
+      files: [{ data: 'JVBERi0=', mimeType: 'application/pdf', filename: 'doc.pdf' }],
+    });
+    const [, , blocks] = enqueue.mock.calls[0];
+    expect(blocks[0].type).toBe('resource_link');
+    expect(blocks[0].name).toBe('doc.pdf');
+    expect(blocks[0].mimeType).toBe('application/pdf');
+  });
+
+  it('POST /prompt with multiple files creates multiple blocks', async () => {
+    const { server, enqueue } = createServer();
+    await server.start();
+    cleanup.push(() => server.stop());
+    await fetchServer(server, 'POST', '/prompt', {
+      text: 'compara estas dos imagenes',
+      files: [
+        { data: 'img1base64', mimeType: 'image/png' },
+        { data: 'img2base64', mimeType: 'image/jpeg' },
+      ],
+    });
+    const [, , blocks] = enqueue.mock.calls[0];
+    expect(blocks.length).toBe(3); // 2 images + 1 text
+    expect(blocks[0].type).toBe('image');
+    expect(blocks[1].type).toBe('image');
+    expect(blocks[2].type).toBe('text');
+  });
+
+  it('POST /prompt with files but no text still enqueues', async () => {
+    const { server, enqueue } = createServer();
+    await server.start();
+    cleanup.push(() => server.stop());
+    await fetchServer(server, 'POST', '/prompt', {
+      text: '',
+      files: [{ data: 'iVBORw0KGgo=', mimeType: 'image/png' }],
+    });
+    expect(enqueue).toHaveBeenCalledTimes(1);
+    const [, , blocks] = enqueue.mock.calls[0];
+    expect(blocks.length).toBe(1); // only image, no text block
+  });
+
+  it('POST /prompt with files missing data is skipped', async () => {
+    const { server, enqueue } = createServer();
+    await server.start();
+    cleanup.push(() => server.stop());
+    await fetchServer(server, 'POST', '/prompt', {
+      text: 'hello',
+      files: [
+        { mimeType: 'image/png' }, // missing data
+      ],
+    });
+    // No blocks created — falls back to text-only
+    const [, , blocks] = enqueue.mock.calls[0];
+    expect(blocks).toBeUndefined();
+  });
+
+  it('POST /prompt backward compat: no files field works as before', async () => {
+    const { server, enqueue } = createServer();
+    await server.start();
+    cleanup.push(() => server.stop());
+    await fetchServer(server, 'POST', '/prompt', { text: 'hello', chatId: 42 });
+    expect(enqueue).toHaveBeenCalledWith('hello', 42, undefined);
   });
 });

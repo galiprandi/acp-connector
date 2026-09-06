@@ -280,6 +280,26 @@ curl -X POST http://localhost:7780/prompt \
 
 The prompt enters the same queue as Telegram messages. If `chatId` is omitted, the first allowed chat ID is used.
 
+##### Sending files via `/prompt`
+
+Include `files` as an array of base64-encoded objects:
+
+```bash
+curl -X POST http://localhost:7780/prompt \
+  -H "Content-Type: application/json" \
+  -d '{
+    "text": "analiza esta imagen",
+    "files": [
+      { "data": "iVBORw0KGgo...", "mimeType": "image/png", "filename": "screenshot.png" }
+    ]
+  }'
+```
+
+- **Images** (`image/*`) → sent as `ImageContent` base64 blocks
+- **Other files** → sent as `ResourceLink` with data URI
+- Multiple files supported — text is appended as a final text block
+- Backward compatible: omit `files` for text-only prompts
+
 ***
 
 ## 🤖 Supported agents

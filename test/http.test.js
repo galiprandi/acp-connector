@@ -49,7 +49,7 @@ describe('HttpServer', () => {
     const res = await fetchServer(server, 'POST', '/prompt', { text: 'hello', chatId: 123 });
     expect(res.status).toBe(200);
     expect(res.body.ok).toBe(true);
-    expect(enqueue).toHaveBeenCalledWith('hello', 123);
+    expect(enqueue).toHaveBeenCalledWith('hello', 123, undefined);
     server.stop();
   });
 

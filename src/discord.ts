@@ -208,7 +208,11 @@ export class DiscordBot implements PlatformBot {
     }
   }
 
-  async enqueuePrompt(text: string, chatId?: number | string): Promise<void> {
+  async enqueuePrompt(
+    text: string,
+    chatId?: number | string,
+    blocks?: ContentBlock[]
+  ): Promise<void> {
     if (!chatId) return;
     const channelId = String(chatId);
     if (await this._handleBuiltinCommand(text, channelId)) return;
@@ -216,7 +220,7 @@ export class DiscordBot implements PlatformBot {
       const handled = await this.onCommand(text, channelId);
       if (handled) return;
     }
-    this.queue.push({ channelId, text });
+    this.queue.push({ channelId, text, blocks });
     this._processQueue();
   }
 

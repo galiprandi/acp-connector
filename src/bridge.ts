@@ -127,9 +127,9 @@ export async function run(): Promise<void> {
     forwardHeaders: config.http?.forwardHeaders || false,
     maxBodySize: config.http?.maxBodySize || 1024 * 1024,
     rateLimit: config.http?.rateLimit || 60,
-    enqueue: (text, chatId) => {
+    enqueue: (text, chatId, blocks) => {
       for (const bot of bots) {
-        bot.enqueuePrompt(text, chatId);
+        bot.enqueuePrompt(text, chatId, blocks);
       }
     },
     getHealth: () => ({

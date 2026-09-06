@@ -9,7 +9,7 @@ const STREAM_BATCH_MS = 800;
 export interface PlatformBot {
   start(): Promise<void>;
   stop(): void;
-  enqueuePrompt(text: string, chatId?: number | string): Promise<void>;
+  enqueuePrompt(text: string, chatId?: number | string, blocks?: ContentBlock[]): Promise<void>;
   sendMessage(chatId: number | string, text: string): Promise<void>;
 }
 
@@ -178,14 +178,14 @@ export class BridgeBot implements PlatformBot {
     this._processQueue();
   }
 
-  async enqueuePrompt(text: string, chatId?: number): Promise<void> {
+  async enqueuePrompt(text: string, chatId?: number, blocks?: ContentBlock[]): Promise<void> {
     if (!chatId) return;
     if (await this._handleBuiltinCommand(text, chatId)) return;
     if (text.startsWith('/') && this.onCommand) {
       const handled = await this.onCommand(text, chatId);
       if (handled) return;
     }
-    this.queue.push({ chatId, text });
+    this.queue.push({ chatId, text, blocks });
     this._processQueue();
   }
 

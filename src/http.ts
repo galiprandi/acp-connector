@@ -1,5 +1,6 @@
 import type { IncomingMessage, Server, ServerResponse } from 'node:http';
 import { createServer } from 'node:http';
+import type { ContentBlock } from '@agentclientprotocol/sdk';
 
 const DEFAULT_MAX_BODY = 1024 * 1024; // 1MB
 const DEFAULT_RATE_LIMIT = 60; // requests per minute
@@ -13,9 +14,9 @@ export interface HealthStatus {
 }
 
 /**
- * Enqueue callback signature: `(text, chatId?) => void`.
+ * Enqueue callback signature: `(text, chatId?, blocks?) => void`.
  */
-export type EnqueueFn = (text: string, chatId?: number) => void;
+export type EnqueueFn = (text: string, chatId?: number, blocks?: ContentBlock[]) => void;
 
 /**
  * Health callback signature: `() => HealthStatus`.
@@ -166,21 +167,57 @@ export class HttpServer {
         return;
       }
 
-      // Try to parse as JSON for backward compat (text + chatId fields)
+      // Try to parse as JSON for backward compat (text + chatId + files fields)
       let promptText = body;
       let chatId: number | undefined;
+      let blocks: ContentBlock[] | undefined;
 
       try {
-        const data = JSON.parse(body) as { text?: string; chatId?: number | string };
+        const data = JSON.parse(body) as {
+          text?: string;
+          chatId?: number | string;
+          files?: Array<{ data: string; mimeType: string; filename?: string }>;
+        };
         if (typeof data.text === 'string') {
           promptText = data.text;
           chatId = typeof data.chatId === 'number' ? data.chatId : undefined;
+
+          // Build ContentBlocks from files
+          if (data.files && Array.isArray(data.files) && data.files.length > 0) {
+            const fileBlocks: ContentBlock[] = [];
+            for (const file of data.files) {
+              if (!file.data || !file.mimeType) continue;
+              if (file.mimeType.startsWith('image/')) {
+                fileBlocks.push({
+                  type: 'image',
+                  data: file.data,
+                  mimeType: file.mimeType,
+                  // biome-ignore lint/suspicious/noExplicitAny: ContentBlock union type narrowing
+                } as any);
+              } else {
+                fileBlocks.push({
+                  type: 'resource_link',
+                  uri: `data:${file.mimeType};base64,${file.data}`,
+                  name: file.filename || 'file',
+                  mimeType: file.mimeType,
+                  // biome-ignore lint/suspicious/noExplicitAny: ContentBlock union type narrowing
+                } as any);
+              }
+            }
+            if (fileBlocks.length > 0) {
+              blocks = fileBlocks;
+              // Add text as last block
+              if (promptText.trim()) {
+                blocks.push({ type: 'text', text: promptText } as ContentBlock);
+              }
+            }
+          }
         }
       } catch {
         // Not JSON — use raw body as prompt
       }
 
-      if (promptText.trim() === '') {
+      if (promptText.trim() === '' && (!blocks || blocks.length === 0)) {
         res.writeHead(400);
         res.end(JSON.stringify({ error: 'empty prompt' }));
         return;
@@ -210,7 +247,7 @@ export class HttpServer {
         }
       }
 
-      this.enqueue(fullPrompt, chatId);
+      this.enqueue(fullPrompt, chatId, blocks);
       res.writeHead(200);
       res.end(JSON.stringify({ ok: true }));
     } catch (err) {
