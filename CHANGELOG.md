@@ -5,6 +5,31 @@ All notable changes to acp-connector will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-09-06
+
+### Added
+- Media handling — photos, documents, stickers, videos, files from Telegram and Discord
+  - Images: if agent supports `image` capability → base64 `ImageContent`
+  - Other files: `ResourceLink` with `file://` URI (all agents MUST support)
+  - Files saved to configurable `media.uploadsDir` (default `/tmp/acp-connector-uploads`)
+  - Log: `📄 file saved: /path/to/file.ext`
+  - Captions included as text blocks
+- HTTP `/prompt` now accepts `files` array with base64-encoded content
+  - Images → `ImageContent` blocks
+  - Other files → `ResourceLink` with data URI
+  - Multiple files supported, backward compatible
+- `AcpClient.prompt()` accepts `string | ContentBlock | ContentBlock[]`
+- `AcpClient.promptCapabilities` stored from agent init response
+- MCP server transports documented (stdio, HTTP, SSE, ACP)
+
+## [0.2.0] - 2026-09-06
+
+### Added
+- Discord platform support (`discord.js`)
+- Shared `PlatformBot` abstraction for Telegram and Discord
+- Setup wizard supports Discord configuration
+- Discord Snowflake IDs stored as strings throughout
+
 ## [0.1.0] - 2026-09-06
 
 ### Added
