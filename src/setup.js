@@ -17,6 +17,7 @@ export async function setup() {
   const rl = createInterface({ input: process.stdin, output: process.stdout });
 
   console.log('acp-connector setup\n');
+  console.log('This wizard creates a .config.jsonc in the current directory.\n');
 
   const telegramToken = await ask(rl, 'Telegram bot token (required): ');
   if (!telegramToken) {
@@ -41,6 +42,15 @@ export async function setup() {
     process.exit(1);
   }
 
+  const sessionConfigPath = await ask(
+    rl,
+    '\nMCP/session config path (optional, press Enter to skip): '
+  );
+
+  const showThoughtsStr = await ask(rl, 'Show agent thoughts in Telegram? (y/N): ');
+  const showThoughts =
+    showThoughtsStr.toLowerCase() === 'y' || showThoughtsStr.toLowerCase() === 'yes';
+
   rl.close();
 
   saveConfig({
@@ -48,13 +58,18 @@ export async function setup() {
     agentCwd: process.cwd(),
     telegramToken,
     allowedChatIds: [chatId],
-    showThoughts: false,
+    sessionConfigPath: sessionConfigPath || undefined,
+    showThoughts,
     streaming: true,
     logLevel: 'info',
     cron: [],
     routines: [],
   });
 
-  console.log('\nSaved .config.jsonc in the current directory.');
-  console.log('Run `npx acp-connector` to start the bridge.');
+  console.log('\n✅ Saved .config.jsonc in the current directory.');
+  console.log('\nNext steps:');
+  console.log('  1. Run `npx acp-connector` to start the bridge');
+  console.log('  2. Send a message to your bot on Telegram');
+  console.log('  3. Use /cron, /routine, /run commands to manage scheduled tasks');
+  console.log('\nSee .config.example.jsonc for all available options.');
 }
