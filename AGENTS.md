@@ -26,6 +26,8 @@ Thin bridge connecting messaging platforms to any ACP-compatible coding agent vi
 
 All commits MUST follow [Conventional Commits](https://www.conventionalcommits.org/):
 
+**Every feature or behavior change MUST include updated documentation** (README.md, AGENTS.md, example config). No exceptions.
+
 ```
 <type>(<scope>): <description>
 ```
