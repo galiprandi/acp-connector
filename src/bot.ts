@@ -27,21 +27,6 @@ interface QueueItem {
   text: string;
 }
 
-interface PermissionOption {
-  optionId: string;
-  kind: string;
-  title?: string;
-  description?: string;
-}
-
-interface PermissionParams {
-  options?: PermissionOption[];
-  toolCall?: {
-    title?: string;
-    status?: string;
-  };
-}
-
 interface PermissionResponse {
   outcome: {
     outcome: 'selected' | 'cancelled';
@@ -471,10 +456,14 @@ export class BridgeBot implements PlatformBot {
     }
   }
 
-  private _formatPermission(params: PermissionParams): string {
+  // biome-ignore lint/suspicious/noExplicitAny: SDK permission types vary
+  private _formatPermission(params: any): string {
     const parts: string[] = [];
-    if (params.toolCall?.title) parts.push(`Tool: ${params.toolCall.title}`);
-    if (params.toolCall?.status) parts.push(`Status: ${params.toolCall.status}`);
+    const tc = params.toolCall || {};
+    if (tc.title) parts.push(`Tool: ${tc.title}`);
+    if (tc.name) parts.push(`Tool: ${tc.name}`);
+    if (tc.status) parts.push(`Status: ${tc.status}`);
+    if (tc.toolCallId && !tc.title && !tc.name) parts.push(`Call: ${tc.toolCallId}`);
     if (parts.length === 0) parts.push(JSON.stringify(params).slice(0, 500));
     return parts.join('\n');
   }
