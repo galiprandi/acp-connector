@@ -14,11 +14,11 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/galiprandi/acpbridge.git"
+    "url": "git+https://github.com/galiprandi/acp-connector.git"
   },
-  "homepage": "https://github.com/galiprandi/acpbridge#readme",
+  "homepage": "https://github.com/galiprandi/acp-connector#readme",
   "bugs": {
-    "url": "https://github.com/galiprandi/acpbridge/issues"
+    "url": "https://github.com/galiprandi/acp-connector/issues"
   },
   "author": "Germán Aliprandi",
   "engines": {
