@@ -98,20 +98,20 @@ Send a message to your bot on Telegram. Your agent will respond. That's it.
 ## 🏗 How it works
 
 ```
-┌──────────┐     ┌──────────────┐     ┌─────────────┐
-│ Telegram │────▶│              │     │             │
-│          │     │  acp-connector│────▶│  ACP Agent  │
-│  (you)   │◀────│   (bridge)   │     │ (any agent) │
-│          │     │              │◀────│             │
-└──────────┘     └──────────────┘     └─────────────┘
-                       ▲
-                       │
-              ┌────────┴────────┐
-              │                 │
-         ┌────┴────┐      ┌────┴────┐
-         │  Cron   │      │  HTTP   │
-         │ (jobs)  │      │  (API)  │
-         └─────────┘      └─────────┘
+┌──────────┐     ┌─────────────────┐     ┌─────────────┐
+│ Telegram │────▶│                 │     │             │
+│          │     │  acp-connector  │────▶│  ACP Agent  │
+│  (you)   │◀────│   (bridge)      │     │ (any agent) │
+│          │     │                 │◀────│             │
+└──────────┘     └─────────────────┘     └─────────────┘
+                          ▲
+                          │
+                 ┌────────┴────────┐
+                 │                 │
+            ┌────┴────┐      ┌────┴────┐
+            │  Cron   │      │  HTTP   │
+            │ (jobs)  │      │  (API)  │
+            └─────────┘      └─────────┘
 ```
 
 1. **Telegram** messages are validated against an allowlist and enqueued
