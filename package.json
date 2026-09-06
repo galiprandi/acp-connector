@@ -1,0 +1,39 @@
+{
+  "name": "acpbridge",
+  "version": "0.0.0",
+  "description": "Thin bridge connecting messaging platforms to any ACP-compatible coding agent",
+  "type": "module",
+  "bin": {
+    "acpbridge": "src/index.js"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "setup": "node src/index.js setup"
+  },
+  "keywords": ["acp", "agent-client-protocol", "telegram", "bridge", "ai", "coding-agent"],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/galiprandi/acpbridge.git"
+  },
+  "homepage": "https://github.com/galiprandi/acpbridge#readme",
+  "bugs": {
+    "url": "https://github.com/galiprandi/acpbridge/issues"
+  },
+  "author": "Germán Aliprandi",
+  "engines": {
+    "node": ">=20"
+  },
+  "files": [
+    "src/",
+    "README.md",
+    "AGENTS.md",
+    ".config.example.jsonc"
+  ],
+  "dependencies": {
+    "@agentclientprotocol/sdk": "^1.4.0",
+    "node-telegram-bot-api": "^0.66.0",
+    "node-cron": "^4.0.0",
+    "dotenv": "^16.4.0"
+  }
+}
