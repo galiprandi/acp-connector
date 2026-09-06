@@ -14,14 +14,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Routine manager (`src/routines.js`) — named prompts with `/cron`, `/routine`, `/run` commands
 - HTTP server (`src/http.js`) — optional `/health` and `/prompt` endpoints
 - Bridge wiring (`src/bridge.js`) — orchestrates all components with graceful shutdown
-- Setup wizard updated with sessionConfigPath and showThoughts prompts
-- 81 tests across 7 test files (78.69% statement coverage)
+- Setup wizard with step-by-step guidance, agent examples, and next steps
+- `/start` and `/help` built-in commands with full command reference
+- Bridge commands (`/run`, `/cron`, `/routine`) work from Telegram, cron, and HTTP
+- Config validation with clear field-specific errors
+- 177 tests across 13 test files (96 edge-case tests included)
 - Professional README with architecture diagram, full config reference, and troubleshooting
 - Biome lint + format, commitlint, husky pre-commit hooks
 
 ### Changed
 - All modules are agent-agnostic (no hardcoded agent references)
 - Config is the single source of truth (`.config.jsonc`)
+- Config loader/saver accepts optional path parameter (testable)
+- Cron parser takes 5-token schedule (was 1-token, broke multi-field cron)
+
+### Fixed
+- ACP client: spawn failure (ENOENT) never rejected `start()`
+- ACP client: double `start()`/`kill()` not idempotent
+- Bot: empty text forwarded to agent instead of ignored
+- Bot: permission with no options hung forever
+- Cron: empty prompt not validated
+- Config: empty/comment-only files crashed with `SyntaxError`
+- Config: no validation of required fields (`agentCmd`, `telegramToken`, `allowedChatIds`)
+- Config: `saveConfig(null)` wrote `"null"` to file
+- HTTP: whitespace-only text accepted as valid prompt
+- HTTP: non-string text accepted as valid prompt
+- HTTP: empty body returned cryptic JSON parse error
+- Bridge: invalid config crashed with stack trace instead of clean error
 
 ## [0.0.4] - 2026-09-06
 
