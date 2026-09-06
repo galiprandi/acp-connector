@@ -144,6 +144,7 @@ See [`acp-connector.example.jsonc`](acp-connector.example.jsonc) for the full re
 | `cron` | `CronJob[]` | no | `[]` | Scheduled jobs (see below) |
 | `routines` | `Routine[]` | no | `[]` | Named reusable prompts |
 | `http` | `HttpConfig` | no | off | HTTP server config (see below) |
+| `media` | `MediaConfig` | no | off | Media handling config (see below) |
 
 > **Backward compat:** `telegramToken` and `allowedChatIds` at the root level still work but are deprecated. Migrate to `platforms.telegram`.
 
@@ -295,6 +296,23 @@ Any agent that implements the [Agent Client Protocol](https://agentclientprotoco
 | Any ACP agent | `<your-agent> acp` |
 
 ***
+
+### Media handling
+
+Send photos, documents, stickers, or files to the bot and they'll be forwarded to the agent:
+
+- **Photos** + agent supports `image` capability → sent as base64 `ImageContent` (agent "sees" the image)
+- **Any file** (or agent without `image` capability) → sent as `ResourceLink` with `file://` URI (agent reads the file from disk)
+- Files are saved to `media.uploadsDir` (default: `/tmp/acp-connector-uploads`)
+- Captions are included as text alongside the media
+
+```jsonc
+{
+  "media": {
+    "uploadsDir": "/tmp/acp-connector-uploads"
+  }
+}
+```
 
 ## 💬 Chat commands
 

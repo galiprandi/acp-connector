@@ -73,6 +73,7 @@ src/
 ├── acp-client.ts  — spawns ACP agent, handles protocol + sessions
 ├── bot.ts         — Telegram bot, message queue, stream batching, PlatformBot interface
 ├── discord.ts     — Discord bot, implements PlatformBot
+├── media.ts       — MediaHandler: download, save, convert to ACP ContentBlocks
 ├── cron.ts        — scheduled prompt injection
 ├── routines.ts    — named prompts + /cron, /routine, /run commands
 ├── http.ts        — optional HTTP API (/health, /prompt)
