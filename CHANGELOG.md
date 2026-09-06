@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to acpbridge will be documented in this file.
+All notable changes to acp-connector will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Project scaffold: package.json, bin entry, ES modules
 - Config loader for `.config.jsonc` (JSONC parser with comment/trailing comma stripping)
-- Interactive setup wizard (`acpbridge setup`) — prompts for Telegram token, agent command, chat ID
+- Interactive setup wizard (`acp-connector setup`) — prompts for Telegram token, agent command, chat ID
 - Bridge entrypoint with startup banner and placeholder modules
 - Example config (`.config.example.jsonc`) with documented options
 - AGENTS.md and README.md

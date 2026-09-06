@@ -1,10 +1,10 @@
 {
-  "name": "acpbridge",
+  "name": "acp-connector",
   "version": "0.0.0",
   "description": "Thin bridge connecting messaging platforms to any ACP-compatible coding agent",
   "type": "module",
   "bin": {
-    "acpbridge": "src/index.js"
+    "acp-connector": "src/index.js"
   },
   "scripts": {
     "start": "node src/index.js",

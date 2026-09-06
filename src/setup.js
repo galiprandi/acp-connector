@@ -16,7 +16,7 @@ function ask(rl, prompt) {
 export async function setup() {
   const rl = createInterface({ input: process.stdin, output: process.stdout });
 
-  console.log('acpbridge setup\n');
+  console.log('acp-connector setup\n');
 
   const telegramToken = await ask(rl, 'Telegram bot token (required): ');
   if (!telegramToken) {
@@ -56,5 +56,5 @@ export async function setup() {
   });
 
   console.log('\nSaved .config.jsonc in the current directory.');
-  console.log('Run `npx acpbridge` to start the bridge.');
+  console.log('Run `npx acp-connector` to start the bridge.');
 }

@@ -1,10 +1,10 @@
 import { loadConfig } from './config.js';
 
 /**
- * Print an ASCII box banner with the "acpbridge" title.
+ * Print an ASCII box banner with the "acp-connector" title.
  */
 function printBanner() {
-  const title = 'acpbridge';
+  const title = 'acp-connector';
   const inner = `  ${title}  `;
   const top = '┌' + '─'.repeat(inner.length) + '┐';
   const mid = '│' + inner + '│';
@@ -20,7 +20,7 @@ function printBanner() {
 export async function run() {
   const config = loadConfig();
   if (!config) {
-    console.error('No .config.jsonc found. Run: npx acpbridge setup');
+    console.error('No .config.jsonc found. Run: npx acp-connector setup');
     process.exit(1);
   }
 

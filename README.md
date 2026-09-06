@@ -1,17 +1,17 @@
-# acpbridge
+# acp-connector
 
 Thin bridge connecting messaging platforms (Telegram first) to any ACP-compatible coding agent via the Agent Client Protocol.
 
 ## Install
 
 ```
-npx acpbridge setup
+npx acp-connector setup
 ```
 
 ## Run
 
 ```
-npx acpbridge
+npx acp-connector
 ```
 
 ## Config

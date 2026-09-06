@@ -1,4 +1,4 @@
-# AGENTS.md — acpbridge
+# AGENTS.md — acp-connector
 
 Thin bridge connecting messaging platforms to any ACP-compatible coding agent via ACP.
 
