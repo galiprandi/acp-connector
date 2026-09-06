@@ -6,7 +6,7 @@ Thin bridge connecting messaging platforms to any ACP-compatible coding agent vi
 
 - TypeScript (ES modules)
 - pnpm
-- @agentclientprotocol/sdk, node-telegram-bot-api, node-cron
+- @agentclientprotocol/sdk, node-telegram-bot-api, discord.js, node-cron
 - Biome (lint + format)
 - Vitest (tests + coverage)
 - commitlint + husky (conventional commits enforcement)
@@ -72,16 +72,17 @@ src/
 ├── bridge.ts      — orchestrates all components
 ├── acp-client.ts  — spawns ACP agent, handles protocol + sessions
 ├── bot.ts         — Telegram bot, message queue, stream batching, PlatformBot interface
+├── discord.ts     — Discord bot, implements PlatformBot
 ├── cron.ts        — scheduled prompt injection
 ├── routines.ts    — named prompts + /cron, /routine, /run commands
 ├── http.ts        — optional HTTP API (/health, /prompt)
-├── config.ts      — JSONC config loader/saver
-└── setup.ts       — interactive setup wizard
+├── config.ts      — JSONC config loader/saver, platforms support
+└── setup.ts       — interactive setup wizard (Telegram + Discord)
 ```
 
 ### Data flow
 
-1. Input sources (Telegram, cron, HTTP) enqueue prompts via `bot.enqueuePrompt()`
+1. Input sources (Telegram, Discord, cron, HTTP) enqueue prompts via `bot.enqueuePrompt()`
 2. Queue is processed one at a time (ACP `session/prompt` is blocking)
 3. Agent responses stream back via `session.nextUpdate()`
 4. `bot._handleUpdate()` batches chunks and edits a single Telegram message

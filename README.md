@@ -1,6 +1,6 @@
 # acp-connector
 
-> 🔌 Thin bridge between Telegram and any ACP-compatible coding agent.
+> 🔌 Thin bridge between Telegram/Discord and any ACP-compatible coding agent.
 
 <div align="center">
   <p>
@@ -21,13 +21,13 @@
 
 ## 🧠 Overview
 
-**acp-connector** is a lightweight, agent-agnostic bridge that connects [Agent Client Protocol](https://agentclientprotocol.com/) (ACP) compatible coding agents to Telegram. It forwards your messages to the agent and streams responses back — no terminal required.
+**acp-connector** is a lightweight, agent-agnostic bridge that connects [Agent Client Protocol](https://agentclientprotocol.com/) (ACP) compatible coding agents to Telegram and Discord. It forwards your messages to the agent and streams responses back — no terminal required.
 
 The bridge is intentionally thin. It doesn't implement its own agent loop, model provider, or tool ecosystem. It launches your agent, passes prompts through, and relays responses back. That's it.
 
 **Key features:**
 - 🤖 Works with any ACP agent (Devin, Claude Code, Codex, Gemini CLI, OpenCode, etc.)
-- 💬 Telegram as the primary interface with streaming responses
+- 💬 Telegram and Discord as messaging interfaces with streaming responses
 - ⏰ Cron scheduler for recurring prompts
 - 🔁 Routines for reusable named prompts
 - 🌐 Optional HTTP API for programmatic access
@@ -133,16 +133,19 @@ See [`acp-connector.example.jsonc`](acp-connector.example.jsonc) for the full re
 |---|---|---|---|---|
 | `agentCmd` | `string` | yes | — | Command to launch the ACP agent (e.g. `"devin acp"`) |
 | `agentCwd` | `string` | no | `cwd` | Working directory for the agent subprocess |
-| `telegramToken` | `string` | yes | — | Telegram bot token from @BotFather |
-| `allowedChatIds` | `number[]` | yes | `[]` | Allowed Telegram chat IDs. Empty = setup mode |
+| `platforms` | `Platforms` | yes | — | Platform configs (Telegram and/or Discord) |
+| `platforms.telegram` | `object` | no | — | `{ token, allowedChatIds }` — Telegram config |
+| `platforms.discord` | `object` | no | — | `{ token, allowedChannelIds }` — Discord config |
 | `sessionId` | `string` | no | — | ACP session ID to load/resume (omit to create new) |
 | `sessionConfigPath` | `string` | no | — | Path to MCP/session config JSONC |
-| `showThoughts` | `boolean` | no | `false` | Forward agent thoughts to Telegram |
+| `showThoughts` | `boolean` | no | `false` | Forward agent thoughts to chat |
 | `streaming` | `boolean` | no | `true` | Stream responses with live message edits |
 | `logLevel` | `string` | no | `"info"` | `"error"` \| `"info"` \| `"debug"` |
 | `cron` | `CronJob[]` | no | `[]` | Scheduled jobs (see below) |
 | `routines` | `Routine[]` | no | `[]` | Named reusable prompts |
 | `http` | `HttpConfig` | no | off | HTTP server config (see below) |
+
+> **Backward compat:** `telegramToken` and `allowedChatIds` at the root level still work but are deprecated. Migrate to `platforms.telegram`.
 
 ### Cron jobs
 
@@ -293,7 +296,9 @@ Any agent that implements the [Agent Client Protocol](https://agentclientprotoco
 
 ***
 
-## 💬 Telegram commands
+## 💬 Chat commands
+
+Both Telegram and Discord support these commands:
 
 The bridge intercepts these commands before forwarding to the agent:
 

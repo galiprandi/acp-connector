@@ -1,7 +1,9 @@
 import { AcpClient } from './acp-client';
+import type { PlatformBot } from './bot';
 import { BridgeBot } from './bot';
 import { type BridgeConfig, loadConfig } from './config';
 import { CronManager } from './cron';
+import { DiscordBot } from './discord';
 import { HttpServer } from './http';
 import { RoutineManager } from './routines';
 
@@ -39,34 +41,81 @@ export async function run(): Promise<void> {
   });
 
   const tg = config.platforms?.telegram;
-  if (!tg) {
-    console.error('No Telegram platform configured. Run: npx acp-connector setup');
+  const dc = config.platforms?.discord;
+
+  if (!tg && !dc) {
+    console.error('No platform configured. Run: npx acp-connector setup');
     process.exit(1);
   }
 
-  const bot = new BridgeBot({
-    acp,
-    telegramToken: tg.token,
-    allowedChatIds: tg.allowedChatIds,
-    agentCmd: config.agentCmd,
-    showThoughts: config.showThoughts,
-    streaming: config.streaming,
-  });
+  // Collect active bots
+  const bots: PlatformBot[] = [];
+  let primaryBot: PlatformBot | null = null;
+
+  if (tg) {
+    const bot = new BridgeBot({
+      acp,
+      telegramToken: tg.token,
+      allowedChatIds: tg.allowedChatIds,
+      agentCmd: config.agentCmd,
+      showThoughts: config.showThoughts,
+      streaming: config.streaming,
+    });
+    bots.push(bot);
+    primaryBot = bot;
+  }
+
+  if (dc) {
+    const bot = new DiscordBot({
+      acp,
+      token: dc.token,
+      allowedChannelIds: dc.allowedChannelIds,
+      agentCmd: config.agentCmd,
+      showThoughts: config.showThoughts,
+      streaming: config.streaming,
+    });
+    bots.push(bot);
+    if (!primaryBot) primaryBot = bot;
+  }
+
+  // Use first bot's allowed IDs for cron (legacy: assumes single platform)
+  const cronAllowedIds = tg?.allowedChatIds || dc?.allowedChannelIds || [];
 
   const cronManager = new CronManager({
     jobs: config.cron || [],
-    allowedChatIds: tg.allowedChatIds,
-    enqueue: (text, chatId) => bot.enqueuePrompt(text, chatId),
+    allowedChatIds: cronAllowedIds,
+    enqueue: (text, chatId) => {
+      // Enqueue to all bots — each will process if chatId matches
+      for (const bot of bots) {
+        bot.enqueuePrompt(text, chatId);
+      }
+    },
   });
 
   const routineManager = new RoutineManager({
     routines: config.routines || [],
     cronManager,
-    enqueue: (text, chatId) => bot.enqueuePrompt(text, chatId),
-    sendMessage: (chatId, text) => bot.sendMessage(chatId, text),
+    enqueue: (text, chatId) => {
+      for (const bot of bots) {
+        bot.enqueuePrompt(text, chatId);
+      }
+    },
+    sendMessage: async (chatId, text) => {
+      // Send to all bots — each will deliver if it can
+      for (const bot of bots) {
+        await bot.sendMessage(chatId, text);
+      }
+    },
   });
 
-  bot.onCommand = (text, chatId) => routineManager.handleCommand(text, chatId);
+  // Wire bridge commands to all bots
+  for (const bot of bots) {
+    if ('onCommand' in bot) {
+      // biome-ignore lint/suspicious/noExplicitAny: PlatformBot doesn't expose onCommand
+      (bot as any).onCommand = (text: string, chatId: number) =>
+        routineManager.handleCommand(text, chatId);
+    }
+  }
 
   const httpServer = new HttpServer({
     enabled: config.http?.enabled || false,
@@ -76,7 +125,11 @@ export async function run(): Promise<void> {
     forwardHeaders: config.http?.forwardHeaders || false,
     maxBodySize: config.http?.maxBodySize || 1024 * 1024,
     rateLimit: config.http?.rateLimit || 60,
-    enqueue: (text, chatId) => bot.enqueuePrompt(text, chatId),
+    enqueue: (text, chatId) => {
+      for (const bot of bots) {
+        bot.enqueuePrompt(text, chatId);
+      }
+    },
     getHealth: () => ({
       status: 'ok',
       agent: !!acp.session,
@@ -84,8 +137,18 @@ export async function run(): Promise<void> {
     }),
   });
 
+  // Wire permission handler — route to the bot that has a pending prompt
   // biome-ignore lint/suspicious/noExplicitAny: SDK permission types are complex
-  acp.onPermission = (params: any) => bot._handlePermission(params);
+  acp.onPermission = (params: any) => {
+    // Try each bot's permission handler — the one with currentChannelId set will handle it
+    for (const bot of bots) {
+      if ('_handlePermission' in bot) {
+        // biome-ignore lint/suspicious/noExplicitAny: PlatformBot doesn't expose _handlePermission
+        return (bot as any)._handlePermission(params);
+      }
+    }
+    return { outcome: { outcome: 'cancelled' } };
+  };
 
   try {
     await acp.start();
@@ -94,7 +157,11 @@ export async function run(): Promise<void> {
     process.exit(1);
   }
 
-  await bot.start();
+  // Start all bots
+  for (const bot of bots) {
+    await bot.start();
+  }
+
   cronManager.start();
   await httpServer.start();
 
@@ -102,7 +169,12 @@ export async function run(): Promise<void> {
   console.log('');
   console.log(`  🆔  Session:  ${acp.sessionId}${config.sessionId ? ' (restored)' : ''}`);
   console.log(`  ⚙️  Mode:     ${mode}`);
-  console.log(`  💬  Chats:    ${tg.allowedChatIds.join(', ') || 'none (setup mode)'}`);
+  if (tg) {
+    console.log(`  💬  TG Chats:    ${tg.allowedChatIds.join(', ') || 'none (setup mode)'}`);
+  }
+  if (dc) {
+    console.log(`  💬  DC Channels: ${dc.allowedChannelIds.join(', ') || 'none (setup mode)'}`);
+  }
   console.log(`  🖥️  Command:  ${config.agentCmd}`);
   if (config.sessionConfigPath) {
     console.log(`  📋  Config:   ${config.sessionConfigPath}`);
@@ -121,7 +193,9 @@ export async function run(): Promise<void> {
     console.log(`\n${sig} received, shutting down...`);
     httpServer.stop();
     cronManager.stop();
-    bot.stop();
+    for (const bot of bots) {
+      bot.stop();
+    }
     acp.kill();
     process.exit(0);
   };
