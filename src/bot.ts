@@ -10,7 +10,12 @@ const TG_MAX_LEN = 4096;
 export interface PlatformBot {
   start(): Promise<void>;
   stop(): void;
-  enqueuePrompt(text: string, chatId?: number | string, blocks?: ContentBlock[]): Promise<void>;
+  enqueuePrompt(
+    text: string,
+    chatId?: number | string,
+    blocks?: ContentBlock[],
+    onComplete?: (response: string, error?: string) => void
+  ): Promise<void>;
   sendMessage(chatId: number | string, text: string): Promise<void>;
   hasActivePrompt(): boolean;
   setMediaHandler(handler: MediaHandler): void;

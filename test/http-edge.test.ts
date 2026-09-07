@@ -89,7 +89,7 @@ describe('HttpServer edge cases', () => {
     const res = await fetchServer(server, 'POST', '/prompt', 'plain text not json');
     expect(res.status).toBe(200);
     expect(res.body.ok).toBe(true);
-    expect(enqueue).toHaveBeenCalledWith('plain text not json', undefined, undefined);
+    expect(enqueue).toHaveBeenCalledWith('plain text not json', undefined, undefined, undefined);
   });
 
   it('POST /prompt with empty text returns 400', async () => {
@@ -117,7 +117,7 @@ describe('HttpServer edge cases', () => {
     const res = await fetchServer(server, 'POST', '/prompt', { text: 'hello' });
     expect(res.status).toBe(200);
     expect(res.body.ok).toBe(true);
-    expect(enqueue).toHaveBeenCalledWith('hello', undefined, undefined);
+    expect(enqueue).toHaveBeenCalledWith('hello', undefined, undefined, undefined);
   });
 
   it('GET /unknown route returns 404', async () => {
@@ -205,7 +205,7 @@ describe('HttpServer edge cases', () => {
     });
     expect(res.status).toBe(200);
     expect(res.body.ok).toBe(true);
-    expect(enqueue).toHaveBeenCalledWith('hello', 42, undefined);
+    expect(enqueue).toHaveBeenCalledWith('hello', 42, undefined, undefined);
   });
 
   it('POST /prompt with non-string text uses raw body as prompt', async () => {
@@ -246,7 +246,7 @@ describe('HttpServer edge cases', () => {
     cleanup.push(() => server.stop());
     const res = await fetchServer(server, 'POST', '/prompt', { text: 'hello' });
     expect(res.status).toBe(200);
-    expect(enqueue).toHaveBeenCalledWith('hello', undefined, undefined);
+    expect(enqueue).toHaveBeenCalledWith('hello', undefined, undefined, undefined);
   });
 
   it('POST /prompt with raw body + query params adds context', async () => {
@@ -305,7 +305,7 @@ describe('HttpServer edge cases', () => {
       }
     );
     expect(res.status).toBe(200);
-    expect(enqueue).toHaveBeenCalledWith('hello', undefined, undefined);
+    expect(enqueue).toHaveBeenCalledWith('hello', undefined, undefined, undefined);
   });
 
   it('GET /health with auth token configured requires auth', async () => {
@@ -474,6 +474,46 @@ describe('HttpServer edge cases', () => {
     await server.start();
     cleanup.push(() => server.stop());
     await fetchServer(server, 'POST', '/prompt', { text: 'hello', chatId: 42 });
-    expect(enqueue).toHaveBeenCalledWith('hello', 42, undefined);
+    expect(enqueue).toHaveBeenCalledWith('hello', 42, undefined, undefined);
+  });
+
+  it('onComplete callback fires with response when agent finishes', async () => {
+    const { server, enqueue } = createServer();
+    await server.start();
+    cleanup.push(() => server.stop());
+    await fetchServer(server, 'POST', '/prompt', {
+      text: 'hello',
+      callback_url: 'https://example.com/hook',
+    });
+    // Get the onComplete callback that was passed to enqueue
+    const onComplete = enqueue.mock.calls[0][3] as (response: string, error?: string) => void;
+    expect(onComplete).toBeDefined();
+    // Simulate agent finishing successfully
+    onComplete('agent response text');
+    // No assertion on fetch — it's fire-and-forget, just verify no throw
+  });
+
+  it('onComplete callback fires with error when agent fails', async () => {
+    const { server, enqueue } = createServer();
+    await server.start();
+    cleanup.push(() => server.stop());
+    await fetchServer(server, 'POST', '/prompt', {
+      text: 'hello',
+      callback_url: 'https://example.com/hook',
+    });
+    const onComplete = enqueue.mock.calls[0][3] as (response: string, error?: string) => void;
+    expect(onComplete).toBeDefined();
+    // Simulate agent failing
+    onComplete('', 'agent crashed');
+    // No assertion on fetch — it's fire-and-forget, just verify no throw
+  });
+
+  it('POST /prompt without callback_url does not pass onComplete', async () => {
+    const { server, enqueue } = createServer();
+    await server.start();
+    cleanup.push(() => server.stop());
+    await fetchServer(server, 'POST', '/prompt', { text: 'hello', chatId: 42 });
+    const onComplete = enqueue.mock.calls[0][3];
+    expect(onComplete).toBeUndefined();
   });
 });

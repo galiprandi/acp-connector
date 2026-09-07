@@ -14,9 +14,21 @@ export interface HealthStatus {
 }
 
 /**
- * Enqueue callback signature: `(text, chatId?, blocks?) => void`.
+ * Callback invoked when the agent finishes processing a prompt.
+ * @param response - The agent's final response text (empty if error).
+ * @param error - Error message if the prompt failed, undefined otherwise.
  */
-export type EnqueueFn = (text: string, chatId?: number, blocks?: ContentBlock[]) => void;
+export type OnCompleteFn = (response: string, error?: string) => void;
+
+/**
+ * Enqueue callback signature: `(text, chatId?, blocks?, onComplete?) => void`.
+ */
+export type EnqueueFn = (
+  text: string,
+  chatId?: number,
+  blocks?: ContentBlock[],
+  onComplete?: OnCompleteFn
+) => void;
 
 /**
  * Health callback signature: `() => HealthStatus`.
@@ -170,16 +182,20 @@ export class HttpServer {
       let promptText = body;
       let chatId: number | undefined;
       let blocks: ContentBlock[] | undefined;
+      let callbackUrl: string | undefined;
 
       try {
         const data = JSON.parse(body) as {
           text?: string;
           chatId?: number | string;
+          callbackUrl?: string;
+          callback_url?: string;
           files?: Array<{ data: string; mimeType: string; filename?: string }>;
         };
         if (typeof data.text === 'string') {
           promptText = data.text;
           chatId = typeof data.chatId === 'number' ? data.chatId : undefined;
+          callbackUrl = data.callbackUrl || data.callback_url;
 
           // Build ContentBlocks from files
           if (data.files && Array.isArray(data.files) && data.files.length > 0) {
@@ -245,7 +261,21 @@ export class HttpServer {
         }
       }
 
-      this.enqueue(fullPrompt, chatId, blocks);
+      // Build onComplete callback if callbackUrl provided
+      let onComplete: OnCompleteFn | undefined;
+      if (callbackUrl) {
+        onComplete = (response: string, error?: string) => {
+          fetch(callbackUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ response, error: error || null }),
+          }).catch((err: unknown) => {
+            console.error(`Webhook callback failed: ${(err as Error).message}`);
+          });
+        };
+      }
+
+      this.enqueue(fullPrompt, chatId, blocks, onComplete);
       res.writeHead(200);
       res.end(JSON.stringify({ ok: true }));
     } catch (err) {

@@ -19,6 +19,7 @@ export interface QueueItem {
   channelId: string | number;
   text: string;
   blocks?: ContentBlock[];
+  onComplete?: (response: string, error?: string) => void;
 }
 
 export interface PermissionResponse {
@@ -119,7 +120,8 @@ export abstract class BaseBot implements PlatformBot {
   async enqueuePrompt(
     text: string,
     chatId?: number | string,
-    blocks?: ContentBlock[]
+    blocks?: ContentBlock[],
+    onComplete?: (response: string, error?: string) => void
   ): Promise<void> {
     if (!chatId) return;
     if (await this._handleBuiltinCommand(text, chatId)) return;
@@ -127,7 +129,7 @@ export abstract class BaseBot implements PlatformBot {
       const handled = await this.onCommand(text, chatId);
       if (handled) return;
     }
-    this.queue.push({ channelId: chatId, text, blocks });
+    this.queue.push({ channelId: chatId, text, blocks, onComplete });
     this._processQueue();
   }
 
@@ -135,7 +137,7 @@ export abstract class BaseBot implements PlatformBot {
     if (this.busy || this.queue.length === 0) return;
 
     // biome-ignore lint/style/noNonNullAssertion: queue is non-empty (checked above)
-    const { channelId, text, blocks } = this.queue.shift()!;
+    const { channelId, text, blocks, onComplete } = this.queue.shift()!;
     this.busy = true;
     this.streamBuffer = '';
     this.currentMessageId = null;
@@ -144,6 +146,7 @@ export abstract class BaseBot implements PlatformBot {
 
     if (this.onPrompt) this.onPrompt(text, channelId);
 
+    let errorMsg: string | undefined;
     try {
       await this.acp.prompt(blocks || text);
 
@@ -169,7 +172,12 @@ export abstract class BaseBot implements PlatformBot {
         }
       }
     } catch (err) {
-      await this._sendPlain(`Error: ${(err as Error).message}`);
+      errorMsg = (err as Error).message;
+      await this._sendPlain(`Error: ${errorMsg}`);
+    }
+
+    if (onComplete) {
+      onComplete(this.streamBuffer, errorMsg);
     }
 
     this.busy = false;

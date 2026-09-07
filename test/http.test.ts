@@ -71,7 +71,33 @@ describe('HttpServer', () => {
     const res = await fetchServer(server, 'POST', '/prompt', { text: 'hello', chatId: 123 });
     expect(res.status).toBe(200);
     expect(res.body.ok).toBe(true);
-    expect(enqueue).toHaveBeenCalledWith('hello', 123, undefined);
+    expect(enqueue).toHaveBeenCalledWith('hello', 123, undefined, undefined);
+    server.stop();
+  });
+
+  it('POST /prompt with callback_url passes onComplete to enqueue', async () => {
+    const { server, enqueue } = createServer();
+    await server.start();
+    const res = await fetchServer(server, 'POST', '/prompt', {
+      text: 'hello',
+      chatId: 123,
+      callback_url: 'https://example.com/hook',
+    });
+    expect(res.status).toBe(200);
+    expect(enqueue).toHaveBeenCalledWith('hello', 123, undefined, expect.any(Function));
+    server.stop();
+  });
+
+  it('POST /prompt with callbackUrl (camelCase) passes onComplete to enqueue', async () => {
+    const { server, enqueue } = createServer();
+    await server.start();
+    const res = await fetchServer(server, 'POST', '/prompt', {
+      text: 'hello',
+      chatId: 123,
+      callbackUrl: 'https://example.com/hook',
+    });
+    expect(res.status).toBe(200);
+    expect(enqueue).toHaveBeenCalledWith('hello', 123, undefined, expect.any(Function));
     server.stop();
   });
 

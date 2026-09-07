@@ -316,6 +316,29 @@ describe('BridgeBot', () => {
     expect(acp.prompt).toHaveBeenCalledWith('test prompt');
   });
 
+  it('enqueuePrompt with onComplete calls it with response after processing', async () => {
+    const { bot, acp } = createBot();
+    await bot.start();
+    acp._pushUpdate({
+      kind: 'update',
+      update: { sessionUpdate: 'agent_message', content: { type: 'text', text: 'Hello back' } },
+    });
+    const onComplete = vi.fn();
+    bot.enqueuePrompt('test prompt', 123, undefined, onComplete);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(onComplete).toHaveBeenCalledWith('Hello back', undefined);
+  });
+
+  it('enqueuePrompt with onComplete calls it with error on failure', async () => {
+    const { bot, acp } = createBot();
+    await bot.start();
+    acp.prompt.mockRejectedValueOnce(new Error('agent crashed'));
+    const onComplete = vi.fn();
+    bot.enqueuePrompt('test prompt', 123, undefined, onComplete);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(onComplete).toHaveBeenCalledWith('', 'agent crashed');
+  });
+
   it('stop() stops polling', async () => {
     const { bot } = createBot();
     bot.stop();
