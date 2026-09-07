@@ -108,7 +108,7 @@ Send a message to your bot on Telegram. Your agent will respond. That's it.
                           │
                  ┌────────┴────────┐
                  │                 │
-            ┌────┴────┐      ┌────┴────┐
+            ┌────┴────┐      ┌─────┴───┐
             │  Cron   │      │  HTTP   │
             │ (jobs)  │      │  (API)  │
             └─────────┘      └─────────┘
