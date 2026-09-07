@@ -37,8 +37,16 @@
   // }
   // "sessionConfigPath": "acp_session.jsonc",
 
-  // Show agent thoughts in Telegram (default: false)
+  // Show agent thoughts in chat (default: false)
   "showThoughts": false,
+
+  // Show tool calls (e.g. "Read file", "Run tests") in chat (default: true)
+  // Set to false when the agent is not used for programming and only the final answer matters
+  "showTools": true,
+
+  // Show agent plan/checklist in chat (default: true)
+  // Set to false to hide plan entries and reduce noise
+  "showPlan": true,
 
   // Stream responses with message edits (default: true)
   "streaming": true,

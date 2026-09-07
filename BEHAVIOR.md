@@ -26,8 +26,13 @@
 - auto-approves permission when no onPermission callback
 - calls session/load when sessionId provided and loadSession capability is true
 - calls session/resume when resume capability is available
+- closeSession is a no-op when no session is active
+- closeSession is non-fatal when agent does not support it
+- closeSession sends session/close request
 - creates a new session when no sessionId provided
 - delegates permission to onPermission callback
+- deleteSession sends session/delete request
+- deleteSession throws when agent does not support it
 - does not call set_mode when no sessionMode configured
 - initial session mode failure is non-fatal (agent does not support modes)
 - kill() disposes session and kills process
@@ -37,6 +42,7 @@
 - loadSession uses session/load when only loadSession capability is true
 - loadSession uses session/resume when resume capability is available
 - loads session config from sessionConfigPath
+- newSession calls closeSession before creating new session
 - newSession creates a new session and updates sessionId
 - nextUpdate() delegates to session.nextUpdate
 - prompt() delegates to session.prompt
@@ -76,6 +82,10 @@
 - splits long output over 4096 chars
 
 ## Module: BridgeBot
+- /delete <id> deletes a session
+- /delete active session is rejected
+- /delete on error sends error message
+- /delete without arg shows usage
 - /mode <id> switches mode
 - /mode <unknown> sends available modes
 - /mode lists available modes
@@ -102,10 +112,15 @@
 - forwards thoughts when showThoughts=true
 - forwards to agent when onCommand returns false
 - handles agent_message (full message)
+- hides plan update when showPlan is false
+- hides tool_call update when showTools is false
 - ignores thoughts when showThoughts=false
 - queues and forwards text to ACP
 - rejects non-text messages
 - rejects unauthorized chat ID
+- renders plan update when showPlan is true
+- renders tool_call update when showTools is true
+- renders tool_call_update with updated status
 - responds with chat ID in setup mode (empty allowlist)
 - sends error message on prompt failure
 - sends error message when acp.prompt() rejects
@@ -115,6 +130,7 @@
 - starts and sets up handlers
 - stop() stops polling
 - streams agent_message_chunk and edits single message
+- updates current mode on current_mode_update
 
 ## Module: bridge
 - exits with error when ACP fails to start

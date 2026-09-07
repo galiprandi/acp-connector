@@ -23,6 +23,8 @@ interface DiscordBotOpts {
   allowedChannelIds: string[];
   agentCmd: string;
   showThoughts?: boolean;
+  showTools?: boolean;
+  showPlan?: boolean;
   streaming?: boolean;
   mediaHandler?: MediaHandler | null;
   onCommand?: ((text: string, chatId: number | string) => Promise<boolean>) | null;
@@ -43,12 +45,24 @@ export class DiscordBot extends BaseBot {
     allowedChannelIds,
     agentCmd,
     showThoughts = false,
+    showTools = true,
+    showPlan = true,
     streaming = true,
     mediaHandler = null,
     onCommand = null,
     onPrompt = null,
   }: DiscordBotOpts) {
-    super({ acp, agentCmd, showThoughts, streaming, mediaHandler, onCommand, onPrompt });
+    super({
+      acp,
+      agentCmd,
+      showThoughts,
+      showTools,
+      showPlan,
+      streaming,
+      mediaHandler,
+      onCommand,
+      onPrompt,
+    });
     this.token = token;
     this.allowedChannelIds = new Set(allowedChannelIds.map(String));
     this.client = new Client({
@@ -232,6 +246,7 @@ export class DiscordBot extends BaseBot {
         '  /new — start a fresh session (clears context)',
         '  /sessions — list available sessions',
         '  /session `<id>` — switch to an existing session',
+        '  /delete `<id>` — delete a session',
         '  /mode — list available session modes',
         '  /mode `<id>` — switch session mode (e.g. /mode bypass)',
         '',

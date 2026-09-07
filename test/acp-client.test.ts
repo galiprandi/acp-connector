@@ -79,6 +79,8 @@ vi.mock('@agentclientprotocol/sdk', () => ({
         list: 'session/list',
         cancel: 'session/cancel',
         setMode: 'session/set_mode',
+        close: 'session/close',
+        delete: 'session/delete',
       },
     },
     client: { session: { requestPermission: 'session/request_permission' } },
@@ -478,5 +480,76 @@ describe('AcpClient', () => {
     // Should not throw — start() resolves despite set_mode failure
     await client.start();
     expect(client.sessionId).toBe('test-session-id');
+  });
+
+  it('closeSession sends session/close request', async () => {
+    const client = new AcpClient({ agentCmd: 'acp-agent serve' });
+    await client.start();
+    await client.closeSession();
+    expect(mockCtx.request).toHaveBeenCalledWith('session/close', {
+      sessionId: 'test-session-id',
+    });
+  });
+
+  it('closeSession is non-fatal when agent does not support it', async () => {
+    mockCtx.request.mockImplementation(async (method: string) => {
+      if (method === 'initialize') {
+        return { protocolVersion: 1, agentCapabilities: { loadSession: true } };
+      }
+      if (method === 'session/close') {
+        throw new Error('Method not found');
+      }
+      return {};
+    });
+    const client = new AcpClient({ agentCmd: 'acp-agent serve' });
+    await client.start();
+    // Should not throw — closeSession is best-effort
+    await client.closeSession();
+    expect(client.sessionId).toBe('test-session-id');
+  });
+
+  it('closeSession is a no-op when no session is active', async () => {
+    const client = new AcpClient({ agentCmd: 'acp-agent serve' });
+    await client.closeSession();
+    expect(mockCtx.request).not.toHaveBeenCalledWith('session/close', expect.anything());
+  });
+
+  it('newSession calls closeSession before creating new session', async () => {
+    const client = new AcpClient({ agentCmd: 'acp-agent serve' });
+    await client.start();
+    mockCtx.buildSession.mockReturnValueOnce({
+      start: vi.fn(async () => mockSession),
+    });
+    await client.newSession();
+    // closeSession should have been called
+    expect(mockCtx.request).toHaveBeenCalledWith('session/close', {
+      sessionId: 'test-session-id',
+    });
+  });
+
+  it('deleteSession sends session/delete request', async () => {
+    mockCtx.request.mockImplementation(async (method: string) => {
+      if (method === 'initialize') {
+        return {
+          protocolVersion: 1,
+          agentCapabilities: { sessionCapabilities: { delete: {} } },
+        };
+      }
+      return {};
+    });
+    const client = new AcpClient({ agentCmd: 'acp-agent serve' });
+    await client.start();
+    await client.deleteSession('other-session');
+    expect(mockCtx.request).toHaveBeenCalledWith('session/delete', {
+      sessionId: 'other-session',
+    });
+  });
+
+  it('deleteSession throws when agent does not support it', async () => {
+    const client = new AcpClient({ agentCmd: 'acp-agent serve' });
+    await client.start();
+    await expect(client.deleteSession('other-session')).rejects.toThrow(
+      'Agent does not support session/delete'
+    );
   });
 });

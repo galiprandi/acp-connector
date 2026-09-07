@@ -9,6 +9,8 @@ export interface BaseBotOpts {
   acp: AcpClient;
   agentCmd: string;
   showThoughts: boolean;
+  showTools: boolean;
+  showPlan: boolean;
   streaming: boolean;
   mediaHandler: MediaHandler | null;
   onCommand: ((text: string, chatId: number | string) => Promise<boolean>) | null;
@@ -37,6 +39,8 @@ export abstract class BaseBot implements PlatformBot {
   protected acp: AcpClient;
   protected agentCmd: string;
   protected showThoughts: boolean;
+  protected showTools: boolean;
+  protected showPlan: boolean;
   protected streaming: boolean;
   protected mediaHandler: MediaHandler | null;
   onCommand: ((text: string, chatId: number | string) => Promise<boolean>) | null;
@@ -49,6 +53,8 @@ export abstract class BaseBot implements PlatformBot {
   protected streamDirty: boolean;
   protected currentChannelId: string | number | null;
   protected permissionPending: PermissionPending | null;
+  protected toolCalls: Map<string, { title?: string; status?: string; kind?: string }>;
+  protected planText: string;
 
   protected abstract readonly maxLen: number;
 
@@ -56,6 +62,8 @@ export abstract class BaseBot implements PlatformBot {
     acp,
     agentCmd,
     showThoughts,
+    showTools,
+    showPlan,
     streaming,
     mediaHandler,
     onCommand,
@@ -64,6 +72,8 @@ export abstract class BaseBot implements PlatformBot {
     this.acp = acp;
     this.agentCmd = agentCmd;
     this.showThoughts = showThoughts;
+    this.showTools = showTools;
+    this.showPlan = showPlan;
     this.streaming = streaming;
     this.mediaHandler = mediaHandler;
     this.onCommand = onCommand;
@@ -76,6 +86,8 @@ export abstract class BaseBot implements PlatformBot {
     this.streamDirty = false;
     this.currentChannelId = null;
     this.permissionPending = null;
+    this.toolCalls = new Map();
+    this.planText = '';
   }
 
   abstract start(): Promise<void>;
@@ -113,6 +125,8 @@ export abstract class BaseBot implements PlatformBot {
         return this._handleListSessions(channelId);
       case 'session':
         return this._handleSwitchSession(channelId, arg);
+      case 'delete':
+        return this._handleDeleteSession(channelId, arg);
       case 'mode':
         return this._handleModeCommand(channelId, arg);
       default:
@@ -170,6 +184,25 @@ export abstract class BaseBot implements PlatformBot {
       console.log(`🔄 switched to session: ${id}`);
     } catch (err) {
       await this.sendMessage(channelId, `Failed to switch session: ${(err as Error).message}`);
+    }
+    return true;
+  }
+
+  private async _handleDeleteSession(channelId: string | number, arg: string): Promise<boolean> {
+    if (!arg) {
+      await this.sendMessage(channelId, 'Usage: /delete `<id>`');
+      return true;
+    }
+    if (arg === this.acp.sessionId) {
+      await this.sendMessage(channelId, 'Cannot delete the active session. Use /new first.');
+      return true;
+    }
+    try {
+      await this.acp.deleteSession(arg);
+      await this.sendMessage(channelId, `🗑 Deleted session: \`${arg}\``);
+      console.log(`🗑 deleted session: ${arg}`);
+    } catch (err) {
+      await this.sendMessage(channelId, `Failed to delete session: ${(err as Error).message}`);
     }
     return true;
   }
@@ -259,6 +292,8 @@ export abstract class BaseBot implements PlatformBot {
     this.currentMessageId = null;
     this.streamDirty = false;
     this.currentChannelId = channelId;
+    this.toolCalls = new Map();
+    this.planText = '';
 
     if (this.onPrompt) this.onPrompt(text, channelId);
 
@@ -349,6 +384,71 @@ export abstract class BaseBot implements PlatformBot {
             if (this.streaming) this._scheduleStreamFlush();
           }
         }
+        break;
+      case 'tool_call':
+        if (this.showTools) {
+          const tcId = update.toolCallId || update.id || '';
+          const title = update.title || update.name || '';
+          const status = update.status || 'pending';
+          const kind = update.kind || '';
+          if (tcId) this.toolCalls.set(tcId, { title, status, kind });
+          const label = title || kind || `tool:${tcId.slice(-8)}`;
+          const line = `\n🔧 _${label} — ${status}_\n`;
+          this.streamBuffer += line;
+          this.streamDirty = true;
+          if (this.streaming) this._scheduleStreamFlush();
+        }
+        break;
+      case 'tool_call_update':
+        if (this.showTools) {
+          const tcId = update.toolCallId || update.id || '';
+          const existing = this.toolCalls.get(tcId) || {};
+          const title = update.title || existing.title || '';
+          const status = update.status || existing.status || 'in_progress';
+          const kind = update.kind || existing.kind || '';
+          if (tcId) this.toolCalls.set(tcId, { title, status, kind });
+          const label = title || kind || `tool:${tcId.slice(-8)}`;
+          const line = `\n🔧 _${label} — ${status}_\n`;
+          this.streamBuffer += line;
+          this.streamDirty = true;
+          if (this.streaming) this._scheduleStreamFlush();
+        }
+        break;
+      case 'plan':
+        if (this.showPlan) {
+          const entries = update.entries || [];
+          const lines = entries.map(
+            // biome-ignore lint/suspicious/noExplicitAny: SDK plan entry type
+            (e: any) => {
+              const status = e.status || 'pending';
+              const icon = status === 'completed' ? '✅' : status === 'in_progress' ? '▶' : '○';
+              const content = e.content || '';
+              return `${icon} ${content}`;
+            }
+          );
+          if (lines.length > 0) {
+            this.planText = `\n📋 _Plan:_\n${lines.join('\n')}\n`;
+            this.streamBuffer += this.planText;
+            this.streamDirty = true;
+            if (this.streaming) this._scheduleStreamFlush();
+          }
+        }
+        break;
+      case 'current_mode_update':
+        if (update.modeId && this.acp.modes) {
+          this.acp.modes.currentModeId = update.modeId;
+        }
+        break;
+      case 'available_commands_update':
+        // Agent-advertised slash commands — stored but not yet surfaced in /help
+        // Future: include in /help output
+        break;
+      case 'config_option_update':
+        // Agent-driven config option change — stored but not yet surfaced
+        // Future: update config option state for /config command
+        break;
+      case 'session_info_update':
+        // Session metadata update (title, etc.) — informational only
         break;
       default:
         break;

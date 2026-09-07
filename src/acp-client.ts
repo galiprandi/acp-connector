@@ -294,11 +294,45 @@ export class AcpClient {
   }
 
   /**
+   * Close the current session cleanly via `session/close`.
+   * Not all agents support this method — failures are non-fatal.
+   */
+  async closeSession(): Promise<void> {
+    if (!this._ctx) return;
+    if (!this.sessionId) return;
+    try {
+      await this._ctx.request(acp.methods.agent.session.close, {
+        sessionId: this.sessionId,
+      });
+    } catch {
+      // Agent doesn't support session/close — non-fatal, dispose instead
+    }
+  }
+
+  /**
+   * Delete a session from the agent's session list via `session/delete`.
+   * Requires `sessionCapabilities.delete` capability.
+   * @param sessionId - The session ID to delete.
+   */
+  async deleteSession(sessionId: string): Promise<void> {
+    if (!this._ctx) throw new Error('ACP context not available');
+    const caps = this.agentCapabilities;
+    if (!caps?.sessionCapabilities?.delete) {
+      throw new Error('Agent does not support session/delete');
+    }
+    await this._ctx.request(acp.methods.agent.session.delete, {
+      sessionId,
+    });
+  }
+
+  /**
    * Close the current session and create a new one with fresh context.
+   * Attempts `session/close` before disposing (non-fatal if unsupported).
    * @returns The new session ID.
    */
   async newSession(): Promise<string> {
     if (!this._ctx) throw new Error('ACP context not available');
+    await this.closeSession();
     if (this.session) this.session.dispose();
     const sessionConfig = this._loadSessionConfig();
     const builder = sessionConfig

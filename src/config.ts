@@ -57,6 +57,8 @@ export interface BridgeConfig {
   sessionMode?: string;
   sessionConfigPath?: string;
   showThoughts?: boolean;
+  showTools?: boolean;
+  showPlan?: boolean;
   streaming?: boolean;
   logLevel?: 'error' | 'info' | 'debug';
   cron?: CronJob[];

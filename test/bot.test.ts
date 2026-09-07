@@ -44,6 +44,8 @@ interface MockAcp {
   listSessions: MockFn;
   loadSession: MockFn;
   setSessionMode: MockFn;
+  deleteSession: MockFn;
+  closeSession: MockFn;
   sessionId: string | null;
   modes: {
     currentModeId: string;
@@ -70,6 +72,8 @@ function createMockAcp(): MockAcp {
     ]),
     loadSession: vi.fn(async (id: string) => id),
     setSessionMode: vi.fn(async () => {}),
+    deleteSession: vi.fn(async () => {}),
+    closeSession: vi.fn(async () => {}),
     sessionId: 'test-session-id',
     modes: {
       currentModeId: 'default',
@@ -577,5 +581,191 @@ describe('BridgeBot', () => {
     expect(mockBot.sendMessage).toHaveBeenCalledWith(123, 'Failed to set mode: agent rejected', {
       parse_mode: 'Markdown',
     });
+  });
+
+  // --- Tool call updates ---
+
+  it('renders tool_call update when showTools is true', async () => {
+    const { bot, acp } = createBot({ showTools: true });
+    await bot.start();
+    acp._pushUpdate({
+      kind: 'update',
+      update: {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'tc-123',
+        title: 'Read file',
+        status: 'in_progress',
+        kind: 'read',
+      },
+    });
+    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    await handler({ chat: { id: 123 }, text: 'hi' });
+    await vi.advanceTimersByTimeAsync(1000);
+    const calls = mockBot.sendMessage.mock.calls.filter((c) => c[0] === 123);
+    const text = calls.map((c) => c[1]).join('');
+    expect(text).toContain('Read file');
+    expect(text).toContain('in_progress');
+  });
+
+  it('hides tool_call update when showTools is false', async () => {
+    const { bot, acp } = createBot({ showTools: false });
+    await bot.start();
+    acp._pushUpdate({
+      kind: 'update',
+      update: {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'tc-123',
+        title: 'Read file',
+        status: 'in_progress',
+      },
+    });
+    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    await handler({ chat: { id: 123 }, text: 'hi' });
+    await vi.advanceTimersByTimeAsync(1000);
+    const calls = mockBot.sendMessage.mock.calls.filter(
+      (c) => c[0] === 123 && typeof c[1] === 'string'
+    );
+    const text = calls.map((c) => c[1]).join('');
+    expect(text).not.toContain('Read file');
+  });
+
+  it('renders tool_call_update with updated status', async () => {
+    const { bot, acp } = createBot({ showTools: true });
+    await bot.start();
+    acp._pushUpdate({
+      kind: 'update',
+      update: {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'tc-456',
+        title: 'Run tests',
+        status: 'pending',
+      },
+    });
+    acp._pushUpdate({
+      kind: 'update',
+      update: {
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'tc-456',
+        status: 'completed',
+      },
+    });
+    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    await handler({ chat: { id: 123 }, text: 'hi' });
+    await vi.advanceTimersByTimeAsync(1000);
+    const calls = mockBot.sendMessage.mock.calls.filter((c) => c[0] === 123);
+    const text = calls.map((c) => c[1]).join('');
+    expect(text).toContain('Run tests');
+    expect(text).toContain('completed');
+  });
+
+  // --- Plan updates ---
+
+  it('renders plan update when showPlan is true', async () => {
+    const { bot, acp } = createBot({ showPlan: true });
+    await bot.start();
+    acp._pushUpdate({
+      kind: 'update',
+      update: {
+        sessionUpdate: 'plan',
+        entries: [
+          { content: 'Read file', status: 'completed' },
+          { content: 'Write tests', status: 'pending' },
+        ],
+      },
+    });
+    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    await handler({ chat: { id: 123 }, text: 'hi' });
+    await vi.advanceTimersByTimeAsync(1000);
+    const calls = mockBot.sendMessage.mock.calls.filter((c) => c[0] === 123);
+    const text = calls.map((c) => c[1]).join('');
+    expect(text).toContain('Read file');
+    expect(text).toContain('Write tests');
+  });
+
+  it('hides plan update when showPlan is false', async () => {
+    const { bot, acp } = createBot({ showPlan: false });
+    await bot.start();
+    acp._pushUpdate({
+      kind: 'update',
+      update: {
+        sessionUpdate: 'plan',
+        entries: [{ content: 'Read file', status: 'pending' }],
+      },
+    });
+    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    await handler({ chat: { id: 123 }, text: 'hi' });
+    await vi.advanceTimersByTimeAsync(1000);
+    const calls = mockBot.sendMessage.mock.calls.filter(
+      (c) => c[0] === 123 && typeof c[1] === 'string'
+    );
+    const text = calls.map((c) => c[1]).join('');
+    expect(text).not.toContain('Read file');
+  });
+
+  // --- current_mode_update ---
+
+  it('updates current mode on current_mode_update', async () => {
+    const { bot, acp } = createBot();
+    await bot.start();
+    expect(acp.modes?.currentModeId).toBe('default');
+    acp._pushUpdate({
+      kind: 'update',
+      update: {
+        sessionUpdate: 'current_mode_update',
+        modeId: 'bypass',
+      },
+    });
+    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    await handler({ chat: { id: 123 }, text: 'hi' });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(acp.modes?.currentModeId).toBe('bypass');
+  });
+
+  // --- /delete command ---
+
+  it('/delete <id> deletes a session', async () => {
+    const { bot, acp } = createBot();
+    await bot.start();
+    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    await handler({ chat: { id: 123 }, text: '/delete other-session' });
+    expect(acp.deleteSession).toHaveBeenCalledWith('other-session');
+    expect(mockBot.sendMessage).toHaveBeenCalledWith(123, '🗑 Deleted session: `other-session`', {
+      parse_mode: 'Markdown',
+    });
+  });
+
+  it('/delete without arg shows usage', async () => {
+    const { bot } = createBot();
+    await bot.start();
+    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    await handler({ chat: { id: 123 }, text: '/delete' });
+    expect(mockBot.sendMessage).toHaveBeenCalledWith(123, 'Usage: /delete `<id>`', {
+      parse_mode: 'Markdown',
+    });
+  });
+
+  it('/delete active session is rejected', async () => {
+    const { bot } = createBot();
+    await bot.start();
+    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    await handler({ chat: { id: 123 }, text: '/delete test-session-id' });
+    expect(mockBot.sendMessage).toHaveBeenCalledWith(
+      123,
+      'Cannot delete the active session. Use /new first.',
+      { parse_mode: 'Markdown' }
+    );
+  });
+
+  it('/delete on error sends error message', async () => {
+    const { bot, acp } = createBot();
+    await bot.start();
+    acp.deleteSession.mockRejectedValueOnce(new Error('agent rejected'));
+    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    await handler({ chat: { id: 123 }, text: '/delete other-session' });
+    expect(mockBot.sendMessage).toHaveBeenCalledWith(
+      123,
+      'Failed to delete session: agent rejected',
+      { parse_mode: 'Markdown' }
+    );
   });
 });

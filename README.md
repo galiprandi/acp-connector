@@ -140,6 +140,8 @@ See [`acp-connector.example.jsonc`](acp-connector.example.jsonc) for the full re
 | `sessionMode` | `string` | no | — | Initial session mode (e.g. `"bypass"` for Devin's auto-approve-all) |
 | `sessionConfigPath` | `string` | no | — | Path to MCP/session config JSONC |
 | `showThoughts` | `boolean` | no | `false` | Forward agent thoughts to chat |
+| `showTools` | `boolean` | no | `true` | Show tool calls (e.g. "Read file", "Run tests") in chat. Set to `false` when only the final answer matters |
+| `showPlan` | `boolean` | no | `true` | Show agent plan/checklist in chat |
 | `streaming` | `boolean` | no | `true` | Stream responses with live message edits |
 | `logLevel` | `string` | no | `"info"` | `"error"` \| `"info"` \| `"debug"` |
 | `cron` | `CronJob[]` | no | `[]` | Scheduled jobs (see below) |
@@ -375,10 +377,11 @@ The bridge intercepts these commands before forwarding to the agent:
 | `/new` | Start a fresh session (clears accumulated context) |
 | `/sessions` | List available sessions (requires agent `session/list` capability) |
 | `/session <id>` | Switch to an existing session (uses `session/resume` or `session/load`) |
+| `/delete <id>` | Delete a session (requires agent `session/delete` capability) |
 | `/mode` | List available session modes reported by the agent |
 | `/mode <id>` | Switch session mode (e.g. `/mode bypass` for Devin's auto-approve-all) |
 
-`/new` and `/session` are refused while the agent is busy — use `/stop` first. `/sessions` gracefully degrades with an error message if the agent doesn't support `session/list`. `/mode` reports "No session modes available" if the agent doesn't expose modes.
+`/new` and `/session` are refused while the agent is busy — use `/stop` first. `/sessions` gracefully degrades with an error message if the agent doesn't support `session/list`. `/delete` cannot delete the active session (use `/new` first). `/mode` reports "No session modes available" if the agent doesn't expose modes.
 
 #### Initial session mode
 

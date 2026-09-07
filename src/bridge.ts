@@ -61,6 +61,8 @@ export async function run(): Promise<void> {
       allowedChatIds: tg.allowedChatIds,
       agentCmd: config.agentCmd,
       showThoughts: config.showThoughts,
+      showTools: config.showTools,
+      showPlan: config.showPlan,
       streaming: config.streaming,
     });
     bots.push(bot);
@@ -74,6 +76,8 @@ export async function run(): Promise<void> {
       allowedChannelIds: dc.allowedChannelIds.map(String),
       agentCmd: config.agentCmd,
       showThoughts: config.showThoughts,
+      showTools: config.showTools,
+      showPlan: config.showPlan,
       streaming: config.streaming,
     });
     bots.push(bot);

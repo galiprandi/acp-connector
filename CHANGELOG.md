@@ -8,15 +8,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Tool call progress: `tool_call` and `tool_call_update` updates now render tool name and status in chat (gated by `showTools` config, default: true)
+- Agent plan rendering: `plan` updates show a checklist of steps with status icons (gated by `showPlan` config, default: true)
+- `current_mode_update` handling: agent-driven mode changes now sync the bridge's mode state
+- `available_commands_update` and `config_option_update` handling: parsed without crashing (future: surface in UI)
+- `session_info_update` handling: parsed without crashing
+- `showTools` config option — set to `false` to hide tool call messages when the agent is not used for programming and only the final answer matters
+- `showPlan` config option — set to `false` to hide plan/checklist entries
+- `AcpClient.closeSession()` — calls `session/close` on the active session (best-effort, non-fatal if agent doesn't support it)
+- `AcpClient.deleteSession(id)` — calls `session/delete` to remove a session from the agent's list
+- `/delete <id>` command — delete a session (rejects deleting the active session)
+- `newSession()` now calls `closeSession()` before creating a new session
+- 16 new tests (325 total)
+
+### Changed
+- `ADR.md` and `DESIGN.md` translated to English
 - Session mode support via `session/set_mode`:
   - `/mode` — list available session modes reported by the agent
   - `/mode <id>` — switch session mode (e.g. `/mode bypass` for Devin's auto-approve-all)
   - `sessionMode` config option — set initial session mode applied after `session/new`, `session/load`, or `session/resume`
 - `AcpClient.setSessionMode(modeId)` — call `session/set_mode` on the active session
 - `AcpClient.initialSessionMode` — stored from config, applied automatically on session creation/load
-- 12 new tests (309 total)
-
-### Changed
 - Initial session mode application is non-fatal: if the agent rejects `session/set_mode` (e.g. OpenCode), the bridge logs a warning and continues instead of crashing
 - AGENTS.md now requires testing ACP features against both Devin and OpenCode before committing
 
