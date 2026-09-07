@@ -92,6 +92,86 @@ export abstract class BaseBot implements PlatformBot {
     channelId: string | number
   ): Promise<boolean>;
 
+  /**
+   * Handle session management commands: /new, /sessions, /session <id>.
+   * Returns true if the command was handled, false otherwise.
+   * Uses sendMessage() so it works without an active prompt.
+   */
+  protected async _handleSessionCommand(
+    text: string,
+    channelId: string | number
+  ): Promise<boolean> {
+    if (!text.startsWith('/')) return false;
+    const parts = text.slice(1).split(/\s+/);
+    const cmd = parts[0];
+    const arg = parts.slice(1).join(' ').trim();
+
+    switch (cmd) {
+      case 'new':
+        return this._handleNewSession(channelId);
+      case 'sessions':
+        return this._handleListSessions(channelId);
+      case 'session':
+        return this._handleSwitchSession(channelId, arg);
+      default:
+        return false;
+    }
+  }
+
+  private async _handleNewSession(channelId: string | number): Promise<boolean> {
+    if (this.busy) {
+      await this.sendMessage(channelId, 'Cannot start new session while busy. Use /stop first.');
+      return true;
+    }
+    try {
+      const newId = await this.acp.newSession();
+      await this.sendMessage(channelId, `🆕 New session started: \`${newId}\``);
+      console.log(`🆕 new session: ${newId}`);
+    } catch (err) {
+      await this.sendMessage(channelId, `Failed to create session: ${(err as Error).message}`);
+    }
+    return true;
+  }
+
+  private async _handleListSessions(channelId: string | number): Promise<boolean> {
+    try {
+      const sessions = await this.acp.listSessions();
+      if (sessions.length === 0) {
+        await this.sendMessage(channelId, 'No sessions available.');
+        return true;
+      }
+      const lines = sessions.map((s) => {
+        const title = s.title ? ` — ${s.title}` : '';
+        const updated = s.updatedAt ? ` (${s.updatedAt})` : '';
+        const marker = s.sessionId === this.acp.sessionId ? '▶' : ' ';
+        return `${marker} \`${s.sessionId}\`${title}${updated}`;
+      });
+      await this.sendMessage(channelId, `*Sessions:*\n${lines.join('\n')}`);
+    } catch (err) {
+      await this.sendMessage(channelId, `Cannot list sessions: ${(err as Error).message}`);
+    }
+    return true;
+  }
+
+  private async _handleSwitchSession(channelId: string | number, arg: string): Promise<boolean> {
+    if (!arg) {
+      await this.sendMessage(channelId, 'Usage: /session `<id>`');
+      return true;
+    }
+    if (this.busy) {
+      await this.sendMessage(channelId, 'Cannot switch session while busy. Use /stop first.');
+      return true;
+    }
+    try {
+      const id = await this.acp.loadSession(arg);
+      await this.sendMessage(channelId, `🔄 Switched to session: \`${id}\``);
+      console.log(`🔄 switched to session: ${id}`);
+    } catch (err) {
+      await this.sendMessage(channelId, `Failed to switch session: ${(err as Error).message}`);
+    }
+    return true;
+  }
+
   setMediaHandler(handler: MediaHandler): void {
     this.mediaHandler = handler;
   }

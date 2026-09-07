@@ -19,6 +19,7 @@ import type {
   RequestPermissionRequest,
   RequestPermissionResponse,
   ResumeSessionRequest,
+  SessionInfo,
   SessionModeState,
   Stream,
 } from '@agentclientprotocol/sdk';
@@ -78,6 +79,7 @@ export class AcpClient {
   sessionId: string | null;
   modes: SessionModeState | null | undefined;
   promptCapabilities: PromptCapabilities | null;
+  agentCapabilities: AgentCapabilities | null;
   private _ctx: SessionClientContext | null;
   private _keepAlive: Promise<void> | null;
   private _disconnect: (() => void) | null;
@@ -108,6 +110,7 @@ export class AcpClient {
     this.sessionId = null;
     this.modes = null;
     this.promptCapabilities = null;
+    this.agentCapabilities = null;
     this._ctx = null;
     this._keepAlive = null;
     this._disconnect = null;
@@ -186,6 +189,7 @@ export class AcpClient {
         });
         this.protocolVersion = initResult.protocolVersion;
         this.promptCapabilities = initResult.agentCapabilities?.promptCapabilities || null;
+        this.agentCapabilities = initResult.agentCapabilities || null;
 
         let session: ActiveSession;
         if (this.resumeSessionId) {
@@ -272,6 +276,84 @@ export class AcpClient {
     await this._ctx.notify(acp.methods.agent.session.cancel, {
       sessionId: this.session.sessionId,
     });
+  }
+
+  /**
+   * Close the current session and create a new one with fresh context.
+   * @returns The new session ID.
+   */
+  async newSession(): Promise<string> {
+    if (!this._ctx) throw new Error('ACP context not available');
+    if (this.session) this.session.dispose();
+    const sessionConfig = this._loadSessionConfig();
+    const builder = sessionConfig
+      ? this._ctx.buildSession(sessionConfig as NewSessionRequest)
+      : this._ctx.buildSession(this.agentCwd);
+    const session = await builder.start();
+    this.session = session;
+    this.sessionId = session.sessionId;
+    this.modes = session.modes;
+    return session.sessionId;
+  }
+
+  /**
+   * List available sessions from the agent.
+   * Requires `sessionCapabilities.list` capability.
+   * @returns Array of session info objects.
+   */
+  async listSessions(): Promise<SessionInfo[]> {
+    if (!this._ctx) throw new Error('ACP context not available');
+    const caps = this.agentCapabilities;
+    if (!caps?.sessionCapabilities?.list) {
+      throw new Error('Agent does not support session/list');
+    }
+    const response = await this._ctx.request(acp.methods.agent.session.list, {});
+    return (response as { sessions: SessionInfo[] }).sessions;
+  }
+
+  /**
+   * Switch to an existing session by ID.
+   * Uses `session/resume` if available, falls back to `session/load`.
+   * @param sessionId - The session ID to switch to.
+   * @returns The session ID (same as input).
+   */
+  async loadSession(sessionId: string): Promise<string> {
+    if (!this._ctx) throw new Error('ACP context not available');
+    const caps = this.agentCapabilities || {};
+    const canResume = caps.sessionCapabilities?.resume !== undefined;
+    const canLoad = caps.loadSession === true;
+    if (!canResume && !canLoad) {
+      throw new Error('Agent does not support session/resume or session/load');
+    }
+
+    if (this.session) this.session.dispose();
+
+    const sessionConfig = this._loadSessionConfig();
+    const loadParams: ResumeSessionRequest | LoadSessionRequest = sessionConfig
+      ? ({ sessionId, ...(sessionConfig as Partial<ResumeSessionRequest>) } as ResumeSessionRequest)
+      : { sessionId, cwd: this.agentCwd, mcpServers: [] };
+
+    let response: Partial<NewSessionResponse>;
+    if (canResume) {
+      response = await this._ctx.request(
+        acp.methods.agent.session.resume,
+        loadParams as ResumeSessionRequest
+      );
+    } else {
+      response = await this._ctx.request(
+        acp.methods.agent.session.load,
+        loadParams as LoadSessionRequest
+      );
+    }
+
+    const session = this._ctx.attachSession({
+      sessionId,
+      ...(response as Partial<NewSessionResponse>),
+    } as NewSessionResponse);
+    this.session = session;
+    this.sessionId = session.sessionId;
+    this.modes = session.modes;
+    return session.sessionId;
   }
 
   kill(): void {

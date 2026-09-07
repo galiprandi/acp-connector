@@ -63,7 +63,13 @@ vi.mock('@agentclientprotocol/sdk', () => ({
   methods: {
     agent: {
       initialize: 'initialize',
-      session: { load: 'session/load', resume: 'session/resume' },
+      session: {
+        load: 'session/load',
+        resume: 'session/resume',
+        new: 'session/new',
+        list: 'session/list',
+        cancel: 'session/cancel',
+      },
     },
     client: { session: { requestPermission: 'session/request_permission' } },
   },
@@ -216,5 +222,162 @@ describe('AcpClient', () => {
       'session/load',
       expect.objectContaining({ cwd: '/tmp', mcpServers: [] })
     );
+  });
+
+  it('newSession creates a new session and updates sessionId', async () => {
+    const newSession: MockSession = {
+      sessionId: 'new-session-id',
+      modes: { currentModeId: 'default' },
+      prompt: vi.fn(async () => {}),
+      nextUpdate: vi.fn(async () => ({ kind: 'stop', stopReason: 'end_turn' })),
+      dispose: vi.fn(),
+    };
+    const client = new AcpClient({ agentCmd: 'acp-agent serve' });
+    await client.start();
+    expect(client.sessionId).toBe('test-session-id');
+    // Set up the mock AFTER start() consumed the first buildSession call
+    mockCtx.buildSession.mockReturnValueOnce({
+      start: vi.fn(async () => newSession),
+    });
+    const id = await client.newSession();
+    expect(id).toBe('new-session-id');
+    expect(client.sessionId).toBe('new-session-id');
+    expect(mockSession.dispose).toHaveBeenCalled();
+  });
+
+  it('listSessions returns sessions when capability supported', async () => {
+    mockCtx.request.mockImplementation(async (method: string) => {
+      if (method === 'initialize') {
+        return {
+          protocolVersion: 1,
+          agentCapabilities: { sessionCapabilities: { list: {} } },
+        };
+      }
+      if (method === 'session/list') {
+        return {
+          sessions: [
+            { sessionId: 's1', cwd: '/tmp', title: 'Session 1' },
+            { sessionId: 's2', cwd: '/tmp', title: null },
+          ],
+        };
+      }
+      return {};
+    });
+    const client = new AcpClient({ agentCmd: 'acp-agent serve' });
+    await client.start();
+    const sessions = await client.listSessions();
+    expect(sessions).toHaveLength(2);
+    expect(sessions[0].sessionId).toBe('s1');
+    expect(sessions[0].title).toBe('Session 1');
+  });
+
+  it('listSessions throws when capability not supported', async () => {
+    mockCtx.request.mockImplementation(async (method: string) => {
+      if (method === 'initialize') {
+        return { protocolVersion: 1, agentCapabilities: {} };
+      }
+      return {};
+    });
+    const client = new AcpClient({ agentCmd: 'acp-agent serve' });
+    await client.start();
+    await expect(client.listSessions()).rejects.toThrow('does not support session/list');
+  });
+
+  it('loadSession uses session/resume when resume capability is available', async () => {
+    mockCtx.request.mockImplementation(async (method: string) => {
+      if (method === 'initialize') {
+        return {
+          protocolVersion: 1,
+          agentCapabilities: {
+            loadSession: true,
+            sessionCapabilities: { resume: {} },
+          },
+        };
+      }
+      if (method === 'session/resume') {
+        return { sessionId: 'target-session' };
+      }
+      return {};
+    });
+    const loadedSession: MockSession = {
+      sessionId: 'target-session',
+      modes: { currentModeId: 'default' },
+      prompt: vi.fn(async () => {}),
+      nextUpdate: vi.fn(async () => ({ kind: 'stop', stopReason: 'end_turn' })),
+      dispose: vi.fn(),
+    };
+    mockCtx.attachSession.mockReturnValueOnce(loadedSession);
+    const client = new AcpClient({ agentCmd: 'acp-agent serve' });
+    await client.start();
+    const id = await client.loadSession('target-session');
+    expect(id).toBe('target-session');
+    expect(mockCtx.request).toHaveBeenCalledWith(
+      'session/resume',
+      expect.objectContaining({ sessionId: 'target-session' })
+    );
+    expect(client.sessionId).toBe('target-session');
+  });
+
+  it('loadSession uses session/load when only loadSession capability is true', async () => {
+    mockCtx.request.mockImplementation(async (method: string) => {
+      if (method === 'initialize') {
+        return { protocolVersion: 1, agentCapabilities: { loadSession: true } };
+      }
+      if (method === 'session/load') {
+        return { sessionId: 'loaded-session' };
+      }
+      return {};
+    });
+    const loadedSession: MockSession = {
+      sessionId: 'loaded-session',
+      modes: { currentModeId: 'default' },
+      prompt: vi.fn(async () => {}),
+      nextUpdate: vi.fn(async () => ({ kind: 'stop', stopReason: 'end_turn' })),
+      dispose: vi.fn(),
+    };
+    mockCtx.attachSession.mockReturnValueOnce(loadedSession);
+    const client = new AcpClient({ agentCmd: 'acp-agent serve' });
+    await client.start();
+    const id = await client.loadSession('loaded-session');
+    expect(id).toBe('loaded-session');
+    expect(mockCtx.request).toHaveBeenCalledWith(
+      'session/load',
+      expect.objectContaining({ sessionId: 'loaded-session' })
+    );
+  });
+
+  it('loadSession throws when no load/resume capability', async () => {
+    mockCtx.request.mockImplementation(async (method: string) => {
+      if (method === 'initialize') {
+        return { protocolVersion: 1, agentCapabilities: {} };
+      }
+      return {};
+    });
+    const client = new AcpClient({ agentCmd: 'acp-agent serve' });
+    await client.start();
+    await expect(client.loadSession('some-id')).rejects.toThrow(
+      'does not support session/resume or session/load'
+    );
+  });
+
+  it('stores agentCapabilities from init response', async () => {
+    mockCtx.request.mockImplementation(async (method: string) => {
+      if (method === 'initialize') {
+        return {
+          protocolVersion: 1,
+          agentCapabilities: {
+            loadSession: true,
+            sessionCapabilities: { list: {}, resume: {} },
+          },
+        };
+      }
+      return {};
+    });
+    const client = new AcpClient({ agentCmd: 'acp-agent serve' });
+    await client.start();
+    expect(client.agentCapabilities).toEqual({
+      loadSession: true,
+      sessionCapabilities: { list: {}, resume: {} },
+    });
   });
 });

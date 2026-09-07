@@ -40,6 +40,10 @@ interface MockAcp {
   prompt: MockFn;
   nextUpdate: MockFn;
   cancel: MockFn;
+  newSession: MockFn;
+  listSessions: MockFn;
+  loadSession: MockFn;
+  sessionId: string | null;
   _pushUpdate: (update: MockAcpUpdate) => void;
   _updates: MockAcpUpdate[];
 }
@@ -54,6 +58,13 @@ function createMockAcp(): MockAcp {
       return { kind: 'stop', stopReason: 'end_turn' };
     }),
     cancel: vi.fn(async () => {}),
+    newSession: vi.fn(async () => 'new-session-id'),
+    listSessions: vi.fn(async () => [
+      { sessionId: 's1', cwd: '/tmp', title: 'Session 1', updatedAt: null },
+      { sessionId: 's2', cwd: '/tmp', title: null, updatedAt: null },
+    ]),
+    loadSession: vi.fn(async (id: string) => id),
+    sessionId: 'test-session-id',
     _pushUpdate: (update: MockAcpUpdate): number => updates.push(update),
     _updates: updates,
   };
@@ -392,5 +403,108 @@ describe('BridgeBot', () => {
     await vi.waitFor(() => expect(bot.busy).toBe(true));
     await handler({ chat: { id: 123 }, text: '/stop' });
     expect(mockBot.sendMessage).toHaveBeenCalledWith(123, 'Stop failed: agent unreachable');
+  });
+
+  it('/new when idle creates new session', async () => {
+    const { bot, acp } = createBot();
+    await bot.start();
+    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    await handler({ chat: { id: 123 }, text: '/new' });
+    expect(acp.newSession).toHaveBeenCalled();
+    expect(mockBot.sendMessage).toHaveBeenCalledWith(
+      123,
+      '🆕 New session started: `new-session-id`',
+      { parse_mode: 'Markdown' }
+    );
+  });
+
+  it('/new when busy refuses with message', async () => {
+    const { bot, acp } = createBot();
+    await bot.start();
+    acp.nextUpdate.mockReturnValue(new Promise(() => {}));
+    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    await handler({ chat: { id: 123 }, text: 'long task' });
+    await vi.waitFor(() => expect(bot.busy).toBe(true));
+    await handler({ chat: { id: 123 }, text: '/new' });
+    expect(acp.newSession).not.toHaveBeenCalled();
+    expect(mockBot.sendMessage).toHaveBeenCalledWith(
+      123,
+      'Cannot start new session while busy. Use /stop first.',
+      { parse_mode: 'Markdown' }
+    );
+  });
+
+  it('/sessions lists available sessions', async () => {
+    const { bot, acp } = createBot();
+    await bot.start();
+    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    await handler({ chat: { id: 123 }, text: '/sessions' });
+    expect(acp.listSessions).toHaveBeenCalled();
+    expect(mockBot.sendMessage).toHaveBeenCalledWith(123, expect.stringContaining('s1'), {
+      parse_mode: 'Markdown',
+    });
+  });
+
+  it('/sessions when not supported sends error', async () => {
+    const { bot, acp } = createBot();
+    await bot.start();
+    acp.listSessions.mockRejectedValueOnce(new Error('Agent does not support session/list'));
+    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    await handler({ chat: { id: 123 }, text: '/sessions' });
+    expect(mockBot.sendMessage).toHaveBeenCalledWith(
+      123,
+      'Cannot list sessions: Agent does not support session/list',
+      { parse_mode: 'Markdown' }
+    );
+  });
+
+  it('/session <id> switches session', async () => {
+    const { bot, acp } = createBot();
+    await bot.start();
+    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    await handler({ chat: { id: 123 }, text: '/session abc-123' });
+    expect(acp.loadSession).toHaveBeenCalledWith('abc-123');
+    expect(mockBot.sendMessage).toHaveBeenCalledWith(123, '🔄 Switched to session: `abc-123`', {
+      parse_mode: 'Markdown',
+    });
+  });
+
+  it('/session without id sends usage', async () => {
+    const { bot } = createBot();
+    await bot.start();
+    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    await handler({ chat: { id: 123 }, text: '/session' });
+    expect(mockBot.sendMessage).toHaveBeenCalledWith(123, 'Usage: /session `<id>`', {
+      parse_mode: 'Markdown',
+    });
+  });
+
+  it('/session when busy refuses with message', async () => {
+    const { bot, acp } = createBot();
+    await bot.start();
+    acp.nextUpdate.mockReturnValue(new Promise(() => {}));
+    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    await handler({ chat: { id: 123 }, text: 'long task' });
+    await vi.waitFor(() => expect(bot.busy).toBe(true));
+    await handler({ chat: { id: 123 }, text: '/session abc-123' });
+    expect(acp.loadSession).not.toHaveBeenCalled();
+    expect(mockBot.sendMessage).toHaveBeenCalledWith(
+      123,
+      'Cannot switch session while busy. Use /stop first.',
+      { parse_mode: 'Markdown' }
+    );
+  });
+
+  it('/new on error sends error message', async () => {
+    const { bot, acp } = createBot();
+    await bot.start();
+    acp.newSession.mockRejectedValueOnce(new Error('agent crashed'));
+    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    await handler({ chat: { id: 123 }, text: '/new' });
+    expect(mockBot.sendMessage).toHaveBeenCalledWith(
+      123,
+      'Failed to create session: agent crashed',
+      { parse_mode: 'Markdown' }
+    );
   });
 });

@@ -67,7 +67,13 @@ vi.mock('@agentclientprotocol/sdk', () => ({
   methods: {
     agent: {
       initialize: 'initialize',
-      session: { load: 'session/load', resume: 'session/resume' },
+      session: {
+        load: 'session/load',
+        resume: 'session/resume',
+        new: 'session/new',
+        list: 'session/list',
+        cancel: 'session/cancel',
+      },
     },
     client: { session: { requestPermission: 'session/request_permission' } },
   },
@@ -288,5 +294,72 @@ describe('AcpClient edge cases', () => {
       options: [{ kind: 'deny', optionId: 'deny1' }],
     });
     expect(result.outcome.outcome).toBe('cancelled');
+  });
+
+  // 15. newSession before start throws
+  it('newSession before start throws', async () => {
+    const client = new AcpClient({ agentCmd: 'acp-agent serve' });
+    await expect(client.newSession()).rejects.toThrow('ACP context not available');
+  });
+
+  // 16. listSessions before start throws
+  it('listSessions before start throws', async () => {
+    const client = new AcpClient({ agentCmd: 'acp-agent serve' });
+    await expect(client.listSessions()).rejects.toThrow('ACP context not available');
+  });
+
+  // 17. loadSession before start throws
+  it('loadSession before start throws', async () => {
+    const client = new AcpClient({ agentCmd: 'acp-agent serve' });
+    await expect(client.loadSession('some-id')).rejects.toThrow('ACP context not available');
+  });
+
+  // 18. newSession with sessionConfig uses config-based builder
+  it('newSession with sessionConfig uses config-based builder', async () => {
+    const newSession: MockSession = {
+      sessionId: 'fresh-session',
+      modes: { currentModeId: 'default' },
+      prompt: vi.fn(async () => {}),
+      nextUpdate: vi.fn(async () => ({ kind: 'stop', stopReason: 'end_turn' })),
+      dispose: vi.fn(),
+    };
+    const client = new AcpClient({ agentCmd: 'acp-agent serve' });
+    await client.start();
+    mockCtx.buildSession.mockReturnValueOnce({
+      start: vi.fn(async () => newSession),
+    });
+    const id = await client.newSession();
+    expect(id).toBe('fresh-session');
+    expect(client.sessionId).toBe('fresh-session');
+  });
+
+  // 19. loadSession disposes old session before switching
+  it('loadSession disposes old session before switching', async () => {
+    mockCtx.request.mockImplementation(async (method: string) => {
+      if (method === 'initialize') {
+        return {
+          protocolVersion: 1,
+          agentCapabilities: { loadSession: true },
+        };
+      }
+      if (method === 'session/load') {
+        return { sessionId: 'switched-session' };
+      }
+      return {};
+    });
+    const switchedSession: MockSession = {
+      sessionId: 'switched-session',
+      modes: { currentModeId: 'default' },
+      prompt: vi.fn(async () => {}),
+      nextUpdate: vi.fn(async () => ({ kind: 'stop', stopReason: 'end_turn' })),
+      dispose: vi.fn(),
+    };
+    mockCtx.attachSession.mockReturnValueOnce(switchedSession);
+    const client = new AcpClient({ agentCmd: 'acp-agent serve' });
+    await client.start();
+    // mockSession is the original session — should be disposed
+    await client.loadSession('switched-session');
+    expect(mockSession.dispose).toHaveBeenCalled();
+    expect(client.sessionId).toBe('switched-session');
   });
 });

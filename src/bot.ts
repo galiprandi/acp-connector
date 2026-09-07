@@ -252,6 +252,8 @@ export class BridgeBot extends BaseBot {
   }
 
   protected async _handleBuiltinCommand(text: string, chatId: string | number): Promise<boolean> {
+    if (await this._handleSessionCommand(text, chatId)) return true;
+
     const cid = chatId as number;
     if (text === '/stop') {
       if (!this.busy) {
@@ -279,6 +281,9 @@ export class BridgeBot extends BaseBot {
         '',
         '*Commands:*',
         '  /stop — cancel the current task',
+        '  /new — start a fresh session (clears context)',
+        '  /sessions — list available sessions',
+        '  /session `<id>` — switch to an existing session',
         '',
         '  /cron list — list scheduled jobs',
         '  /cron add `<schedule> <prompt>` — add a job',

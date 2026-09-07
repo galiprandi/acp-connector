@@ -200,6 +200,8 @@ export class DiscordBot extends BaseBot {
     text: string,
     channelId: string | number
   ): Promise<boolean> {
+    if (await this._handleSessionCommand(text, channelId)) return true;
+
     const cid = String(channelId);
     if (text === '/stop') {
       const channel = this.client.channels.cache.get(cid) as TextChannel;
@@ -227,6 +229,9 @@ export class DiscordBot extends BaseBot {
         '',
         '**Commands:**',
         '  /stop — cancel the current task',
+        '  /new — start a fresh session (clears context)',
+        '  /sessions — list available sessions',
+        '  /session `<id>` — switch to an existing session',
         '',
         '  /cron list — list scheduled jobs',
         '  /cron add `<schedule> <prompt>` — add a job',
