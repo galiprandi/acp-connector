@@ -1,5 +1,5 @@
 import { createInterface, type Interface } from 'node:readline';
-import { type BridgeConfig, type PlatformsConfig, saveConfig } from './config';
+import { type BridgeConfig, type PlatformsConfig, saveConfig } from './config.js';
 
 function ask(rl: Interface, prompt: string): Promise<string> {
   return new Promise((resolve) => rl.question(prompt, (answer) => resolve(answer.trim())));

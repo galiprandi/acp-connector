@@ -25,7 +25,7 @@ import type {
   Stream,
 } from '@agentclientprotocol/sdk';
 import * as acp from '@agentclientprotocol/sdk';
-import { stripJsonc } from './config';
+import { stripJsonc } from './config.js';
 
 const require = createRequire(import.meta.url);
 const pkg = require('../package.json') as { version: string };

@@ -1,7 +1,7 @@
 import type { ContentBlock } from '@agentclientprotocol/sdk';
-import type { AcpClient } from './acp-client';
-import type { PlatformBot } from './bot';
-import type { MediaHandler } from './media';
+import type { AcpClient } from './acp-client.js';
+import type { PlatformBot } from './bot.js';
+import type { MediaHandler } from './media.js';
 
 const STREAM_BATCH_MS = 800;
 

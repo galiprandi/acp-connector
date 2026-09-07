@@ -1,12 +1,12 @@
-import { AcpClient } from './acp-client';
-import type { PlatformBot } from './bot';
-import { BridgeBot } from './bot';
-import { type BridgeConfig, loadConfig } from './config';
-import { CronManager } from './cron';
-import { DiscordBot } from './discord';
-import { HttpServer } from './http';
-import { MediaHandler } from './media';
-import { RoutineManager } from './routines';
+import { AcpClient } from './acp-client.js';
+import type { PlatformBot } from './bot.js';
+import { BridgeBot } from './bot.js';
+import { type BridgeConfig, loadConfig } from './config.js';
+import { CronManager } from './cron.js';
+import { DiscordBot } from './discord.js';
+import { HttpServer } from './http.js';
+import { MediaHandler } from './media.js';
+import { RoutineManager } from './routines.js';
 
 function printBanner(): void {
   const title = 'acp-connector';

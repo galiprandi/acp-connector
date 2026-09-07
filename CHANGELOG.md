@@ -5,6 +5,11 @@ All notable changes to acp-connector will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.1] - 2026-09-07
+
+### Fixed
+- ESM module resolution: published `dist/` now uses `.js` extensions on relative imports, fixing `ERR_MODULE_NOT_FOUND` when running via `npx acp-connector` (or any plain Node.js invocation). `tsconfig.json` switched to `module`/`moduleResolution: node16`, which is the correct setting for ESM packages published to npm.
+
 ## [0.5.0] - 2026-09-07
 
 ### Added
