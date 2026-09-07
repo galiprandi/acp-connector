@@ -100,6 +100,20 @@ src/
 - **Config is truth**: all state in `acp-connector.jsonc`, persisted by routines
 - **Serialized queue**: one prompt at a time, no concurrent prompts
 
+## BEHAVIOR.md (auto-generated)
+
+`BEHAVIOR.md` is generated from test results — never edit it by hand.
+
+```bash
+pnpm behavior   # runs tests with JSON reporter, then compiles BEHAVIOR.md
+```
+
+The pre-commit hook runs `pnpm behavior` automatically, so BEHAVIOR.md stays in sync with tests.
+
+- Script: `scripts/compile-behavior.mjs`
+- Test results: `.context/test-results.json` (gitignored)
+- Trigger: any test change → BEHAVIOR.md regenerated on commit
+
 ## Testing with real agents
 
 When implementing or modifying ACP protocol features, **always test against both Devin and OpenCode** before committing:
