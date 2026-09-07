@@ -240,7 +240,7 @@ describe('BridgeBot', () => {
 
   it('sends permission buttons when agentCmd has no dangerous', async () => {
     const { bot } = createBot({ agentCmd: 'acp-agent serve' });
-    bot.currentChatId = 123;
+    bot.currentChannelId = 123;
     const permissionPromise = bot._handlePermission({
       options: [
         { kind: 'allow', optionId: 'opt_allow' },

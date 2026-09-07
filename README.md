@@ -340,6 +340,12 @@ Both Telegram and Discord support these commands:
 
 The bridge intercepts these commands before forwarding to the agent:
 
+### Task control
+
+| Command | Description |
+|---|---|
+| `/stop` | Cancel the current task (sends `session/cancel` to the agent) |
+
 ### Cron management
 
 | Command | Description |
@@ -363,7 +369,6 @@ The bridge intercepts these commands before forwarding to the agent:
 | Command | Description |
 |---|---|
 | `/run <name>` | Execute a routine by name |
-| `/stop` | Cancel the current task (sends `session/cancel` to the agent) |
 | `/start` | Show welcome message with command list |
 | `/help` | Show welcome message with command list |
 

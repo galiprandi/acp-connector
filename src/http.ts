@@ -116,19 +116,18 @@ export class HttpServer {
           return;
         }
 
-        if (req.method === 'GET' && req.url === '/health') {
+        const parsedUrl = new URL(req.url ?? '/', `http://${this.host}:${this.port}`);
+
+        if (req.method === 'GET' && parsedUrl.pathname === '/health') {
           const health = this.getHealth();
           res.writeHead(200);
           res.end(JSON.stringify(health));
           return;
         }
 
-        if (req.method === 'POST') {
-          const parsedUrl = new URL(req.url ?? '/', `http://${this.host}:${this.port}`);
-          if (parsedUrl.pathname === '/prompt') {
-            await this._handlePrompt(req, res);
-            return;
-          }
+        if (req.method === 'POST' && parsedUrl.pathname === '/prompt') {
+          await this._handlePrompt(req, res, parsedUrl);
+          return;
         }
 
         res.writeHead(404);
@@ -150,7 +149,7 @@ export class HttpServer {
     });
   }
 
-  async _handlePrompt(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  async _handlePrompt(req: IncomingMessage, res: ServerResponse, url: URL): Promise<void> {
     try {
       // Check Content-Length before reading
       const contentLength = parseInt(req.headers['content-length'] || '0', 10);
@@ -224,7 +223,6 @@ export class HttpServer {
       }
 
       // Build prompt with query params as context
-      const url = new URL(req.url ?? '/', `http://${this.host}:${this.port}`);
       const params = url.searchParams;
       const paramEntries = [...params.entries()];
 

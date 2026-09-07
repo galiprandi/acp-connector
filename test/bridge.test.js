@@ -35,6 +35,8 @@ const mockBot = {
   sendMessage: vi.fn(async () => ({})),
   onCommand: null,
   hasActivePrompt: vi.fn(() => false),
+  setMediaHandler: vi.fn(),
+  setCommandHandler: vi.fn(),
   _handlePermission: vi.fn(async () => ({ outcome: { outcome: 'cancelled' } })),
 };
 
@@ -45,6 +47,8 @@ const mockDiscordBot = {
   sendMessage: vi.fn(async () => ({})),
   onCommand: null,
   hasActivePrompt: vi.fn(() => false),
+  setMediaHandler: vi.fn(),
+  setCommandHandler: vi.fn(),
   _handlePermission: vi.fn(async () => ({ outcome: { outcome: 'cancelled' } })),
 };
 
@@ -95,6 +99,11 @@ vi.mock('../src/bot.ts', () => ({
     sendMessage = mockBot.sendMessage;
     onCommand = null;
     hasActivePrompt = mockBot.hasActivePrompt;
+    setMediaHandler = mockBot.setMediaHandler;
+    setCommandHandler(fn) {
+      this.onCommand = fn;
+      mockBot.setCommandHandler(fn);
+    }
     _handlePermission = mockBot._handlePermission;
     constructor() {
       lastBotInstance = this;
@@ -109,6 +118,11 @@ vi.mock('../src/discord.ts', () => ({
     sendMessage = mockDiscordBot.sendMessage;
     onCommand = null;
     hasActivePrompt = mockDiscordBot.hasActivePrompt;
+    setMediaHandler = mockDiscordBot.setMediaHandler;
+    setCommandHandler(fn) {
+      this.onCommand = fn;
+      mockDiscordBot.setCommandHandler(fn);
+    }
     _handlePermission = mockDiscordBot._handlePermission;
     constructor() {
       lastBotInstance = this;

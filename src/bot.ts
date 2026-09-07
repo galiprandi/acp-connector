@@ -1,10 +1,11 @@
 import type { ContentBlock } from '@agentclientprotocol/sdk';
 import TelegramBot from 'node-telegram-bot-api';
 import type { AcpClient } from './acp-client';
+import type { PermissionResponse } from './base-bot';
+import { BaseBot } from './base-bot';
 import type { MediaHandler } from './media';
 
 const TG_MAX_LEN = 4096;
-const STREAM_BATCH_MS = 800;
 
 export interface PlatformBot {
   start(): Promise<void>;
@@ -12,6 +13,8 @@ export interface PlatformBot {
   enqueuePrompt(text: string, chatId?: number | string, blocks?: ContentBlock[]): Promise<void>;
   sendMessage(chatId: number | string, text: string): Promise<void>;
   hasActivePrompt(): boolean;
+  setMediaHandler(handler: MediaHandler): void;
+  setCommandHandler(fn: ((text: string, chatId: number | string) => Promise<boolean>) | null): void;
 }
 
 interface BridgeBotOpts {
@@ -22,55 +25,15 @@ interface BridgeBotOpts {
   showThoughts?: boolean;
   streaming?: boolean;
   mediaHandler?: MediaHandler | null;
-  onCommand?: ((text: string, chatId: number) => Promise<boolean>) | null;
-  onPrompt?: ((text: string, chatId: number) => void) | null;
+  onCommand?: ((text: string, chatId: number | string) => Promise<boolean>) | null;
+  onPrompt?: ((text: string, chatId: number | string) => void) | null;
 }
 
-interface QueueItem {
-  chatId: number;
-  text: string;
-  blocks?: ContentBlock[];
-}
-
-interface PermissionResponse {
-  outcome: {
-    outcome: 'selected' | 'cancelled';
-    optionId?: string;
-  };
-}
-
-interface SessionUpdate {
-  sessionUpdate: string;
-  content?: Content | Content[];
-}
-
-interface Content {
-  type: string;
-  text: string;
-}
-
-interface PermissionPending {
-  resolve: (response: PermissionResponse) => void;
-}
-
-export class BridgeBot implements PlatformBot {
-  private acp: AcpClient;
+export class BridgeBot extends BaseBot {
   private allowedChatIds: Set<number>;
-  private agentCmd: string;
-  private showThoughts: boolean;
-  private streaming: boolean;
-  private mediaHandler: MediaHandler | null;
-  onCommand: ((text: string, chatId: number) => Promise<boolean>) | null;
-  private onPrompt: ((text: string, chatId: number) => void) | null;
   private bot: TelegramBot;
-  private queue: QueueItem[];
-  private busy: boolean;
-  private currentMessageId: number | null;
-  private streamBuffer: string;
-  private streamTimer: NodeJS.Timeout | null;
-  private streamDirty: boolean;
-  private currentChatId: number | null;
-  private permissionPending: PermissionPending | null;
+
+  protected readonly maxLen = TG_MAX_LEN;
 
   constructor({
     acp,
@@ -83,28 +46,17 @@ export class BridgeBot implements PlatformBot {
     onCommand = null,
     onPrompt = null,
   }: BridgeBotOpts) {
-    this.acp = acp;
+    super({ acp, agentCmd, showThoughts, streaming, mediaHandler, onCommand, onPrompt });
     this.allowedChatIds = new Set(allowedChatIds);
-    this.agentCmd = agentCmd;
-    this.showThoughts = showThoughts;
-    this.streaming = streaming;
-    this.mediaHandler = mediaHandler;
-    this.onCommand = onCommand;
-    this.onPrompt = onPrompt;
-
     this.bot = new TelegramBot(telegramToken, { polling: true });
-    this.queue = [];
-    this.busy = false;
-    this.currentMessageId = null;
-    this.streamBuffer = '';
-    this.streamTimer = null;
-    this.streamDirty = false;
-    this.currentChatId = null;
-    this.permissionPending = null;
   }
 
   async start(): Promise<void> {
     this._setupHandlers();
+  }
+
+  stop(): void {
+    if (this.bot) this.bot.stopPolling();
   }
 
   private _setupHandlers(): void {
@@ -117,15 +69,69 @@ export class BridgeBot implements PlatformBot {
     return this.allowedChatIds.has(chatId);
   }
 
-  private _sanitize(text: string, maxLen = 80): string {
-    return (
-      text
-        // biome-ignore lint/suspicious/noControlCharactersInRegex: intentional control char stripping for safe logging
-        .replace(/[\x00-\x1f\x7f]/g, ' ')
-        .replace(/\n/g, ' ')
-        .trim()
-        .slice(0, maxLen)
-    );
+  protected _currentChannel(): string | number | null {
+    return this.currentChannelId;
+  }
+
+  protected async _sendNewMessage(text: string): Promise<{ messageId: number | string }> {
+    const chatId = this._currentChannel() as number;
+    if (!chatId) throw new Error('No active chat');
+    try {
+      const sent = await this.bot.sendMessage(chatId, text, { parse_mode: 'Markdown' });
+      return { messageId: sent.message_id };
+    } catch (err) {
+      const msg = (err as Error).message;
+      if (msg.includes('parse') || msg.includes('entity')) {
+        const sent = await this.bot.sendMessage(chatId, text);
+        return { messageId: sent.message_id };
+      }
+      throw err;
+    }
+  }
+
+  protected async _editMessage(messageId: number | string, text: string): Promise<void> {
+    const chatId = this._currentChannel() as number;
+    if (!chatId) return;
+    try {
+      await this.bot.editMessageText(text, {
+        chat_id: chatId,
+        message_id: messageId as number,
+        parse_mode: 'Markdown',
+      });
+    } catch (err) {
+      const msg = (err as Error).message;
+      if (msg.includes('parse') || msg.includes('entity')) {
+        await this.bot.editMessageText(text, {
+          chat_id: chatId,
+          message_id: messageId as number,
+        });
+      } else {
+        throw err;
+      }
+    }
+  }
+
+  protected async _sendOverflowChunk(chunk: string): Promise<void> {
+    const chatId = this._currentChannel() as number;
+    if (!chatId) return;
+    try {
+      await this.bot.sendMessage(chatId, chunk, { parse_mode: 'Markdown' });
+    } catch (err) {
+      const msg = (err as Error).message;
+      if (msg.includes('parse') || msg.includes('entity')) {
+        try {
+          await this._sendPlain(chunk);
+        } catch {
+          // ignore
+        }
+      }
+    }
+  }
+
+  protected async _sendPlain(text: string): Promise<void> {
+    const chatId = this._currentChannel() as number;
+    if (!chatId) return;
+    await this.bot.sendMessage(chatId, text);
   }
 
   private async _onMessage(msg: TelegramBot.Message): Promise<void> {
@@ -175,18 +181,7 @@ export class BridgeBot implements PlatformBot {
     const preview = text.slice(0, 80).replace(/\n/g, ' ');
     console.log(`👤 ${preview}${text.length > 80 ? '…' : ''}`);
 
-    this.queue.push({ chatId, text });
-    this._processQueue();
-  }
-
-  async enqueuePrompt(text: string, chatId?: number, blocks?: ContentBlock[]): Promise<void> {
-    if (!chatId) return;
-    if (await this._handleBuiltinCommand(text, chatId)) return;
-    if (text.startsWith('/') && this.onCommand) {
-      const handled = await this.onCommand(text, chatId);
-      if (handled) return;
-    }
-    this.queue.push({ chatId, text, blocks });
+    this.queue.push({ channelId: chatId, text });
     this._processQueue();
   }
 
@@ -243,7 +238,7 @@ export class BridgeBot implements PlatformBot {
       );
       const preview = caption ? `📷 ${caption.slice(0, 60)}` : `📷 ${mimeType}`;
       console.log(`👤 ${preview}`);
-      this.queue.push({ chatId, text: caption || `[📄 file]`, blocks });
+      this.queue.push({ channelId: chatId, text: caption || `[📄 file]`, blocks });
       this._processQueue();
     } catch (err) {
       console.error('Media download failed:', (err as Error).message);
@@ -251,26 +246,27 @@ export class BridgeBot implements PlatformBot {
     }
   }
 
-  private async _handleBuiltinCommand(text: string, chatId: number): Promise<boolean> {
+  protected async _handleBuiltinCommand(text: string, chatId: string | number): Promise<boolean> {
+    const cid = chatId as number;
     if (text === '/stop') {
       if (!this.busy) {
-        await this.bot.sendMessage(chatId, 'Nothing to stop.');
+        await this.bot.sendMessage(cid, 'Nothing to stop.');
         return true;
       }
       try {
         await this.acp.cancel();
         this.queue = [];
-        await this.bot.sendMessage(chatId, '⏹ Stopped.');
+        await this.bot.sendMessage(cid, '⏹ Stopped.');
         console.log('⏹ stop requested');
       } catch (err) {
-        await this.bot.sendMessage(chatId, `Stop failed: ${(err as Error).message}`);
+        await this.bot.sendMessage(cid, `Stop failed: ${(err as Error).message}`);
       }
       return true;
     }
 
     if (text !== '/start' && text !== '/help') return false;
     await this.bot.sendMessage(
-      chatId,
+      cid,
       [
         '👋 *acp-connector*',
         '',
@@ -300,185 +296,6 @@ export class BridgeBot implements PlatformBot {
     return true;
   }
 
-  private async _processQueue(): Promise<void> {
-    if (this.busy || this.queue.length === 0) return;
-
-    // biome-ignore lint/style/noNonNullAssertion: queue is non-empty (checked above)
-    const { chatId, text, blocks } = this.queue.shift()!;
-    this.busy = true;
-    this.streamBuffer = '';
-    this.currentMessageId = null;
-    this.streamDirty = false;
-    this.currentChatId = chatId;
-
-    if (this.onPrompt) this.onPrompt(text, chatId);
-
-    try {
-      await this.acp.prompt(blocks || text);
-
-      // biome-ignore lint/suspicious/noExplicitAny: SDK update types are complex and dynamic
-      let message: any = null;
-      for (;;) {
-        message = await this.acp.nextUpdate();
-        if (message.kind === 'stop') break;
-        if (message.update) this._handleUpdate(message.update);
-      }
-
-      this._flushStream();
-      await this._flushOverflow();
-
-      const respLen = this.streamBuffer.length;
-      const respPreview = this.streamBuffer.slice(0, 80).replace(/\n/g, ' ');
-      console.log(`🤖 ${respPreview}${respLen > 80 ? '…' : ''}`);
-
-      if (!this.streamBuffer && this.currentChatId) {
-        const stopReason = message?.stopReason;
-        if (stopReason && stopReason !== 'end_turn') {
-          await this.bot.sendMessage(this.currentChatId, `[${stopReason}]`);
-        }
-      }
-    } catch (err) {
-      await this.bot.sendMessage(chatId, `Error: ${(err as Error).message}`);
-    }
-
-    this.busy = false;
-    this.currentMessageId = null;
-    this.streamBuffer = '';
-    this._processQueue();
-  }
-
-  private _handleUpdate(update: SessionUpdate): void {
-    switch (update.sessionUpdate) {
-      case 'agent_message_chunk':
-        if (
-          update.content &&
-          typeof update.content === 'object' &&
-          !Array.isArray(update.content)
-        ) {
-          const c = update.content as Content;
-          if (c.type === 'text') {
-            this.streamBuffer += c.text;
-            this.streamDirty = true;
-            if (this.streaming) this._scheduleStreamFlush();
-          }
-        }
-        break;
-      case 'agent_message':
-        if (Array.isArray(update.content)) {
-          this.streamBuffer = update.content.map((c) => c.text || '').join('');
-        } else if (update.content && (update.content as Content).text) {
-          this.streamBuffer = (update.content as Content).text;
-        }
-        this.streamDirty = true;
-        if (this.streaming) this._scheduleStreamFlush();
-        break;
-      case 'agent_thought_chunk':
-        if (
-          this.showThoughts &&
-          update.content &&
-          typeof update.content === 'object' &&
-          !Array.isArray(update.content)
-        ) {
-          const c = update.content as Content;
-          if (c.type === 'text') {
-            this.streamBuffer += c.text;
-            this.streamDirty = true;
-            if (this.streaming) this._scheduleStreamFlush();
-          }
-        }
-        break;
-      case 'agent_thought':
-        if (this.showThoughts) {
-          const thoughtText = Array.isArray(update.content)
-            ? update.content.map((c) => c.text || '').join('')
-            : (update.content as Content)?.text || '';
-          if (thoughtText) {
-            this.streamBuffer += thoughtText;
-            this.streamDirty = true;
-            if (this.streaming) this._scheduleStreamFlush();
-          }
-        }
-        break;
-      default:
-        break;
-    }
-  }
-
-  private _scheduleStreamFlush(): void {
-    if (this.streamTimer) return;
-    this.streamTimer = setTimeout(() => {
-      this.streamTimer = null;
-      this._flushStream();
-    }, STREAM_BATCH_MS);
-  }
-
-  private async _flushStream(): Promise<void> {
-    if (this.streamTimer) {
-      clearTimeout(this.streamTimer);
-      this.streamTimer = null;
-    }
-    if (!this.streamDirty || !this.streamBuffer) return;
-    this.streamDirty = false;
-
-    const text = this.streamBuffer.slice(0, TG_MAX_LEN);
-    const chatId = this.currentChatId;
-    if (!chatId) return;
-
-    try {
-      if (!this.currentMessageId) {
-        const sent = await this.bot.sendMessage(chatId, text, { parse_mode: 'Markdown' });
-        this.currentMessageId = sent.message_id;
-      } else {
-        await this.bot.editMessageText(text, {
-          chat_id: chatId,
-          message_id: this.currentMessageId,
-          parse_mode: 'Markdown',
-        });
-      }
-    } catch (err) {
-      if ((err as Error).message.includes('parse') || (err as Error).message.includes('entity')) {
-        try {
-          if (this.currentMessageId) {
-            await this.bot.editMessageText(text, {
-              chat_id: chatId,
-              message_id: this.currentMessageId,
-            });
-          } else {
-            const sent = await this.bot.sendMessage(chatId, text);
-            this.currentMessageId = sent.message_id;
-          }
-        } catch {
-          // ignore
-        }
-      }
-    }
-  }
-
-  private async _flushOverflow(): Promise<void> {
-    const text = this.streamBuffer;
-    const chatId = this.currentChatId;
-    if (!chatId || text.length <= TG_MAX_LEN) return;
-
-    const chunks: string[] = [];
-    for (let i = TG_MAX_LEN; i < text.length; i += TG_MAX_LEN) {
-      chunks.push(text.slice(i, i + TG_MAX_LEN));
-    }
-
-    for (const chunk of chunks) {
-      try {
-        await this.bot.sendMessage(chatId, chunk, { parse_mode: 'Markdown' });
-      } catch (err) {
-        if ((err as Error).message.includes('parse') || (err as Error).message.includes('entity')) {
-          try {
-            await this.bot.sendMessage(chatId, chunk);
-          } catch {
-            // ignore
-          }
-        }
-      }
-    }
-  }
-
   // biome-ignore lint/suspicious/noExplicitAny: SDK permission types are complex
   async _handlePermission(params: any): Promise<any> {
     const cmd = (this.agentCmd || '').toLowerCase();
@@ -498,7 +315,7 @@ export class BridgeBot implements PlatformBot {
       return { outcome: { outcome: 'cancelled' } };
     }
 
-    const chatId = this.currentChatId;
+    const chatId = this.currentChannelId as number | null;
     if (!chatId) {
       const allowOpt = params.options?.find(
         // biome-ignore lint/suspicious/noExplicitAny: SDK option type
@@ -547,18 +364,6 @@ export class BridgeBot implements PlatformBot {
     }
   }
 
-  // biome-ignore lint/suspicious/noExplicitAny: SDK permission types vary
-  private _formatPermission(params: any): string {
-    const parts: string[] = [];
-    const tc = params.toolCall || {};
-    if (tc.title) parts.push(`Tool: ${tc.title}`);
-    if (tc.name) parts.push(`Tool: ${tc.name}`);
-    if (tc.status) parts.push(`Status: ${tc.status}`);
-    if (tc.toolCallId && !tc.title && !tc.name) parts.push(`Call: ${tc.toolCallId}`);
-    if (parts.length === 0) parts.push(JSON.stringify(params).slice(0, 500));
-    return parts.join('\n');
-  }
-
   private async _onCallbackQuery(query: TelegramBot.CallbackQuery): Promise<void> {
     const chatId = query.message?.chat?.id;
     if (!chatId || !this._isAllowed(chatId)) return;
@@ -588,15 +393,7 @@ export class BridgeBot implements PlatformBot {
     }
   }
 
-  async sendMessage(chatId: number, text: string): Promise<void> {
-    await this.bot.sendMessage(chatId, text, { parse_mode: 'Markdown' });
-  }
-
-  hasActivePrompt(): boolean {
-    return this.currentChatId !== null;
-  }
-
-  stop(): void {
-    if (this.bot) this.bot.stopPolling();
+  async sendMessage(chatId: number | string, text: string): Promise<void> {
+    await this.bot.sendMessage(chatId as number, text, { parse_mode: 'Markdown' });
   }
 }

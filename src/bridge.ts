@@ -112,11 +112,7 @@ export async function run(): Promise<void> {
 
   // Wire bridge commands to all bots
   for (const bot of bots) {
-    if ('onCommand' in bot) {
-      // biome-ignore lint/suspicious/noExplicitAny: PlatformBot doesn't expose onCommand
-      (bot as any).onCommand = (text: string, chatId: number) =>
-        routineManager.handleCommand(text, chatId);
-    }
+    bot.setCommandHandler((text, chatId) => routineManager.handleCommand(text, chatId as number));
   }
 
   const httpServer = new HttpServer({
@@ -168,13 +164,7 @@ export async function run(): Promise<void> {
   });
   // Inject media handler into bots
   for (const bot of bots) {
-    if (bot instanceof BridgeBot) {
-      // biome-ignore lint/suspicious/noExplicitAny: inject mediaHandler post-construction
-      (bot as any).mediaHandler = mediaHandler;
-    } else if (bot instanceof DiscordBot) {
-      // biome-ignore lint/suspicious/noExplicitAny: inject mediaHandler post-construction
-      (bot as any).mediaHandler = mediaHandler;
-    }
+    bot.setMediaHandler(mediaHandler);
   }
 
   // Start all bots
@@ -222,5 +212,5 @@ export async function run(): Promise<void> {
   process.on('SIGINT', () => shutdown('SIGINT'));
   process.on('SIGTERM', () => shutdown('SIGTERM'));
 
-  setInterval(() => {}, 1 << 30);
+  process.stdin.resume();
 }

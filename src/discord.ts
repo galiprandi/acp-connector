@@ -11,11 +11,11 @@ import {
   type TextChannel,
 } from 'discord.js';
 import type { AcpClient } from './acp-client';
-import type { PlatformBot } from './bot';
+import type { PermissionResponse } from './base-bot';
+import { BaseBot } from './base-bot';
 import type { MediaHandler } from './media';
 
 const DISCORD_MAX_LEN = 2000;
-const STREAM_BATCH_MS = 800;
 
 interface DiscordBotOpts {
   acp: AcpClient;
@@ -25,46 +25,17 @@ interface DiscordBotOpts {
   showThoughts?: boolean;
   streaming?: boolean;
   mediaHandler?: MediaHandler | null;
-  onCommand?: ((text: string, chatId: string) => Promise<boolean>) | null;
-  onPrompt?: ((text: string, chatId: string) => void) | null;
+  onCommand?: ((text: string, chatId: number | string) => Promise<boolean>) | null;
+  onPrompt?: ((text: string, chatId: number | string) => void) | null;
 }
 
-interface QueueItem {
-  channelId: string;
-  text: string;
-  blocks?: ContentBlock[];
-}
-
-interface PermissionResponse {
-  outcome: {
-    outcome: 'selected' | 'cancelled';
-    optionId?: string;
-  };
-}
-
-interface PermissionPending {
-  resolve: (response: PermissionResponse) => void;
-}
-
-export class DiscordBot implements PlatformBot {
-  private acp: AcpClient;
+export class DiscordBot extends BaseBot {
   private token: string;
   private allowedChannelIds: Set<string>;
-  private agentCmd: string;
-  private showThoughts: boolean;
-  private streaming: boolean;
-  private mediaHandler: MediaHandler | null;
-  onCommand: ((text: string, chatId: string) => Promise<boolean>) | null;
-  private onPrompt: ((text: string, chatId: string) => void) | null;
   private client: Client;
-  private queue: QueueItem[];
-  private busy: boolean;
   private currentMessage: Message | null;
-  private streamBuffer: string;
-  private streamTimer: NodeJS.Timeout | null;
-  private streamDirty: boolean;
-  private currentChannelId: string | null;
-  private permissionPending: PermissionPending | null;
+
+  protected readonly maxLen = DISCORD_MAX_LEN;
 
   constructor({
     acp,
@@ -77,16 +48,9 @@ export class DiscordBot implements PlatformBot {
     onCommand = null,
     onPrompt = null,
   }: DiscordBotOpts) {
-    this.acp = acp;
+    super({ acp, agentCmd, showThoughts, streaming, mediaHandler, onCommand, onPrompt });
     this.token = token;
     this.allowedChannelIds = new Set(allowedChannelIds.map(String));
-    this.agentCmd = agentCmd;
-    this.showThoughts = showThoughts;
-    this.streaming = streaming;
-    this.mediaHandler = mediaHandler;
-    this.onCommand = onCommand;
-    this.onPrompt = onPrompt;
-
     this.client = new Client({
       intents: [
         GatewayIntentBits.Guilds,
@@ -94,19 +58,16 @@ export class DiscordBot implements PlatformBot {
         GatewayIntentBits.MessageContent,
       ],
     });
-    this.queue = [];
-    this.busy = false;
     this.currentMessage = null;
-    this.streamBuffer = '';
-    this.streamTimer = null;
-    this.streamDirty = false;
-    this.currentChannelId = null;
-    this.permissionPending = null;
   }
 
   async start(): Promise<void> {
     this._setupHandlers();
     await this.client.login(this.token);
+  }
+
+  stop(): void {
+    if (this.client) this.client.destroy();
   }
 
   private _setupHandlers(): void {
@@ -121,15 +82,42 @@ export class DiscordBot implements PlatformBot {
     return this.allowedChannelIds.has(channelId);
   }
 
-  private _sanitize(text: string, maxLen = 80): string {
-    return (
-      text
-        // biome-ignore lint/suspicious/noControlCharactersInRegex: intentional control char stripping for safe logging
-        .replace(/[\x00-\x1f\x7f]/g, ' ')
-        .replace(/\n/g, ' ')
-        .trim()
-        .slice(0, maxLen)
-    );
+  protected _currentChannel(): string | number | null {
+    return this.currentChannelId;
+  }
+
+  protected async _sendNewMessage(text: string): Promise<{ messageId: number | string }> {
+    const channelId = this._currentChannel() as string;
+    if (!channelId) throw new Error('No active channel');
+    const channel = this.client.channels.cache.get(channelId) as TextChannel;
+    if (!channel) throw new Error('Channel not found');
+    this.currentMessage = await channel.send(text);
+    return { messageId: this.currentMessage.id };
+  }
+
+  protected async _editMessage(_messageId: number | string, text: string): Promise<void> {
+    if (this.currentMessage) {
+      await this.currentMessage.edit(text);
+    }
+  }
+
+  protected async _sendOverflowChunk(chunk: string): Promise<void> {
+    const channelId = this._currentChannel() as string;
+    if (!channelId) return;
+    const channel = this.client.channels.cache.get(channelId) as TextChannel;
+    if (!channel) return;
+    try {
+      await channel.send(chunk);
+    } catch {
+      // ignore
+    }
+  }
+
+  protected async _sendPlain(text: string): Promise<void> {
+    const channelId = this._currentChannel() as string;
+    if (!channelId) return;
+    const channel = this.client.channels.cache.get(channelId) as TextChannel;
+    await channel?.send(text);
   }
 
   private async _onMessage(msg: Message): Promise<void> {
@@ -141,7 +129,7 @@ export class DiscordBot implements PlatformBot {
     if (!this._isAllowed(channelId)) {
       console.log(`🚫 [${channelId}] ${this._sanitize(text)}`);
       if (this.allowedChannelIds.size === 0) {
-        (msg.channel as TextChannel).send(
+        await (msg.channel as TextChannel).send(
           [
             `Your channel ID is: ${channelId}`,
             '',
@@ -208,25 +196,13 @@ export class DiscordBot implements PlatformBot {
     }
   }
 
-  async enqueuePrompt(
+  protected async _handleBuiltinCommand(
     text: string,
-    chatId?: number | string,
-    blocks?: ContentBlock[]
-  ): Promise<void> {
-    if (!chatId) return;
-    const channelId = String(chatId);
-    if (await this._handleBuiltinCommand(text, channelId)) return;
-    if (text.startsWith('/') && this.onCommand) {
-      const handled = await this.onCommand(text, channelId);
-      if (handled) return;
-    }
-    this.queue.push({ channelId, text, blocks });
-    this._processQueue();
-  }
-
-  private async _handleBuiltinCommand(text: string, channelId: string): Promise<boolean> {
+    channelId: string | number
+  ): Promise<boolean> {
+    const cid = String(channelId);
     if (text === '/stop') {
-      const channel = this.client.channels.cache.get(channelId) as TextChannel;
+      const channel = this.client.channels.cache.get(cid) as TextChannel;
       if (!this.busy) {
         await channel?.send('Nothing to stop.');
         return true;
@@ -243,7 +219,7 @@ export class DiscordBot implements PlatformBot {
     }
 
     if (text !== '/start' && text !== '/help') return false;
-    (this.client.channels.cache.get(channelId) as TextChannel)?.send(
+    await (this.client.channels.cache.get(cid) as TextChannel)?.send(
       [
         '👋 **acp-connector**',
         '',
@@ -272,158 +248,6 @@ export class DiscordBot implements PlatformBot {
     return true;
   }
 
-  private async _processQueue(): Promise<void> {
-    if (this.busy || this.queue.length === 0) return;
-
-    // biome-ignore lint/style/noNonNullAssertion: queue is non-empty (checked above)
-    const { channelId, text, blocks } = this.queue.shift()!;
-    this.busy = true;
-    this.streamBuffer = '';
-    this.currentMessage = null;
-    this.streamDirty = false;
-    this.currentChannelId = channelId;
-
-    if (this.onPrompt) this.onPrompt(text, channelId);
-
-    try {
-      await this.acp.prompt(blocks || text);
-
-      // biome-ignore lint/suspicious/noExplicitAny: SDK update types are complex and dynamic
-      let message: any = null;
-      for (;;) {
-        message = await this.acp.nextUpdate();
-        if (message.kind === 'stop') break;
-        if (message.update) this._handleUpdate(message.update);
-      }
-
-      this._flushStream();
-      await this._flushOverflow();
-
-      const respLen = this.streamBuffer.length;
-      const respPreview = this.streamBuffer.slice(0, 80).replace(/\n/g, ' ');
-      console.log(`🤖 ${respPreview}${respLen > 80 ? '…' : ''}`);
-
-      if (!this.streamBuffer && this.currentChannelId) {
-        const stopReason = message?.stopReason;
-        if (stopReason && stopReason !== 'end_turn') {
-          const channel = this.client.channels.cache.get(this.currentChannelId) as TextChannel;
-          await channel?.send(`[${stopReason}]`);
-        }
-      }
-    } catch (err) {
-      const channel = this.client.channels.cache.get(channelId) as TextChannel;
-      await channel?.send(`Error: ${(err as Error).message}`);
-    }
-
-    this.busy = false;
-    this.currentMessage = null;
-    this.streamBuffer = '';
-    this._processQueue();
-  }
-
-  // biome-ignore lint/suspicious/noExplicitAny: SDK update types are complex and dynamic
-  private _handleUpdate(update: any): void {
-    switch (update.sessionUpdate) {
-      case 'agent_message_chunk':
-        if (update.content?.type === 'text') {
-          this.streamBuffer += update.content.text;
-          this.streamDirty = true;
-          if (this.streaming) this._scheduleStreamFlush();
-        }
-        break;
-      case 'agent_message':
-        if (Array.isArray(update.content)) {
-          this.streamBuffer = update.content
-            .map(
-              // biome-ignore lint/suspicious/noExplicitAny: SDK content type
-              (c: any) => c.text || ''
-            )
-            .join('');
-        } else if (update.content?.text) {
-          this.streamBuffer = update.content.text;
-        }
-        this.streamDirty = true;
-        if (this.streaming) this._scheduleStreamFlush();
-        break;
-      case 'agent_thought_chunk':
-        if (this.showThoughts && update.content?.type === 'text') {
-          this.streamBuffer += update.content.text;
-          this.streamDirty = true;
-          if (this.streaming) this._scheduleStreamFlush();
-        }
-        break;
-      case 'agent_thought':
-        if (this.showThoughts) {
-          const thoughtText = Array.isArray(update.content)
-            ? update.content
-                .map(
-                  // biome-ignore lint/suspicious/noExplicitAny: SDK content type
-                  (c: any) => c.text || ''
-                )
-                .join('')
-            : update.content?.text || '';
-          if (thoughtText) {
-            this.streamBuffer += thoughtText;
-            this.streamDirty = true;
-            if (this.streaming) this._scheduleStreamFlush();
-          }
-        }
-        break;
-      default:
-        break;
-    }
-  }
-
-  private _scheduleStreamFlush(): void {
-    if (this.streamTimer) return;
-    this.streamTimer = setTimeout(() => {
-      this.streamTimer = null;
-      this._flushStream();
-    }, STREAM_BATCH_MS);
-  }
-
-  private async _flushStream(): Promise<void> {
-    if (this.streamTimer) {
-      clearTimeout(this.streamTimer);
-      this.streamTimer = null;
-    }
-    if (!this.streamDirty || !this.streamBuffer) return;
-    this.streamDirty = false;
-
-    const text = this.streamBuffer.slice(0, DISCORD_MAX_LEN);
-    const channelId = this.currentChannelId;
-    if (!channelId) return;
-
-    try {
-      if (!this.currentMessage) {
-        const channel = this.client.channels.cache.get(channelId) as TextChannel;
-        this.currentMessage = await channel?.send(text);
-      } else {
-        await this.currentMessage.edit(text);
-      }
-    } catch {
-      // Discord edit failures are non-fatal
-    }
-  }
-
-  private async _flushOverflow(): Promise<void> {
-    const text = this.streamBuffer;
-    const channelId = this.currentChannelId;
-    if (!channelId || text.length <= DISCORD_MAX_LEN) return;
-
-    const channel = this.client.channels.cache.get(channelId) as TextChannel;
-    if (!channel) return;
-
-    for (let i = DISCORD_MAX_LEN; i < text.length; i += DISCORD_MAX_LEN) {
-      const chunk = text.slice(i, i + DISCORD_MAX_LEN);
-      try {
-        await channel.send(chunk);
-      } catch {
-        // ignore
-      }
-    }
-  }
-
   // biome-ignore lint/suspicious/noExplicitAny: SDK permission types are complex
   async _handlePermission(params: any): Promise<any> {
     const cmd = (this.agentCmd || '').toLowerCase();
@@ -443,7 +267,7 @@ export class DiscordBot implements PlatformBot {
       return { outcome: { outcome: 'cancelled' } };
     }
 
-    const channelId = this.currentChannelId;
+    const channelId = this.currentChannelId as string | null;
     if (!channelId) {
       const allowOpt = params.options?.find(
         // biome-ignore lint/suspicious/noExplicitAny: SDK option type
@@ -514,18 +338,6 @@ export class DiscordBot implements PlatformBot {
     }
   }
 
-  // biome-ignore lint/suspicious/noExplicitAny: SDK permission types vary
-  private _formatPermission(params: any): string {
-    const parts: string[] = [];
-    const tc = params.toolCall || {};
-    if (tc.title) parts.push(`Tool: ${tc.title}`);
-    if (tc.name) parts.push(`Tool: ${tc.name}`);
-    if (tc.status) parts.push(`Status: ${tc.status}`);
-    if (tc.toolCallId && !tc.title && !tc.name) parts.push(`Call: ${tc.toolCallId}`);
-    if (parts.length === 0) parts.push(JSON.stringify(params).slice(0, 500));
-    return parts.join('\n');
-  }
-
   private async _onInteraction(interaction: ButtonInteraction): Promise<void> {
     if (!interaction.isButton()) return;
     const channelId = interaction.channel?.id;
@@ -554,13 +366,5 @@ export class DiscordBot implements PlatformBot {
   async sendMessage(channelId: number | string, text: string): Promise<void> {
     const channel = this.client.channels.cache.get(String(channelId)) as TextChannel;
     await channel?.send(text);
-  }
-
-  hasActivePrompt(): boolean {
-    return this.currentChannelId !== null;
-  }
-
-  stop(): void {
-    if (this.client) this.client.destroy();
   }
 }

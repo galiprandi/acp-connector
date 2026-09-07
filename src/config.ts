@@ -70,7 +70,7 @@ const REQUIRED_FIELDS: Record<string, string> = {
   agentCmd: 'string',
 };
 
-function stripJsonc(text: string): string {
+export function stripJsonc(text: string): string {
   let out = '';
   let i = 0;
   let inString = false;

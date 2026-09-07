@@ -1,5 +1,6 @@
 import { type ChildProcess, spawn } from 'node:child_process';
 import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { Readable, Writable } from 'node:stream';
 import type {
   ActiveSession,
@@ -22,52 +23,10 @@ import type {
   Stream,
 } from '@agentclientprotocol/sdk';
 import * as acp from '@agentclientprotocol/sdk';
+import { stripJsonc } from './config';
 
-/**
- * Parse JSONC (JSON with comments) — strips line and block comments,
- * respecting string literals so // inside strings (e.g. URLs) is preserved.
- * @param text - The JSONC text to parse.
- * @returns The parsed object.
- */
-function parseJSONC(text: string): Record<string, unknown> {
-  let result = '';
-  let i = 0;
-  let inString = false;
-
-  while (i < text.length) {
-    const ch = text[i];
-
-    if (ch === '"' && text[i - 1] !== '\\') {
-      inString = !inString;
-      result += ch;
-      i++;
-      continue;
-    }
-
-    if (inString) {
-      result += ch;
-      i++;
-      continue;
-    }
-
-    if (ch === '/' && text[i + 1] === '/') {
-      while (i < text.length && text[i] !== '\n') i++;
-      continue;
-    }
-
-    if (ch === '/' && text[i + 1] === '*') {
-      i += 2;
-      while (i < text.length && !(text[i] === '*' && text[i + 1] === '/')) i++;
-      i += 2;
-      continue;
-    }
-
-    result += ch;
-    i++;
-  }
-
-  return JSON.parse(result) as Record<string, unknown>;
-}
+const require = createRequire(import.meta.url);
+const pkg = require('../package.json') as { version: string };
 
 /** Callback invoked when the agent requests permission for a tool call. */
 type PermissionCallback = (
@@ -163,7 +122,7 @@ export class AcpClient {
     if (!this.sessionConfigPath) return null;
     try {
       const raw = readFileSync(this.sessionConfigPath, 'utf-8');
-      return parseJSONC(raw);
+      return JSON.parse(stripJsonc(raw)) as Record<string, unknown>;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.error(`Failed to read session config from ${this.sessionConfigPath}: ${message}`);
@@ -214,7 +173,7 @@ export class AcpClient {
     const sessionConfig = this._loadSessionConfig();
 
     acp
-      .client({ name: 'acp-connector', version: '0.1.0' } as acp.AppOptions)
+      .client({ name: 'acp-connector', version: pkg.version } as acp.AppOptions)
       .onRequest(acp.methods.client.session.requestPermission, (ctx) =>
         this._handlePermission(ctx.params)
       )

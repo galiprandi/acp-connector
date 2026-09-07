@@ -133,7 +133,7 @@ describe('BridgeBot edge cases', () => {
   it('handles permission with no options', async () => {
     const { bot } = createBot({ agentCmd: 'safe-agent' });
     await bot.start();
-    bot.currentChatId = 123;
+    bot.currentChannelId = 123;
     const result = await bot._handlePermission({ options: [] });
     // Should not crash, should return cancelled
     expect(result.outcome).toBeDefined();
@@ -143,7 +143,7 @@ describe('BridgeBot edge cases', () => {
   it('auto-approves permission with no chatId', async () => {
     const { bot } = createBot({ agentCmd: 'safe-agent' });
     await bot.start();
-    bot.currentChatId = null;
+    bot.currentChannelId = null;
     const result = await bot._handlePermission({
       options: [{ kind: 'allow', optionId: 'opt1' }],
     });
@@ -313,7 +313,7 @@ describe('BridgeBot edge cases', () => {
   it('auto-approves when agentCmd contains "dangerous"', async () => {
     const { bot } = createBot({ agentCmd: 'agent --dangerous acp' });
     await bot.start();
-    bot.currentChatId = 123;
+    bot.currentChannelId = 123;
     const result = await bot._handlePermission({
       options: [{ kind: 'allow', optionId: 'opt1' }],
     });
@@ -323,7 +323,7 @@ describe('BridgeBot edge cases', () => {
   it('auto-approves when agentCmd contains "bypass"', async () => {
     const { bot } = createBot({ agentCmd: 'agent --bypass-permissions acp' });
     await bot.start();
-    bot.currentChatId = 123;
+    bot.currentChannelId = 123;
     const result = await bot._handlePermission({
       options: [{ kind: 'allow', optionId: 'opt1' }],
     });
@@ -333,7 +333,7 @@ describe('BridgeBot edge cases', () => {
   it('auto-approves when agentCmd contains "yolo"', async () => {
     const { bot } = createBot({ agentCmd: 'agent --yolo acp' });
     await bot.start();
-    bot.currentChatId = 123;
+    bot.currentChannelId = 123;
     const result = await bot._handlePermission({
       options: [{ kind: 'allow', optionId: 'opt1' }],
     });
