@@ -353,11 +353,11 @@ export class BridgeBot extends BaseBot {
       );
       const buttons: { text: string; callback_data: string }[] = [];
       if (allowOpt)
-        buttons.push({ text: 'Permitir', callback_data: `perm_allow_${allowOpt.optionId}` });
+        buttons.push({ text: 'Allow', callback_data: `perm_allow_${allowOpt.optionId}` });
       if (rejectOpt)
-        buttons.push({ text: 'Denegar', callback_data: `perm_deny_${rejectOpt.optionId}` });
+        buttons.push({ text: 'Deny', callback_data: `perm_deny_${rejectOpt.optionId}` });
 
-      await this.bot.sendMessage(chatId, `Permiso requerido:\n\n${desc}`, {
+      await this.bot.sendMessage(chatId, `Permission required:\n\n${desc}`, {
         reply_markup: { inline_keyboard: [buttons] },
       });
 
@@ -391,7 +391,7 @@ export class BridgeBot extends BaseBot {
 
       try {
         await this.bot.editMessageText(
-          `Permiso: ${outcome === 'allow' ? 'Permitido' : 'Denegado'}`,
+          `Permission: ${outcome === 'allow' ? 'Allowed' : 'Denied'}`,
           {
             chat_id: chatId,
             message_id: query.message?.message_id,

@@ -314,7 +314,7 @@ describe('DiscordBot', () => {
     });
     expect(result).toBeInstanceOf(Promise);
     expect(mockChannel.send).toHaveBeenCalledWith(
-      expect.objectContaining({ content: expect.stringContaining('Permiso requerido') })
+      expect.objectContaining({ content: expect.stringContaining('Permission required') })
     );
 
     // Cleanup

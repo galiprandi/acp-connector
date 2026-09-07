@@ -314,7 +314,7 @@ export class DiscordBot extends BaseBot {
         row.addComponents(
           new ButtonBuilder()
             .setCustomId(`perm_allow_${allowOpt.optionId}`)
-            .setLabel('Permitir')
+            .setLabel('Allow')
             .setStyle(ButtonStyle.Success)
         );
       }
@@ -322,12 +322,12 @@ export class DiscordBot extends BaseBot {
         row.addComponents(
           new ButtonBuilder()
             .setCustomId(`perm_deny_${rejectOpt.optionId}`)
-            .setLabel('Denegar')
+            .setLabel('Deny')
             .setStyle(ButtonStyle.Danger)
         );
       }
 
-      await channel.send({ content: `Permiso requerido:\n\n${desc}`, components: [row] });
+      await channel.send({ content: `Permission required:\n\n${desc}`, components: [row] });
 
       return new Promise<PermissionResponse>((resolve) => {
         this.permissionPending = { resolve };
@@ -361,7 +361,7 @@ export class DiscordBot extends BaseBot {
 
       try {
         await interaction.update({
-          content: `Permiso: ${outcome === 'allow' ? 'Permitido' : 'Denegado'}`,
+          content: `Permission: ${outcome === 'allow' ? 'Allowed' : 'Denied'}`,
           components: [],
         });
       } catch {

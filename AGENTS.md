@@ -28,6 +28,8 @@ All commits MUST follow [Conventional Commits](https://www.conventionalcommits.o
 
 **Every feature or behavior change MUST include updated documentation** (README.md, AGENTS.md, example config). No exceptions.
 
+**All test text MUST be in English** — test descriptions (`describe`/`it`), string literals, assertions, and comments. User-facing bot messages must also be in English so tests can match them cleanly.
+
 ```
 <type>(<scope>): <description>
 ```

@@ -302,7 +302,7 @@ describe('BridgeBot', () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(mockBot.sendMessage).toHaveBeenCalledWith(
       123,
-      expect.stringContaining('Permiso requerido'),
+      expect.stringContaining('Permission required'),
       expect.objectContaining({ reply_markup: expect.any(Object) })
     );
     expect(bot.permissionPending).not.toBeNull();
