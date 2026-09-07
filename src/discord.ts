@@ -286,7 +286,7 @@ export class DiscordBot implements PlatformBot {
     if (this.onPrompt) this.onPrompt(text, channelId);
 
     try {
-      this.acp.prompt(blocks || text);
+      await this.acp.prompt(blocks || text);
 
       // biome-ignore lint/suspicious/noExplicitAny: SDK update types are complex and dynamic
       let message: any = null;

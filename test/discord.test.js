@@ -213,6 +213,21 @@ describe('DiscordBot', () => {
     });
   });
 
+  it('sends error message when acp.prompt() rejects asynchronously', async () => {
+    const { bot, acp } = createBot();
+    acp.prompt.mockRejectedValueOnce(new Error('prompt failed'));
+    await bot.start();
+
+    const handler = mockClient.on.mock.calls.find((c) => c[0] === 'messageCreate')[1];
+    await handler(makeMessage('123', 'hi'));
+
+    await vi.waitFor(() => {
+      expect(mockChannel.send).toHaveBeenCalledWith(
+        expect.stringContaining('Error: prompt failed')
+      );
+    });
+  });
+
   it('auto-approves permission when agentCmd includes dangerous', async () => {
     const { bot } = createBot({ agentCmd: 'agent --dangerous acp' });
     const result = await bot._handlePermission({

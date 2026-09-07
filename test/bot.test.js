@@ -187,6 +187,16 @@ describe('BridgeBot', () => {
     expect(mockBot.sendMessage).toHaveBeenCalledWith(123, 'Error: connection lost');
   });
 
+  it('sends error message when acp.prompt() rejects', async () => {
+    const { bot, acp } = createBot();
+    await bot.start();
+    acp.prompt.mockRejectedValueOnce(new Error('prompt failed'));
+    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    await handler({ chat: { id: 123 }, text: 'hi' });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(mockBot.sendMessage).toHaveBeenCalledWith(123, 'Error: prompt failed');
+  });
+
   it('ignores thoughts when showThoughts=false', async () => {
     const { bot, acp } = createBot({ showThoughts: false });
     await bot.start();
