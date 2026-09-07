@@ -1,25 +1,25 @@
 # Architecture Decision Records
 
-| ADR | Título | Estado |
-|-----|--------|--------|
-| ADR-001 | Migración de JavaScript a TypeScript | Accepted |
-| ADR-002 | Soporte multi-plataforma (Telegram + Discord) | Accepted |
-| ADR-003 | Cola serializada para prompts | Accepted |
+| ADR | Title | Status |
+|-----|-------|--------|
+| ADR-001 | Migration from JavaScript to TypeScript | Accepted |
+| ADR-002 | Multi-platform support (Telegram + Discord) | Accepted |
+| ADR-003 | Serialized queue for prompts | Accepted |
 
-## ADR-001: Migración de JavaScript a TypeScript
+## ADR-001: Migration from JavaScript to TypeScript
 
-**Contexto**: El proyecto comenzó en JavaScript puro y migró a TypeScript en el commit a5a4d4a.
-**Decisión**: Migrar a TypeScript con strict mode, ESM, target ES2022.
-**Consecuencias**: Mejor type safety, mejor DX, requiere tsc/tsx.
+**Context**: The project started in pure JavaScript and migrated to TypeScript in commit a5a4d4a.
+**Decision**: Migrate to TypeScript with strict mode, ESM, target ES2022.
+**Consequences**: Better type safety, better DX, requires tsc/tsx.
 
-## ADR-002: Soporte multi-plataforma
+## ADR-002: Multi-platform support
 
-**Contexto**: Originalmente solo Telegram. Discord agregado en v0.2.0.
-**Decisión**: Interfaz PlatformBot compartida, BridgeBot y DiscordBot la implementan.
-**Consecuencias**: Código duplicado (~80%), pero independencia de plataforma.
+**Context**: Originally Telegram only. Discord added in v0.2.0.
+**Decision**: Shared PlatformBot interface, BridgeBot and DiscordBot implement it.
+**Consequences**: Duplicated code (~80%), but platform independence.
 
-## ADR-003: Cola serializada
+## ADR-003: Serialized queue
 
-**Contexto**: ACP session/prompt es bloqueante.
-**Decisión**: Una sola prompt a la vez por sesión, cola FIFO.
-**Consecuencias**: Sin concurrencia, latencia para prompts encolados.
+**Context**: ACP session/prompt is blocking.
+**Decision**: One prompt at a time per session, FIFO queue.
+**Consequences**: No concurrency, latency for queued prompts.

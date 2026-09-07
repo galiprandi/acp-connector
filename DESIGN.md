@@ -1,196 +1,200 @@
 # DESIGN.md
 
-Documento de diseño de `acp-connector`. Adaptado al contexto de un CLI/bridge
-(sin componentes de UI): documenta patrones de arquitectura, convenciones de
-mensajes, máquinas de estado, límites de plataforma y seguridad HTTP.
+Design document for `acp-connector`. Adapted to the context of a CLI/bridge
+(no UI components): documents architecture patterns, message conventions,
+state machines, platform limits, and HTTP security.
 
-## Patrones de arquitectura
+## Architecture patterns
 
-- **Thin bridge**: sin loop de agente, sin model provider, sin tools. El bridge
-  solo transporta prompts y updates entre una plataforma de mensajería y un
-  agente ACP arbitrario.
-- **Agent-agnostic**: `agentCmd` es un string arbitrario (ej. `acp-agent serve`,
-  `claude acp`, `gemini acp`). No hay referencias hardcodeadas a agentes
-  específicos en el código fuente.
-- **Cola serializada**: un prompt a la vez por sesión. `session/prompt` es
-  bloqueante, por lo que `BridgeBot`/`DiscordBot` mantienen una `queue: QueueItem[]`
-  FIFO procesada por `_processQueue()`, que solo despacha el siguiente item si
+- **Thin bridge**: no agent loop, no model provider, no tools. The bridge
+  only transports prompts and updates between a messaging platform and an
+  arbitrary ACP agent.
+- **Agent-agnostic**: `agentCmd` is an arbitrary string (e.g. `acp-agent serve`,
+  `claude acp`, `gemini acp`). No hardcoded references to specific agents
+  in the source code.
+- **Serialized queue**: one prompt at a time per session. `session/prompt` is
+  blocking, so `BridgeBot`/`DiscordBot` maintain a `queue: QueueItem[]`
+  FIFO processed by `_processQueue()`, which only dispatches the next item if
   `busy === false`.
-- **Config is truth**: todo el estado persistente vive en `acp-connector.jsonc`
-  (JSONC con comentarios y trailing commas). `RoutineManager._persist()` recarga
-  la config, la muta y la guarda completa.
-- **PlatformBot interface**: interfaz compartida (`start`, `stop`, `enqueuePrompt`,
-  `sendMessage`, `hasActivePrompt`) implementada por `BridgeBot` (Telegram) y
-  `DiscordBot`. El bridge orquesta sobre `PlatformBot[]`, sin importar la
-  plataforma concreta.
-- **Inyección post-construcción**: `MediaHandler` se crea después de `acp.start()`
-  (para conocer `promptCapabilities.image`) y se inyecta en los bots ya
-  construidos.
-- **Permission routing**: `acp.onPermission` recorre `bots` y despacha al bot con
-  `hasActivePrompt() === true`; si ninguno tiene prompt activo, cancela.
-- **Shutdown cooperativo**: `SIGINT`/`SIGTERM` detienen HTTP, cron, bots y ACP en
-  orden, luego `process.exit(0)`. Un `setInterval` vacío mantiene el proceso vivo.
+- **Config is truth**: all persistent state lives in `acp-connector.jsonc`
+  (JSONC with comments and trailing commas). `RoutineManager._persist()` reloads
+  the config, mutates it, and saves the whole file.
+- **PlatformBot interface**: shared interface (`start`, `stop`, `enqueuePrompt`,
+  `sendMessage`, `hasActivePrompt`) implemented by `BridgeBot` (Telegram) and
+  `DiscordBot`. The bridge orchestrates over `PlatformBot[]`, regardless of
+  the concrete platform.
+- **Post-construction injection**: `MediaHandler` is created after `acp.start()`
+  (to know `promptCapabilities.image`) and injected into already-constructed
+  bots.
+- **Permission routing**: `acp.onPermission` iterates `bots` and dispatches to
+  the bot with `hasActivePrompt() === true`; if none has an active prompt, it
+  cancels.
+- **Cooperative shutdown**: `SIGINT`/`SIGTERM` stop HTTP, cron, bots, and ACP
+  in order, then `process.exit(0)`. An empty `setInterval` keeps the process alive.
 
-## Convenciones de mensajes
+## Message conventions
 
 ### Streaming
-- Batching con `STREAM_BATCH_MS = 800` ms (constante compartida por TG y Discord).
-- Se edita un **único** mensaje por prompt: el primer chunk se envía con
-  `sendMessage`, los siguientes se actualizan con `editMessageText` (TG) /
+- Batching with `STREAM_BATCH_MS = 800` ms (shared constant for TG and Discord).
+- A **single** message is edited per prompt: the first chunk is sent with
+  `sendMessage`, subsequent ones are updated with `editMessageText` (TG) /
   `message.edit` (Discord).
-- `streamBuffer` acumula el texto; `streamDirty` indica si hay cambios sin flushear;
-  `streamTimer` programa el flush.
-- Al recibir `stop`, se flushea el stream restante y luego el overflow.
+- `streamBuffer` accumulates text; `streamDirty` indicates unflushed changes;
+  `streamTimer` schedules the flush.
+- On `stop`, the remaining stream is flushed, then overflow.
 
-### Tipos de update ACP
-| `sessionUpdate` | Acción |
+### ACP update types
+| `sessionUpdate` | Action |
 |---|---|
-| `agent_message_chunk` | Append al buffer (content.type === 'text') |
-| `agent_message` | Reemplazo del buffer (content array o single) |
-| `agent_thought_chunk` | Append solo si `showThoughts=true` |
-| `agent_thought` | Append solo si `showThoughts=true` |
-| `stop` | Fin del loop de updates |
+| `agent_message_chunk` | Append to buffer (content.type === 'text') |
+| `agent_message` | Replace buffer (content array or single) |
+| `agent_thought_chunk` | Append only if `showThoughts=true` |
+| `agent_thought` | Append only if `showThoughts=true` |
+| `tool_call` | Append tool status line only if `showTools=true` |
+| `tool_call_update` | Update tool status line only if `showTools=true` |
+| `plan` | Render plan checklist only if `showPlan=true` |
+| `current_mode_update` | Update current mode state |
+| `stop` | End of update loop |
 
-### Parse mode y fallback
-- **Telegram**: `parse_mode: 'Markdown'` en send y edit. Si Telegram rechaza con
-  error de parseo (`parse` / `entity` en el mensaje), se reintenta **sin**
-  `parse_mode` (texto plano). Aplica tanto al flush del stream como al overflow.
-- **Discord**: texto plano, sin `parse_mode` en send ni edit. Los fallos de
-  edición son no-fatales (silenciados).
+### Parse mode and fallback
+- **Telegram**: `parse_mode: 'Markdown'` in send and edit. If Telegram rejects
+  with a parse error (`parse` / `entity` in the message), it retries **without**
+  `parse_mode` (plain text). Applies to both stream flush and overflow.
+- **Discord**: plain text, no `parse_mode` in send or edit. Edit failures are
+  non-fatal (silenced).
 
 ### Overflow
-- Cuando `streamBuffer.length > MAX_LEN`, los chunks excedentes se envían como
-  mensajes nuevos (send), respetando el mismo límite y el mismo fallback de parse.
+- When `streamBuffer.length > MAX_LEN`, excess chunks are sent as new messages
+  (send), respecting the same limit and the same parse fallback.
 
-## Patrones de estado
+## State patterns
 
-Estados del bot (TG y Discord comparten la misma máquina):
+Bot states (TG and Discord share the same machine):
 
-- **Idle**: `busy=false`, `currentChatId`/`currentChannelId = null`, sin prompt activo.
-  - Transición a **Processing** al despachar un item de la cola.
+- **Idle**: `busy=false`, `currentChatId`/`currentChannelId = null`, no active prompt.
+  - Transition to **Processing** when dispatching a queue item.
 - **Processing**: `busy=true`, `currentChatId`/`currentChannelId` set,
-  `currentMessageId`/`currentMessage` set tras primer flush.
-  - Loop `for(;;)` consumiendo `acp.nextUpdate()` hasta `kind === 'stop'`.
-  - Transición a **Idle** al finalizar (catch incluido).
-- **Permission pending**: `permissionPending != null`, botones inline enviados
-  (`Permiso requerido`). Se resuelve via `callback_query` (TG) / `interactionCreate`
-  (Discord) con `perm_allow_*` / `perm_deny_*`.
-- **Error**: cualquier excepción en `prompt()` o `nextUpdate()` envía
-  `Error: <msg>` al chat/canal y vuelve a **Idle**.
+  `currentMessageId`/`currentMessage` set after first flush.
+  - `for(;;)` loop consuming `acp.nextUpdate()` until `kind === 'stop'`.
+  - Transition to **Idle** on completion (catch included).
+- **Permission pending**: `permissionPending != null`, inline buttons sent
+  (`Permission required`). Resolved via `callback_query` (TG) /
+  `interactionCreate` (Discord) with `perm_allow_*` / `perm_deny_*`.
+- **Error**: any exception in `prompt()` or `nextUpdate()` sends
+  `Error: <msg>` to the chat/channel and returns to **Idle**.
 
-Estados del AcpClient:
+AcpClient states:
 
-- **Not started**: `_started=false`, `session=null`. `prompt()` lanza.
-- **Starting**: spawn + initialize + session load/resume/build en curso.
-- **Ready**: `session` y `sessionId` set, `_sessionReady` resuelto.
-- **Killed**: `_killed=true`, `session.dispose()` llamado, proceso killado.
-  Idempotente: segundo `kill()` no-op.
+- **Not started**: `_started=false`, `session=null`. `prompt()` throws.
+- **Starting**: spawn + initialize + session load/resume/build in progress.
+- **Ready**: `session` and `sessionId` set, `_sessionReady` resolved.
+- **Killed**: `_killed=true`, `session.dispose()` called, process killed.
+  Idempotent: second `kill()` is a no-op.
 
-## Límites de plataforma
+## Platform limits
 
-| Plataforma | Max len | Parse mode | Edición |
+| Platform | Max len | Parse mode | Edit |
 |---|---|---|---|
 | Telegram | 4096 (`TG_MAX_LEN`) | Markdown (fallback plain) | `editMessageText` |
-| Discord | 2000 (`DISCORD_MAX_LEN`) | Plain (sin parse_mode) | `message.edit` |
+| Discord | 2000 (`DISCORD_MAX_LEN`) | Plain (no parse_mode) | `message.edit` |
 
-## Comandos builtin
+## Builtin commands
 
-Comandos manejados antes de reenviar al agente (en `_handleBuiltinCommand`):
+Commands handled before forwarding to the agent (in `_handleBuiltinCommand`):
 
-| Comando | Comportamiento |
+| Command | Behavior |
 |---|---|
-| `/start`, `/help` | Mensaje de ayuda con lista de comandos |
-| `/stop` | Si idle → `Nothing to stop.`; si busy → `acp.cancel()` + vaciar cola + `⏹ Stopped.` |
+| `/start`, `/help` | Help message with command list |
+| `/stop` | If idle → `Nothing to stop.`; if busy → `acp.cancel()` + clear queue + `⏹ Stopped.` |
 
-Comandos delegados a `RoutineManager` via `onCommand`:
+Commands delegated to `RoutineManager` via `onCommand`:
 
-| Comando | Subcomandos |
+| Command | Subcommands |
 |---|---|
 | `/cron` | `list`, `add <schedule> <prompt>`, `remove <name>`, `toggle <name>`, `run <name>` |
 | `/routine` | `list`, `add <name> <prompt>`, `remove <name>` |
-| `/run <name>` | Ejecuta routine por nombre |
+| `/run <name>` | Execute routine by name |
 
-## Permisos (ACP `session/request_permission`)
+## Permissions (ACP `session/request_permission`)
 
-Flujo de `_handlePermission` (TG y Discord):
+`_handlePermission` flow (TG and Discord):
 
-1. Si `agentCmd` contiene `dangerous`, `bypass` o `yolo` → auto-aprobar
-   (seleccionar primera opción `allow`).
-2. Si no hay opciones → cancelar.
-3. Si no hay `currentChatId`/`currentChannelId` → auto-aprobar (fallback seguro).
-4. Si hay canal activo → enviar botones inline `Permitir` / `Denegar` con
+1. If `agentCmd` contains `dangerous`, `bypass`, or `yolo` → auto-approve
+   (select first `allow` option).
+2. If no options → cancel.
+3. If no `currentChatId`/`currentChannelId` → auto-approve (safe fallback).
+4. If active channel → send inline buttons `Allow` / `Deny` with
    `callback_data`/`customId` `perm_allow_<optionId>` / `perm_deny_<optionId>`,
-   y quedar pendiente en un `Promise` resuelto por el handler de callback.
-5. Si falla el envío de botones → auto-aprobar como fallback.
+   and wait on a `Promise` resolved by the callback handler.
+5. If sending buttons fails → auto-approve as fallback.
 
 ## Media (ContentBlocks)
 
-`MediaHandler` convierte archivos descargados a ACP `ContentBlock`:
+`MediaHandler` converts downloaded files to ACP `ContentBlock`:
 
-| Condición | Block type |
+| Condition | Block type |
 |---|---|
 | `mimeType` starts with `image/` AND `supportsImage=true` | `image` (base64 data) |
-| Cualquier otro caso | `resource_link` (`file://` URI, name, mimeType) |
-| Caption presente | `text` block adicional al final |
+| Any other case | `resource_link` (`file://` URI, name, mimeType) |
+| Caption present | Additional `text` block at the end |
 
-- Archivos guardados en `uploadsDir` (default `/tmp/acp-connector-uploads`),
-  creado con `mkdirSync({ recursive: true })`.
-- `BridgeBot` soporta photo, document, sticker (webp→image), voice, audio, video.
-- `DiscordBot` procesa `msg.attachments` (cualquier tipo).
-- HTTP `/prompt` acepta `files: [{ data, mimeType, filename? }]`:
-  - `image/*` → `ImageContent`; resto → `ResourceLink` con `data:` URI.
-  - Files sin `data` se ignoran (fallback a texto).
+- Files saved in `uploadsDir` (default `/tmp/acp-connector-uploads`),
+  created with `mkdirSync({ recursive: true })`.
+- `BridgeBot` supports photo, document, sticker (webp→image), voice, audio, video.
+- `DiscordBot` processes `msg.attachments` (any type).
+- HTTP `/prompt` accepts `files: [{ data, mimeType, filename? }]`:
+  - `image/*` → `ImageContent`; other → `ResourceLink` with `data:` URI.
+  - Files without `data` are ignored (fallback to text).
 
-## Seguridad HTTP
+## HTTP security
 
-`HttpServer` (opcional, `http.enabled`):
+`HttpServer` (optional, `http.enabled`):
 
-| Aspecto | Default | Notas |
+| Aspect | Default | Notes |
 |---|---|---|
-| Bind host | `127.0.0.1` | Loopback only por defecto |
+| Bind host | `127.0.0.1` | Loopback only by default |
 | Port | `7780` | Configurable via `http.port` |
-| Auth | opcional | Bearer token via `http.auth.token` |
+| Auth | optional | Bearer token via `http.auth.token` |
 | Body limit | 1 MB (`DEFAULT_MAX_BODY`) | `http.maxBodySize` |
 | Rate limit | 60 req/min (`DEFAULT_RATE_LIMIT`) | `http.rateLimit` |
 | Forward headers | `false` | `http.forwardHeaders` |
 
-Reglas de seguridad verificadas:
+Verified security rules:
 
-- **Authorization nunca forwardeado**: incluso con `forwardHeaders=true`, se
-  eliminan `authorization`, `content-length`, `content-type` y `host` antes de
-  serializar headers al prompt.
-- **Auth estricta**: solo `Bearer <token>` exacto (case-sensitive en esquema).
-  Rechaza `bearer` minúscula, `Basic`, token vacío, espacios extra, tokens muy
-  largos (DoS → 401/431).
-- **Auth aplica a todas las rutas** incluida `/health`.
-- **Rate limit cuenta todo**: incluye `/health` y requests no autorizadas.
-  Ventana deslizante de 60s sobre `_requestTimes`.
-- **Path traversal**: `/prompt/../../../etc/passwd` → 404 (no reach al FS).
-- **Métodos no soportados**: GET/PUT/DELETE en `/prompt` → 404 (no 405).
-- **Content-Type flexible**: acepta `application/json`, `text/plain` y sin
-  content-type; usa body crudo como prompt si no es JSON con `text`.
-- **Query params como contexto**: `[k=v, ...]` se antepone al prompt (URL-encoded
-  decodificado).
-- **Responses siempre JSON** con `content-type: application/json`; errores
-  incluyen campo `error`.
+- **Authorization never forwarded**: even with `forwardHeaders=true`,
+  `authorization`, `content-length`, `content-type`, and `host` are removed
+  before serializing headers to the prompt.
+- **Strict auth**: only exact `Bearer <token>` (case-sensitive on scheme).
+  Rejects lowercase `bearer`, `Basic`, empty token, extra spaces, overly long
+  tokens (DoS → 401/431).
+- **Auth applies to all routes** including `/health`.
+- **Rate limit counts everything**: includes `/health` and unauthorized requests.
+  60s sliding window over `_requestTimes`.
+- **Path traversal**: `/prompt/../../../etc/passwd` → 404 (no FS reach).
+- **Unsupported methods**: GET/PUT/DELETE on `/prompt` → 404 (not 405).
+- **Flexible Content-Type**: accepts `application/json`, `text/plain`, and no
+  content-type; uses raw body as prompt if not JSON with `text`.
+- **Query params as context**: `[k=v, ...]` is prepended to the prompt (URL-decoded).
+- **Responses always JSON** with `content-type: application/json`; errors
+  include `error` field.
 
 ## Config (JSONC)
 
-`acp-connector.jsonc` soporta:
+`acp-connector.jsonc` supports:
 
-- Comentarios de línea `//` y de bloque `/* */` (striper propio `stripJsonc`).
-- Trailing commas (striper con regex `/,(\s*[}\]])/`).
-- Strings con `//` dentro no se stripean (state machine con `inString`).
-- Migración legacy: `telegramToken` + `allowedChatIds` raíz → `platforms.telegram`.
-- Validación: `agentCmd` requerido (string); requiere `platforms.telegram` o
-  `telegramToken` legacy.
+- Line comments `//` and block comments `/* */` (custom `stripJsonc`).
+- Trailing commas (regex stripper `/,(\s*[}\]])/`).
+- Strings with `//` inside are not stripped (state machine with `inString`).
+- Legacy migration: `telegramToken` + `allowedChatIds` at root → `platforms.telegram`.
+- Validation: `agentCmd` required (string); requires `platforms.telegram` or
+  legacy `telegramToken`.
 - `defaultConfigPath` = `cwd/acp-connector.jsonc`.
 
-## Convenciones de logging
+## Logging conventions
 
-- Emojis prefijos en stdout: `👤` (prompt entrante), `🤖` (respuesta),
-  `🚫` (chat no autorizado), `⏰` (cron), `🔐` (permiso), `⚡` (auto-approve),
-  `📄` (file guardado), `🌐` (HTTP), `⏹` (stop), `👋` (help).
-- `_sanitize(text, 80)` para logs: stripa control chars, newlines, trunca a 80.
-- Errores del agente (stderr) filtrados por regex
-  `/\bERROR\b|\bFATAL\b|\berror:\b|\bfatal:\b|Invalid params/` y logueados con `⚠️`.
+- Prefix emojis on stdout: `👤` (incoming prompt), `🤖` (response),
+  `🚫` (unauthorized chat), `⏰` (cron), `🔐` (permission), `⚡` (auto-approve),
+  `📄` (file saved), `🌐` (HTTP), `⏹` (stop), `👋` (help).
+- `_sanitize(text, 80)` for logs: strips control chars, newlines, truncates to 80.
+- Agent errors (stderr) filtered by regex
+  `/\bERROR\b|\bFATAL\b|\berror:\b|\bfatal:\b|Invalid params/` and logged with `⚠️`.
