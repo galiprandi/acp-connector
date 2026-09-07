@@ -34,6 +34,7 @@ const mockBot = {
   enqueuePrompt: vi.fn(),
   sendMessage: vi.fn(async () => ({})),
   onCommand: null,
+  hasActivePrompt: vi.fn(() => false),
   _handlePermission: vi.fn(async () => ({ outcome: { outcome: 'cancelled' } })),
 };
 
@@ -43,6 +44,7 @@ const mockDiscordBot = {
   enqueuePrompt: vi.fn(),
   sendMessage: vi.fn(async () => ({})),
   onCommand: null,
+  hasActivePrompt: vi.fn(() => false),
   _handlePermission: vi.fn(async () => ({ outcome: { outcome: 'cancelled' } })),
 };
 
@@ -92,6 +94,7 @@ vi.mock('../src/bot.ts', () => ({
     enqueuePrompt = mockBot.enqueuePrompt;
     sendMessage = mockBot.sendMessage;
     onCommand = null;
+    hasActivePrompt = mockBot.hasActivePrompt;
     _handlePermission = mockBot._handlePermission;
     constructor() {
       lastBotInstance = this;
@@ -105,6 +108,7 @@ vi.mock('../src/discord.ts', () => ({
     enqueuePrompt = mockDiscordBot.enqueuePrompt;
     sendMessage = mockDiscordBot.sendMessage;
     onCommand = null;
+    hasActivePrompt = mockDiscordBot.hasActivePrompt;
     _handlePermission = mockDiscordBot._handlePermission;
     constructor() {
       lastBotInstance = this;
@@ -212,5 +216,26 @@ describe('bridge', () => {
     await run();
     expect(lastCronManagerArgs).not.toBeNull();
     expect(lastCronManagerArgs.allowedChatIds).toContain(snowflake);
+  });
+
+  it('routes permission to the bot with an active prompt (Discord), not the first bot (TG)', async () => {
+    mockConfig = {
+      agentCmd: 'acp-agent serve',
+      platforms: {
+        telegram: { token: 'tg-token', allowedChatIds: [123] },
+        discord: { token: 'dc-token', allowedChannelIds: ['999'] },
+      },
+    };
+    await run();
+    // Simulate Discord having an active prompt, TG idle
+    mockBot.hasActivePrompt.mockReturnValue(false);
+    mockDiscordBot.hasActivePrompt.mockReturnValue(true);
+    mockBot._handlePermission.mockClear();
+    mockDiscordBot._handlePermission.mockClear();
+
+    await lastAcpInstance.onPermission({ options: [{ kind: 'allow', optionId: 'a1' }] });
+
+    expect(mockDiscordBot._handlePermission).toHaveBeenCalledTimes(1);
+    expect(mockBot._handlePermission).not.toHaveBeenCalled();
   });
 });

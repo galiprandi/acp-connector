@@ -11,6 +11,7 @@ export interface PlatformBot {
   stop(): void;
   enqueuePrompt(text: string, chatId?: number | string, blocks?: ContentBlock[]): Promise<void>;
   sendMessage(chatId: number | string, text: string): Promise<void>;
+  hasActivePrompt(): boolean;
 }
 
 interface BridgeBotOpts {
@@ -589,6 +590,10 @@ export class BridgeBot implements PlatformBot {
 
   async sendMessage(chatId: number, text: string): Promise<void> {
     await this.bot.sendMessage(chatId, text, { parse_mode: 'Markdown' });
+  }
+
+  hasActivePrompt(): boolean {
+    return this.currentChatId !== null;
   }
 
   stop(): void {

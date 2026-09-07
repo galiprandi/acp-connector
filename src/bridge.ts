@@ -139,16 +139,17 @@ export async function run(): Promise<void> {
     }),
   });
 
-  // Wire permission handler — route to the bot that has a pending prompt
+  // Wire permission handler — route to the bot that has an active prompt
   // biome-ignore lint/suspicious/noExplicitAny: SDK permission types are complex
   acp.onPermission = (params: any) => {
-    // Try each bot's permission handler — the one with currentChannelId set will handle it
+    // Route to the bot with an active prompt (currentChatId/currentChannelId set)
     for (const bot of bots) {
-      if ('_handlePermission' in bot) {
+      if (bot.hasActivePrompt()) {
         // biome-ignore lint/suspicious/noExplicitAny: PlatformBot doesn't expose _handlePermission
         return (bot as any)._handlePermission(params);
       }
     }
+    // No active prompt — auto-approve or cancel as fallback
     return { outcome: { outcome: 'cancelled' } };
   };
 

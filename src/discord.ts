@@ -556,6 +556,10 @@ export class DiscordBot implements PlatformBot {
     await channel?.send(text);
   }
 
+  hasActivePrompt(): boolean {
+    return this.currentChannelId !== null;
+  }
+
   stop(): void {
     if (this.client) this.client.destroy();
   }
