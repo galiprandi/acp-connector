@@ -37,6 +37,17 @@ const mockBot = {
   _handlePermission: vi.fn(async () => ({ outcome: { outcome: 'cancelled' } })),
 };
 
+const mockDiscordBot = {
+  start: vi.fn(async () => {}),
+  stop: vi.fn(),
+  enqueuePrompt: vi.fn(),
+  sendMessage: vi.fn(async () => ({})),
+  onCommand: null,
+  _handlePermission: vi.fn(async () => ({ outcome: { outcome: 'cancelled' } })),
+};
+
+let lastCronManagerArgs = null;
+
 const mockCronManager = {
   start: vi.fn(),
   stop: vi.fn(),
@@ -87,6 +98,19 @@ vi.mock('../src/bot.ts', () => ({
     }
   },
 }));
+vi.mock('../src/discord.ts', () => ({
+  DiscordBot: class MockDiscordBot {
+    start = mockDiscordBot.start;
+    stop = mockDiscordBot.stop;
+    enqueuePrompt = mockDiscordBot.enqueuePrompt;
+    sendMessage = mockDiscordBot.sendMessage;
+    onCommand = null;
+    _handlePermission = mockDiscordBot._handlePermission;
+    constructor() {
+      lastBotInstance = this;
+    }
+  },
+}));
 vi.mock('../src/cron.ts', () => ({
   CronManager: class MockCronManager {
     start = mockCronManager.start;
@@ -96,6 +120,9 @@ vi.mock('../src/cron.ts', () => ({
     remove = mockCronManager.remove;
     toggle = mockCronManager.toggle;
     run = mockCronManager.run;
+    constructor(args) {
+      lastCronManagerArgs = args;
+    }
   },
 }));
 vi.mock('../src/routines.ts', () => ({
@@ -121,6 +148,7 @@ describe('bridge', () => {
     vi.clearAllMocks();
     mockAcpClient.start.mockResolvedValue(undefined);
     mockConfig = null;
+    lastCronManagerArgs = null;
     intervalSpy = vi.spyOn(global, 'setInterval').mockImplementation(() => 0);
     onSpy = vi.spyOn(process, 'on').mockImplementation(() => process);
     exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => {
@@ -168,5 +196,21 @@ describe('bridge', () => {
     await run();
     expect(lastAcpInstance.onPermission).toBeDefined();
     expect(typeof lastAcpInstance.onPermission).toBe('function');
+  });
+
+  it('preserves Discord Snowflake channel IDs for cron allowedChatIds', async () => {
+    const snowflake = '123456789012345678';
+    mockConfig = {
+      agentCmd: 'acp-agent serve',
+      platforms: {
+        discord: {
+          token: 'discord-token',
+          allowedChannelIds: [snowflake],
+        },
+      },
+    };
+    await run();
+    expect(lastCronManagerArgs).not.toBeNull();
+    expect(lastCronManagerArgs.allowedChatIds).toContain(snowflake);
   });
 });

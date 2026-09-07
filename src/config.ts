@@ -5,7 +5,7 @@ export interface CronJob {
   name: string;
   schedule: string;
   prompt: string;
-  chatId?: number;
+  chatId?: number | string;
   enabled?: boolean;
 }
 

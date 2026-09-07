@@ -7,7 +7,7 @@ export interface CronJob {
   name: string;
   schedule: string;
   prompt: string;
-  chatId?: number;
+  chatId?: number | string;
   enabled?: boolean;
 }
 
@@ -19,14 +19,14 @@ type LogFn = (msg: string) => void;
 /**
  * Enqueue callback: enqueues a prompt text for a given chat id.
  */
-type EnqueueFn = (text: string, chatId: number) => void;
+type EnqueueFn = (text: string, chatId: number | string) => void;
 
 /**
  * Constructor options for CronManager.
  */
 export interface CronManagerOptions {
   jobs: CronJob[];
-  allowedChatIds: number[];
+  allowedChatIds: Array<number | string>;
   enqueue: EnqueueFn;
   onLog?: LogFn | null;
 }
@@ -41,7 +41,7 @@ interface CronTaskEntry {
  */
 export class CronManager {
   jobs: CronJob[];
-  allowedChatIds: number[];
+  allowedChatIds: Array<number | string>;
   enqueue: EnqueueFn;
   onLog: LogFn;
   private _tasks: Map<string, CronTaskEntry>;
