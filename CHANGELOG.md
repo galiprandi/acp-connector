@@ -5,6 +5,28 @@ All notable changes to acp-connector will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-09-06
+
+### Added
+- Webhook callback support for `POST /prompt` — include `callback_url` (or `callbackUrl`) in the request body to receive the agent's final response asynchronously. The bridge POSTs `{response, error}` to the callback URL after the prompt completes. Fire-and-forget: callback failures are logged but not retried.
+- Session management commands:
+  - `/new` — close the current session and start a fresh one (clears accumulated context)
+  - `/sessions` — list available sessions from the agent (requires `sessionCapabilities.list`)
+  - `/session <id>` — switch to an existing session (uses `session/resume` or `session/load`)
+- `AcpClient.newSession()` — dispose current session and create a new one
+- `AcpClient.listSessions()` — list sessions (graceful error if unsupported)
+- `AcpClient.loadSession(id)` — switch to an existing session by ID
+- `AcpClient.agentCapabilities` stored from init response
+- `EnqueueFn` accepts optional `onComplete` callback (4th parameter)
+- `PlatformBot.enqueuePrompt` accepts optional `onComplete` callback
+- `/new` and `/session` refuse while busy with a message to use `/stop` first
+- 27 new tests (297 total)
+
+### Changed
+- `QueueItem` stores optional `onComplete` callback
+- `_processQueue` invokes `onComplete` with `(response, error)` after prompt completion or failure
+- `/help` updated in Telegram and Discord to document session commands
+
 ## [0.3.0] - 2026-09-06
 
 ### Added

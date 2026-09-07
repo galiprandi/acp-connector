@@ -37,6 +37,14 @@ DEBE / NO DEBE, agrupadas por módulo. Cada regla está respaldada por al menos 
 - DEBE cancelar el agente (`acp.cancel()`) y responder `⏹ Stopped.` ante `/stop` cuando está busy.
 - DEBE vaciar la cola ante `/stop` cuando está busy.
 - DEBE responder `Stop failed: <error>` cuando `acp.cancel()` falla.
+- DEBE crear una sesión nueva con `/new` cuando está idle (responde `🆕 New session started`).
+- DEBE rechazar `/new` cuando está busy (responde `Cannot start new session while busy. Use /stop first.`).
+- DEBE listar sesiones con `/sessions` (responde `*Sessions:*` con la lista).
+- DEBE responder `Cannot list sessions: <error>` cuando el agente no soporta `session/list`.
+- DEBE cambiar de sesión con `/session <id>` (responde `🔄 Switched to session`).
+- DEBE responder `Usage: /session <id>` cuando `/session` no tiene argumentos.
+- DEBE rechazar `/session <id>` cuando está busy (responde `Cannot switch session while busy. Use /stop first.`).
+- DEBE responder `Failed to create session: <error>` cuando `newSession()` falla.
 - DEBE detener el polling con `stop()`.
 - NO DEBE crashear al llamar `stop()` dos veces (double stop seguro).
 
@@ -91,6 +99,16 @@ DEBE / NO DEBE, agrupadas por módulo. Cada regla está respaldada por al menos 
 - DEBE lanzar un error claro al llamar `prompt()` antes de `start()`.
 - DEBE reenviar texto vacío y texto muy largo (1.000.000 chars) a `session.prompt` sin truncar.
 - NO DEBE crashear cuando el agente cierra stdin / termina inesperadamente.
+- DEBE almacenar `agentCapabilities` del init response.
+- DEBE crear una sesión nueva con `newSession()` (dispose + buildSession + start).
+- DEBE retornar el nuevo `sessionId` desde `newSession()`.
+- DEBE listar sesiones con `listSessions()` cuando el agente soporta `sessionCapabilities.list`.
+- DEBE lanzar `does not support session/list` cuando el agente no soporta `session/list`.
+- DEBE cargar sesión con `loadSession(id)` usando `session/resume` cuando está disponible.
+- DEBE cargar sesión con `loadSession(id)` usando `session/load` cuando solo `loadSession` está disponible.
+- DEBE lanzar `does not support session/resume or session/load` cuando ninguna capability está disponible.
+- DEBE disponer la sesión anterior antes de cargar una nueva con `loadSession()`.
+- DEBE lanzar `ACP context not available` al llamar `newSession()`, `listSessions()` o `loadSession()` antes de `start()`.
 
 ## Módulo: bridge (orquestación)
 
@@ -217,6 +235,11 @@ DEBE / NO DEBE, agrupadas por módulo. Cada regla está respaldada por al menos 
 - DEBE encolar con files aunque `text` esté vacío (solo blocks).
 - DEBE ignorar files sin `data` (fallback a texto).
 - DEBE mantener backward compat sin campo `files`.
+- DEBE aceptar `callback_url` (snake_case) o `callbackUrl` (camelCase) en el body de `POST /prompt`.
+- DEBE pasar un callback `onComplete` a `enqueue` cuando se provee `callback_url`.
+- NO DEBE pasar `onComplete` cuando no se provee `callback_url`.
+- DEBE invocar `onComplete` con `(response, undefined)` cuando el agente termina exitosamente.
+- DEBE invocar `onComplete` con `('', error)` cuando el agente falla.
 
 ## Módulo: MediaHandler
 

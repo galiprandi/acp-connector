@@ -300,6 +300,27 @@ curl -X POST http://localhost:7780/prompt \
 - Multiple files supported — text is appended as a final text block
 - Backward compatible: omit `files` for text-only prompts
 
+##### Webhook callback
+
+Include `callback_url` (or `callbackUrl`) to receive the agent's response asynchronously:
+
+```bash
+curl -X POST http://localhost:7780/prompt \
+  -H "Content-Type: application/json" \
+  -d '{
+    "text": "fix the failing tests",
+    "callback_url": "https://your-ci.com/webhook"
+  }'
+```
+
+The bridge returns `200 {ok:true}` immediately. When the agent finishes, the bridge POSTs to the callback URL:
+
+```json
+{ "response": "I fixed the tests by...", "error": null }
+```
+
+If the prompt fails, `error` contains the error message and `response` is empty. The callback is fire-and-forget — failures are logged but not retried.
+
 ***
 
 ## 🤖 Supported agents
@@ -345,6 +366,16 @@ The bridge intercepts these commands before forwarding to the agent:
 | Command | Description |
 |---|---|
 | `/stop` | Cancel the current task (sends `session/cancel` to the agent) |
+
+### Session management
+
+| Command | Description |
+|---|---|
+| `/new` | Start a fresh session (clears accumulated context) |
+| `/sessions` | List available sessions (requires agent `session/list` capability) |
+| `/session <id>` | Switch to an existing session (uses `session/resume` or `session/load`) |
+
+`/new` and `/session` are refused while the agent is busy — use `/stop` first. `/sessions` gracefully degrades with an error message if the agent doesn't support `session/list`.
 
 ### Cron management
 
