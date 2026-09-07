@@ -135,7 +135,7 @@ export class BridgeBot implements PlatformBot {
     if (!this._isAllowed(chatId)) {
       console.log(`🚫 [${chatId}] ${this._sanitize(text)}`);
       if (this.allowedChatIds.size === 0) {
-        this.bot.sendMessage(
+        await this.bot.sendMessage(
           chatId,
           [
             `Your chat ID is: ${chatId}`,
@@ -156,7 +156,7 @@ export class BridgeBot implements PlatformBot {
       (msg.photo || msg.voice || msg.sticker || msg.document || msg.video || msg.audio)
     ) {
       if (!this.mediaHandler) {
-        this.bot.sendMessage(chatId, 'Media no soportado');
+        await this.bot.sendMessage(chatId, 'Media no soportado');
         return;
       }
       await this._handleMedia(msg, chatId);
@@ -247,29 +247,29 @@ export class BridgeBot implements PlatformBot {
       this._processQueue();
     } catch (err) {
       console.error('Media download failed:', (err as Error).message);
-      this.bot.sendMessage(chatId, `Error downloading media: ${(err as Error).message}`);
+      await this.bot.sendMessage(chatId, `Error downloading media: ${(err as Error).message}`);
     }
   }
 
   private async _handleBuiltinCommand(text: string, chatId: number): Promise<boolean> {
     if (text === '/stop') {
       if (!this.busy) {
-        this.bot.sendMessage(chatId, 'Nothing to stop.');
+        await this.bot.sendMessage(chatId, 'Nothing to stop.');
         return true;
       }
       try {
         await this.acp.cancel();
         this.queue = [];
-        this.bot.sendMessage(chatId, '⏹ Stopped.');
+        await this.bot.sendMessage(chatId, '⏹ Stopped.');
         console.log('⏹ stop requested');
       } catch (err) {
-        this.bot.sendMessage(chatId, `Stop failed: ${(err as Error).message}`);
+        await this.bot.sendMessage(chatId, `Stop failed: ${(err as Error).message}`);
       }
       return true;
     }
 
     if (text !== '/start' && text !== '/help') return false;
-    this.bot.sendMessage(
+    await this.bot.sendMessage(
       chatId,
       [
         '👋 *acp-connector*',
@@ -334,11 +334,11 @@ export class BridgeBot implements PlatformBot {
       if (!this.streamBuffer && this.currentChatId) {
         const stopReason = message?.stopReason;
         if (stopReason && stopReason !== 'end_turn') {
-          this.bot.sendMessage(this.currentChatId, `[${stopReason}]`);
+          await this.bot.sendMessage(this.currentChatId, `[${stopReason}]`);
         }
       }
     } catch (err) {
-      this.bot.sendMessage(chatId, `Error: ${(err as Error).message}`);
+      await this.bot.sendMessage(chatId, `Error: ${(err as Error).message}`);
     }
 
     this.busy = false;
