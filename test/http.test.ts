@@ -1,26 +1,48 @@
+import type { Server } from 'node:http';
 import { describe, expect, it, vi } from 'vitest';
+import type {
+  EnqueueFn,
+  GetHealthFn,
+  HttpServerOptions,
+  HttpServer as HttpServerType,
+} from '../src/http';
 
 const { HttpServer } = await import('../src/http.ts');
 
-function createServer(overrides = {}) {
+type TestableHttpServer = HttpServerType & {
+  _server: Server | null;
+  _requestTimes: number[];
+};
+
+function createServer(overrides: Partial<HttpServerOptions> = {}) {
   const enqueue = vi.fn();
   const getHealth = vi.fn(() => ({ status: 'ok', agent: true, session: 'test-session' }));
   const server = new HttpServer({
     enabled: true,
     port: 0, // use port 0 for ephemeral port in tests
-    enqueue,
-    getHealth,
+    enqueue: enqueue as unknown as EnqueueFn,
+    getHealth: getHealth as unknown as GetHealthFn,
     ...overrides,
   });
-  return { server, enqueue, getHealth };
+  return { server: server as unknown as TestableHttpServer, enqueue, getHealth };
 }
 
-async function fetchServer(server, method, path, body = null) {
+async function fetchServer(
+  server: TestableHttpServer,
+  method: string,
+  path: string,
+  body: Record<string, unknown> | null = null
+): Promise<{ status: number; body: unknown }> {
   const port = server._server?.address()?.port;
   if (!port) throw new Error('server not started');
   const url = `http://localhost:${port}${path}`;
-  const opts = { method, headers: { 'Content-Type': 'application/json' } };
-  if (body) opts.body = JSON.stringify(body);
+  const opts: RequestInit = {
+    method,
+    headers: { 'Content-Type': 'application/json' },
+  };
+  if (body) {
+    opts.body = JSON.stringify(body);
+  }
   const res = await fetch(url, opts);
   const text = await res.text();
   return { status: res.status, body: text ? JSON.parse(text) : null };

@@ -1,8 +1,36 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+interface MockSession {
+  sessionId: string;
+  modes: { currentModeId: string };
+  prompt: vi.Mock;
+  nextUpdate: vi.Mock;
+  dispose: vi.Mock;
+}
+
+interface MockCtx {
+  request: vi.Mock;
+  buildSession: vi.Mock;
+  attachSession: vi.Mock;
+}
+
+interface MockClientInstance {
+  onRequest: vi.Mock;
+  connectWith: vi.Mock;
+  catch: vi.Mock;
+}
+
+interface MockProc {
+  stdin: { write: vi.Mock; end: vi.Mock };
+  stdout: { on: vi.Mock };
+  stderr: { on: vi.Mock };
+  on: vi.Mock;
+  kill: vi.Mock;
+}
+
 // --- Mocks (same patterns as test/acp-client.test.js) -----------------------
 
-const mockSession = {
+const mockSession: MockSession = {
   sessionId: 'test-session-id',
   modes: { currentModeId: 'default' },
   prompt: vi.fn(async () => {}),
@@ -10,8 +38,8 @@ const mockSession = {
   dispose: vi.fn(),
 };
 
-const mockCtx = {
-  request: vi.fn(async (method) => {
+const mockCtx: MockCtx = {
+  request: vi.fn(async (method: string) => {
     if (method === 'initialize') {
       return { protocolVersion: 1, agentCapabilities: { loadSession: true } };
     }
@@ -23,9 +51,9 @@ const mockCtx = {
   attachSession: vi.fn(() => mockSession),
 };
 
-const mockClientInstance = {
+const mockClientInstance: MockClientInstance = {
   onRequest: vi.fn(() => mockClientInstance),
-  connectWith: vi.fn(async (_stream, callback) => {
+  connectWith: vi.fn(async (_stream: unknown, callback: (ctx: MockCtx) => Promise<void>) => {
     await callback(mockCtx);
     return mockClientInstance;
   }),
@@ -46,7 +74,7 @@ vi.mock('@agentclientprotocol/sdk', () => ({
 }));
 
 // Mock child_process.spawn — default returns a healthy proc
-const mockProc = {
+const mockProc: MockProc = {
   stdin: { write: vi.fn(), end: vi.fn() },
   stdout: { on: vi.fn() },
   stderr: { on: vi.fn() },
@@ -57,12 +85,12 @@ const mockProc = {
 const spawnMock = vi.fn(() => mockProc);
 
 vi.mock('node:child_process', () => ({
-  spawn: vi.fn((...args) => spawnMock(...args)),
+  spawn: vi.fn((...args: unknown[]) => spawnMock(...args)),
 }));
 
 // Mock stream conversions
 vi.mock('node:stream', async (importOriginal) => {
-  const actual = await importOriginal();
+  const actual = (await importOriginal()) as Record<string, unknown>;
   return {
     ...actual,
     Writable: { toWeb: vi.fn(() => ({})) },
@@ -79,16 +107,18 @@ describe('AcpClient edge cases', () => {
     vi.clearAllMocks();
     spawnMock.mockReturnValue(mockProc);
     mockProc.on.mockClear();
-    mockCtx.request.mockImplementation(async (method) => {
+    mockCtx.request.mockImplementation(async (method: string) => {
       if (method === 'initialize') {
         return { protocolVersion: 1, agentCapabilities: { loadSession: true } };
       }
       return {};
     });
-    mockClientInstance.connectWith.mockImplementation(async (_stream, callback) => {
-      await callback(mockCtx);
-      return mockClientInstance;
-    });
+    mockClientInstance.connectWith.mockImplementation(
+      async (_stream: unknown, callback: (ctx: MockCtx) => Promise<void>) => {
+        await callback(mockCtx);
+        return mockClientInstance;
+      }
+    );
     mockSession.nextUpdate.mockResolvedValue({ kind: 'stop', stopReason: 'end_turn' });
     mockSession.prompt.mockResolvedValue(undefined);
     mockSession.dispose.mockReset();
@@ -101,11 +131,11 @@ describe('AcpClient edge cases', () => {
   // 1. Agent spawn failure (command not found)
   it('rejects start() when the child process emits an error (command not found)', async () => {
     const procError = new Error('spawn acp-nonexistent ENOENT');
-    const errorProc = {
+    const errorProc: MockProc = {
       stdin: { write: vi.fn(), end: vi.fn() },
       stdout: { on: vi.fn() },
       stderr: { on: vi.fn() },
-      on: vi.fn((event, cb) => {
+      on: vi.fn((event: string, cb: (arg?: unknown) => void) => {
         if (event === 'error') {
           // Defer so listeners attach first
           setImmediate(() => cb(procError));
@@ -123,7 +153,7 @@ describe('AcpClient edge cases', () => {
 
   // 2. Session load failure (session/load throws)
   it('rejects start() when session/load throws', async () => {
-    mockCtx.request.mockImplementation(async (method) => {
+    mockCtx.request.mockImplementation(async (method: string) => {
       if (method === 'initialize') {
         return { protocolVersion: 1, agentCapabilities: { loadSession: true } };
       }
@@ -139,7 +169,7 @@ describe('AcpClient edge cases', () => {
 
   // 3. Session resume failure (session/resume throws)
   it('rejects start() when session/resume throws', async () => {
-    mockCtx.request.mockImplementation(async (method) => {
+    mockCtx.request.mockImplementation(async (method: string) => {
       if (method === 'initialize') {
         return {
           protocolVersion: 1,
@@ -227,7 +257,7 @@ describe('AcpClient edge cases', () => {
 
   // 11. Very long prompt text
   it('prompt() forwards very long text to the session', async () => {
-    const longText = 'a'.repeat(1_000_000);
+    const longText: string = 'a'.repeat(1_000_000);
     const client = new AcpClient({ agentCmd: 'acp-agent serve' });
     await client.start();
     await client.prompt(longText);
@@ -239,9 +269,9 @@ describe('AcpClient edge cases', () => {
     const client = new AcpClient({ agentCmd: 'acp-agent serve' });
     await client.start();
     // Simulate process exit (agent closed stdin / died)
-    const exitHandler = mockProc.on.mock.calls.find((c) => c[0] === 'exit')?.[1];
+    const exitHandler = mockProc.on.mock.calls.find((c: unknown[]) => c[0] === 'exit')?.[1];
     expect(exitHandler).toBeDefined();
-    expect(() => exitHandler(0)).not.toThrow();
+    expect(() => (exitHandler as (code: number | null) => void)(0)).not.toThrow();
   });
 
   // 13. Permission with no options array

@@ -1,7 +1,18 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { AcpClient } from '../src/acp-client';
+
+type MockFn = ReturnType<typeof vi.fn>;
+
+interface MockBot {
+  on: MockFn;
+  sendMessage: MockFn;
+  editMessageText: MockFn;
+  answerCallbackQuery: MockFn;
+  stopPolling: MockFn;
+}
 
 // Mock node-telegram-bot-api
-const mockBot = {
+const mockBot: MockBot = {
   on: vi.fn(),
   sendMessage: vi.fn(async () => ({ message_id: 1 })),
   editMessageText: vi.fn(async () => ({})),
@@ -19,27 +30,43 @@ vi.mock('node-telegram-bot-api', () => ({
   },
 }));
 
+interface MockAcpUpdate {
+  kind: string;
+  update?: Record<string, unknown>;
+  stopReason?: string;
+}
+
+interface MockAcp {
+  prompt: MockFn;
+  nextUpdate: MockFn;
+  cancel: MockFn;
+  _pushUpdate: (update: MockAcpUpdate) => void;
+  _updates: MockAcpUpdate[];
+}
+
 // Mock ACP client
-function createMockAcp() {
-  const updates = [];
+function createMockAcp(): MockAcp {
+  const updates: MockAcpUpdate[] = [];
   return {
     prompt: vi.fn(async () => {}),
     nextUpdate: vi.fn(async () => {
-      if (updates.length > 0) return updates.shift();
+      if (updates.length > 0) return updates.shift() as MockAcpUpdate;
       return { kind: 'stop', stopReason: 'end_turn' };
     }),
     cancel: vi.fn(async () => {}),
-    _pushUpdate: (update) => updates.push(update),
+    _pushUpdate: (update: MockAcpUpdate): number => updates.push(update),
     _updates: updates,
   };
 }
 
 const { BridgeBot } = await import('../src/bot.js');
 
-function createBot(overrides = {}) {
+type BotOverrides = Partial<ConstructorParameters<typeof BridgeBot>[0]>;
+
+function createBot(overrides: BotOverrides = {}) {
   const acp = createMockAcp();
   const bot = new BridgeBot({
-    acp,
+    acp: acp as unknown as AcpClient,
     telegramToken: 'test-token',
     allowedChatIds: [123],
     agentCmd: 'acp-agent serve',
@@ -136,7 +163,7 @@ describe('BridgeBot', () => {
   it('splits output >4096 chars into multiple messages', async () => {
     const { bot, acp } = createBot();
     await bot.start();
-    const longText = 'A'.repeat(5000);
+    const longText: string = 'A'.repeat(5000);
     acp._pushUpdate({
       kind: 'update',
       update: { sessionUpdate: 'agent_message', content: { type: 'text', text: longText } },

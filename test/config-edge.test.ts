@@ -2,9 +2,9 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { loadConfig, saveConfig } from '../src/config.ts';
+import { type BridgeConfig, loadConfig, saveConfig } from '../src/config.ts';
 
-const validConfig = {
+const validConfig: BridgeConfig = {
   agentCmd: 'acp-agent serve',
   platforms: {
     telegram: {
@@ -15,8 +15,8 @@ const validConfig = {
 };
 
 describe('config edge cases', () => {
-  let tmpDir;
-  let cfgPath;
+  let tmpDir: string;
+  let cfgPath: string;
 
   beforeEach(() => {
     tmpDir = mkdtempSync(join(tmpdir(), 'acp-cfg-edge-'));
@@ -27,7 +27,7 @@ describe('config edge cases', () => {
     if (tmpDir && existsSync(tmpDir)) rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  function writeCfg(content) {
+  function writeCfg(content: string): void {
     writeFileSync(cfgPath, content, 'utf8');
   }
 
@@ -70,7 +70,7 @@ describe('config edge cases', () => {
       JSON.stringify({ agentCmd: 'acp-agent serve', platforms: { telegram: { token: 'tok' } } })
     );
     const cfg = loadConfig(cfgPath);
-    expect(cfg.platforms.telegram.allowedChatIds).toEqual([]);
+    expect(cfg?.platforms?.telegram?.allowedChatIds).toEqual([]);
   });
 
   it('extra unknown fields are preserved safely', () => {
@@ -83,9 +83,9 @@ describe('config edge cases', () => {
     );
     const cfg = loadConfig(cfgPath);
     expect(cfg).not.toBeNull();
-    expect(cfg.agentCmd).toBe('acp-agent serve');
-    expect(cfg.unknownField).toBe('hello');
-    expect(cfg.another).toEqual({ nested: true });
+    expect(cfg?.agentCmd).toBe('acp-agent serve');
+    expect((cfg as Record<string, unknown>).unknownField).toBe('hello');
+    expect((cfg as Record<string, unknown>).another).toEqual({ nested: true });
   });
 
   it('file with trailing comma (invalid JSONC) is accepted', () => {
@@ -98,7 +98,7 @@ describe('config edge cases', () => {
     );
     const cfg = loadConfig(cfgPath);
     expect(cfg).not.toBeNull();
-    expect(cfg.allowedChatIds).toEqual([123]);
+    expect(cfg?.allowedChatIds).toEqual([123]);
   });
 
   it('file with block comments is parsed', () => {
@@ -113,7 +113,7 @@ describe('config edge cases', () => {
     );
     const cfg = loadConfig(cfgPath);
     expect(cfg).not.toBeNull();
-    expect(cfg.agentCmd).toBe('acp-agent serve');
+    expect(cfg?.agentCmd).toBe('acp-agent serve');
   });
 
   it('file with line comments is parsed', () => {
@@ -127,17 +127,17 @@ describe('config edge cases', () => {
     );
     const cfg = loadConfig(cfgPath);
     expect(cfg).not.toBeNull();
-    expect(cfg.agentCmd).toBe('acp-agent serve');
+    expect(cfg?.agentCmd).toBe('acp-agent serve');
   });
 
   it('saveConfig with null/undefined throws a clear error', () => {
-    expect(() => saveConfig(null, cfgPath)).toThrow();
-    expect(() => saveConfig(undefined, cfgPath)).toThrow();
+    expect(() => saveConfig(null as unknown as BridgeConfig, cfgPath)).toThrow();
+    expect(() => saveConfig(undefined as unknown as BridgeConfig, cfgPath)).toThrow();
     expect(existsSync(cfgPath)).toBe(false);
   });
 
   it('saveConfig with empty object writes a file that loads as null', () => {
-    saveConfig({}, cfgPath);
+    saveConfig({} as BridgeConfig, cfgPath);
     expect(existsSync(cfgPath)).toBe(true);
     // empty object has no required fields -> validation throws on load
     expect(() => loadConfig(cfgPath)).toThrow();
@@ -151,7 +151,7 @@ describe('config edge cases', () => {
   });
 
   it('saveConfig writes to a path inside a non-existent nested dir fails predictably', () => {
-    const nested = join(tmpDir, 'sub', 'deep', 'test.acp-connector.jsonc');
+    const nested: string = join(tmpDir, 'sub', 'deep', 'test.acp-connector.jsonc');
     expect(() => saveConfig(validConfig, nested)).toThrow();
   });
 
@@ -164,7 +164,7 @@ describe('config edge cases', () => {
       JSON.stringify({ agentCmd: 'acp-agent serve', telegramToken: 'tok', allowedChatIds: [123] })
     );
     const cfg = loadConfig(cfgPath);
-    expect(cfg.platforms.telegram.token).toBe('tok');
-    expect(cfg.platforms.telegram.allowedChatIds).toEqual([123]);
+    expect(cfg?.platforms?.telegram?.token).toBe('tok');
+    expect(cfg?.platforms?.telegram?.allowedChatIds).toEqual([123]);
   });
 });

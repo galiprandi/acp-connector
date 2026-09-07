@@ -1,7 +1,18 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { AcpClient } from '../src/acp-client';
+
+type MockFn = ReturnType<typeof vi.fn>;
+
+interface MockBot {
+  on: MockFn;
+  sendMessage: MockFn;
+  editMessageText: MockFn;
+  answerCallbackQuery: MockFn;
+  stopPolling: MockFn;
+}
 
 // Mock node-telegram-bot-api
-const mockBot = {
+const mockBot: MockBot = {
   on: vi.fn(),
   sendMessage: vi.fn(async () => ({ message_id: 1 })),
   editMessageText: vi.fn(async () => ({})),
@@ -19,26 +30,44 @@ vi.mock('node-telegram-bot-api', () => ({
   },
 }));
 
+interface MockAcpUpdate {
+  kind: string;
+  update?: Record<string, unknown>;
+  stopReason?: string;
+}
+
+interface MockAcp {
+  prompt: MockFn;
+  nextUpdate: MockFn;
+  cancel: MockFn;
+  _pushUpdate: (update: Record<string, unknown>) => void;
+  _updates: MockAcpUpdate[];
+}
+
 // Mock ACP client
-function createMockAcp() {
-  const updates = [];
+function createMockAcp(): MockAcp {
+  const updates: MockAcpUpdate[] = [];
   return {
     prompt: vi.fn(async () => {}),
     nextUpdate: vi.fn(async () => {
-      if (updates.length > 0) return updates.shift();
+      if (updates.length > 0) return updates.shift() as MockAcpUpdate;
       return { kind: 'stop', stopReason: 'end_turn' };
     }),
-    _pushUpdate: (update) => updates.push({ kind: 'update', update }),
+    cancel: vi.fn(async () => {}),
+    _pushUpdate: (update: Record<string, unknown>): number =>
+      updates.push({ kind: 'update', update }),
     _updates: updates,
   };
 }
 
 const { BridgeBot } = await import('../src/bot.js');
 
-function createBot(overrides = {}) {
+type BotOverrides = Partial<ConstructorParameters<typeof BridgeBot>[0]>;
+
+function createBot(overrides: BotOverrides = {}) {
   const acp = createMockAcp();
   const bot = new BridgeBot({
-    acp,
+    acp: acp as unknown as AcpClient,
     telegramToken: 'test-token',
     allowedChatIds: [123],
     agentCmd: 'acp-agent serve',
@@ -47,12 +76,12 @@ function createBot(overrides = {}) {
   return { bot, acp };
 }
 
-async function sendMessage(_bot, msg) {
+async function sendMessage(_bot: unknown, msg: Record<string, unknown>): Promise<void> {
   const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
   await handler(msg);
 }
 
-async function sendCallbackQuery(_bot, query) {
+async function sendCallbackQuery(_bot: unknown, query: Record<string, unknown>): Promise<void> {
   const handler = mockBot.on.mock.calls.find((c) => c[0] === 'callback_query')[1];
   await handler(query);
 }
@@ -78,7 +107,7 @@ describe('BridgeBot edge cases', () => {
   it('splits long output over 4096 chars', async () => {
     const { bot, acp } = createBot();
     await bot.start();
-    const longText = 'a'.repeat(5000);
+    const longText: string = 'a'.repeat(5000);
     acp._pushUpdate({
       sessionUpdate: 'agent_message',
       content: [{ type: 'text', text: longText }],

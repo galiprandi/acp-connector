@@ -1,11 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { CronJob, CronManagerOptions } from '../src/cron';
 
-const mockTask = {
+const mockTask: { stop: vi.Mock } = {
   stop: vi.fn(),
 };
 
-const mockValidate = vi.fn(() => true);
-const mockSchedule = vi.fn(() => mockTask);
+const mockValidate: vi.Mock = vi.fn(() => true);
+const mockSchedule: vi.Mock = vi.fn(() => mockTask);
 
 vi.mock('node-cron', () => ({
   default: {
@@ -16,9 +17,19 @@ vi.mock('node-cron', () => ({
 
 const { CronManager } = await import('../src/cron.ts');
 
-function createManager(jobs = [], overrides = {}) {
-  const enqueue = vi.fn();
-  const onLog = vi.fn();
+interface CreateManagerResult {
+  // biome-ignore lint/suspicious/noExplicitAny: CronManager constructor type is complex in mock context
+  manager: any;
+  enqueue: vi.Mock;
+  onLog: vi.Mock;
+}
+
+function createManager(
+  jobs: CronJob[] = [],
+  overrides: Partial<CronManagerOptions> = {}
+): CreateManagerResult {
+  const enqueue: vi.Mock = vi.fn();
+  const onLog: vi.Mock = vi.fn();
   const manager = new CronManager({
     jobs,
     allowedChatIds: [123],
@@ -80,7 +91,7 @@ describe('CronManager', () => {
       { name: 'job1', schedule: '0 9 * * *', prompt: 'hello' },
     ]);
     manager.start();
-    const callback = mockSchedule.mock.calls[0][1];
+    const callback = mockSchedule.mock.calls[0][1] as () => void;
     callback();
     expect(enqueue).toHaveBeenCalledWith('hello', 123);
   });
@@ -90,7 +101,7 @@ describe('CronManager', () => {
       { name: 'job1', schedule: '0 9 * * *', prompt: 'hello', chatId: 999 },
     ]);
     manager.start();
-    const callback = mockSchedule.mock.calls[0][1];
+    const callback = mockSchedule.mock.calls[0][1] as () => void;
     callback();
     expect(enqueue).toHaveBeenCalledWith('hello', 999);
   });
@@ -150,7 +161,7 @@ describe('CronManager', () => {
   });
 
   it('list() returns all jobs', () => {
-    const jobs = [
+    const jobs: CronJob[] = [
       { name: 'job1', schedule: '0 9 * * *', prompt: 'hello' },
       { name: 'job2', schedule: '0 10 * * *', prompt: 'world' },
     ];

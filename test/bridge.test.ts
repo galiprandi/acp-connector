@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { BridgeConfig } from '../src/config';
+import type { CronManagerOptions } from '../src/cron';
 
-const validConfig = {
+const validConfig: BridgeConfig = {
   agentCmd: 'acp-agent serve',
   platforms: {
     telegram: {
@@ -10,14 +12,25 @@ const validConfig = {
   },
 };
 
-let mockConfig = null;
+let mockConfig: BridgeConfig | null = null;
 
 vi.mock('../src/config.ts', () => ({
   loadConfig: () => mockConfig,
 }));
 
+interface MockAcpClient {
+  start: vi.Mock;
+  kill: vi.Mock;
+  prompt: vi.Mock;
+  nextUpdate: vi.Mock;
+  sessionId: string;
+  modes: { currentModeId: string };
+  session: Record<string, unknown>;
+  onPermission: ((params: unknown) => Promise<unknown>) | null;
+}
+
 // Mock all modules
-const mockAcpClient = {
+const mockAcpClient: MockAcpClient = {
   start: vi.fn(async () => {}),
   kill: vi.fn(),
   prompt: vi.fn(async () => {}),
@@ -28,7 +41,19 @@ const mockAcpClient = {
   onPermission: null,
 };
 
-const mockBot = {
+interface MockBot {
+  start: vi.Mock;
+  stop: vi.Mock;
+  enqueuePrompt: vi.Mock;
+  sendMessage: vi.Mock;
+  onCommand: ((text: string, chatId: number | string) => Promise<boolean>) | null;
+  hasActivePrompt: vi.Mock;
+  setMediaHandler: vi.Mock;
+  setCommandHandler: vi.Mock;
+  _handlePermission: vi.Mock;
+}
+
+const mockBot: MockBot = {
   start: vi.fn(async () => {}),
   stop: vi.fn(),
   enqueuePrompt: vi.fn(),
@@ -40,7 +65,7 @@ const mockBot = {
   _handlePermission: vi.fn(async () => ({ outcome: { outcome: 'cancelled' } })),
 };
 
-const mockDiscordBot = {
+const mockDiscordBot: MockBot = {
   start: vi.fn(async () => {}),
   stop: vi.fn(),
   enqueuePrompt: vi.fn(),
@@ -52,9 +77,19 @@ const mockDiscordBot = {
   _handlePermission: vi.fn(async () => ({ outcome: { outcome: 'cancelled' } })),
 };
 
-let lastCronManagerArgs = null;
+let lastCronManagerArgs: CronManagerOptions | null = null;
 
-const mockCronManager = {
+interface MockCronManager {
+  start: vi.Mock;
+  stop: vi.Mock;
+  list: vi.Mock;
+  add: vi.Mock;
+  remove: vi.Mock;
+  toggle: vi.Mock;
+  run: vi.Mock;
+}
+
+const mockCronManager: MockCronManager = {
   start: vi.fn(),
   stop: vi.fn(),
   list: vi.fn(() => []),
@@ -64,17 +99,34 @@ const mockCronManager = {
   run: vi.fn(),
 };
 
-const mockRoutineManager = {
+interface MockRoutineManager {
+  handleCommand: vi.Mock;
+}
+
+const mockRoutineManager: MockRoutineManager = {
   handleCommand: vi.fn(async () => false),
 };
 
-const mockHttpServer = {
+interface MockHttpServer {
+  start: vi.Mock;
+  stop: vi.Mock;
+}
+
+const mockHttpServer: MockHttpServer = {
   start: vi.fn(),
   stop: vi.fn(),
 };
 
-let lastAcpInstance = null;
-let lastBotInstance = null;
+interface MockAcpInstance {
+  onPermission: ((params: unknown) => Promise<unknown>) | null;
+}
+
+interface MockBotInstance {
+  onCommand: ((text: string, chatId: number | string) => Promise<boolean>) | null;
+}
+
+let lastAcpInstance: MockAcpInstance | null = null;
+let lastBotInstance: MockBotInstance | null = null;
 
 vi.mock('../src/acp-client.ts', () => ({
   AcpClient: class MockAcpClient {
@@ -85,9 +137,9 @@ vi.mock('../src/acp-client.ts', () => ({
     sessionId = mockAcpClient.sessionId;
     modes = mockAcpClient.modes;
     session = mockAcpClient.session;
-    onPermission = null;
+    onPermission: ((params: unknown) => Promise<unknown>) | null = null;
     constructor() {
-      lastAcpInstance = this;
+      lastAcpInstance = this as unknown as MockAcpInstance;
     }
   },
 }));
@@ -97,16 +149,16 @@ vi.mock('../src/bot.ts', () => ({
     stop = mockBot.stop;
     enqueuePrompt = mockBot.enqueuePrompt;
     sendMessage = mockBot.sendMessage;
-    onCommand = null;
+    onCommand: ((text: string, chatId: number | string) => Promise<boolean>) | null = null;
     hasActivePrompt = mockBot.hasActivePrompt;
     setMediaHandler = mockBot.setMediaHandler;
-    setCommandHandler(fn) {
+    setCommandHandler(fn: (text: string, chatId: number | string) => Promise<boolean>): void {
       this.onCommand = fn;
       mockBot.setCommandHandler(fn);
     }
     _handlePermission = mockBot._handlePermission;
     constructor() {
-      lastBotInstance = this;
+      lastBotInstance = this as unknown as MockBotInstance;
     }
   },
 }));
@@ -116,16 +168,16 @@ vi.mock('../src/discord.ts', () => ({
     stop = mockDiscordBot.stop;
     enqueuePrompt = mockDiscordBot.enqueuePrompt;
     sendMessage = mockDiscordBot.sendMessage;
-    onCommand = null;
+    onCommand: ((text: string, chatId: number | string) => Promise<boolean>) | null = null;
     hasActivePrompt = mockDiscordBot.hasActivePrompt;
     setMediaHandler = mockDiscordBot.setMediaHandler;
-    setCommandHandler(fn) {
+    setCommandHandler(fn: (text: string, chatId: number | string) => Promise<boolean>): void {
       this.onCommand = fn;
       mockDiscordBot.setCommandHandler(fn);
     }
     _handlePermission = mockDiscordBot._handlePermission;
     constructor() {
-      lastBotInstance = this;
+      lastBotInstance = this as unknown as MockBotInstance;
     }
   },
 }));
@@ -138,7 +190,7 @@ vi.mock('../src/cron.ts', () => ({
     remove = mockCronManager.remove;
     toggle = mockCronManager.toggle;
     run = mockCronManager.run;
-    constructor(args) {
+    constructor(args: CronManagerOptions) {
       lastCronManagerArgs = args;
     }
   },
@@ -158,9 +210,9 @@ vi.mock('../src/http.js', () => ({
 const { run } = await import('../src/bridge.js');
 
 describe('bridge', () => {
-  let intervalSpy;
-  let onSpy;
-  let exitSpy;
+  let intervalSpy: ReturnType<typeof vi.spyOn>;
+  let onSpy: ReturnType<typeof vi.spyOn>;
+  let exitSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -205,19 +257,19 @@ describe('bridge', () => {
   it('wires onCommand to routine manager', async () => {
     mockConfig = { ...validConfig };
     await run();
-    expect(lastBotInstance.onCommand).toBeDefined();
-    expect(typeof lastBotInstance.onCommand).toBe('function');
+    expect(lastBotInstance?.onCommand).toBeDefined();
+    expect(typeof lastBotInstance?.onCommand).toBe('function');
   });
 
   it('wires onPermission to bot', async () => {
     mockConfig = { ...validConfig };
     await run();
-    expect(lastAcpInstance.onPermission).toBeDefined();
-    expect(typeof lastAcpInstance.onPermission).toBe('function');
+    expect(lastAcpInstance?.onPermission).toBeDefined();
+    expect(typeof lastAcpInstance?.onPermission).toBe('function');
   });
 
   it('preserves Discord Snowflake channel IDs for cron allowedChatIds', async () => {
-    const snowflake = '123456789012345678';
+    const snowflake: string = '123456789012345678';
     mockConfig = {
       agentCmd: 'acp-agent serve',
       platforms: {
@@ -229,7 +281,7 @@ describe('bridge', () => {
     };
     await run();
     expect(lastCronManagerArgs).not.toBeNull();
-    expect(lastCronManagerArgs.allowedChatIds).toContain(snowflake);
+    expect(lastCronManagerArgs?.allowedChatIds).toContain(snowflake);
   });
 
   it('routes permission to the bot with an active prompt (Discord), not the first bot (TG)', async () => {
@@ -247,7 +299,7 @@ describe('bridge', () => {
     mockBot._handlePermission.mockClear();
     mockDiscordBot._handlePermission.mockClear();
 
-    await lastAcpInstance.onPermission({ options: [{ kind: 'allow', optionId: 'a1' }] });
+    await lastAcpInstance?.onPermission?.({ options: [{ kind: 'allow', optionId: 'a1' }] });
 
     expect(mockDiscordBot._handlePermission).toHaveBeenCalledTimes(1);
     expect(mockBot._handlePermission).not.toHaveBeenCalled();

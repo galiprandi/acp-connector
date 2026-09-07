@@ -2,8 +2,28 @@ import { rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+interface MockSession {
+  sessionId: string;
+  modes: { currentModeId: string };
+  prompt: vi.Mock;
+  nextUpdate: vi.Mock;
+  dispose: vi.Mock;
+}
+
+interface MockCtx {
+  request: vi.Mock;
+  buildSession: vi.Mock;
+  attachSession: vi.Mock;
+}
+
+interface MockClientInstance {
+  onRequest: vi.Mock;
+  connectWith: vi.Mock;
+  catch: vi.Mock;
+}
+
 // Mock the SDK before importing AcpClient
-const mockSession = {
+const mockSession: MockSession = {
   sessionId: 'test-session-id',
   modes: { currentModeId: 'default' },
   prompt: vi.fn(async () => {}),
@@ -11,8 +31,8 @@ const mockSession = {
   dispose: vi.fn(),
 };
 
-const mockCtx = {
-  request: vi.fn(async (method) => {
+const mockCtx: MockCtx = {
+  request: vi.fn(async (method: string) => {
     if (method === 'initialize') {
       return {
         protocolVersion: 1,
@@ -27,9 +47,9 @@ const mockCtx = {
   attachSession: vi.fn(() => mockSession),
 };
 
-const mockClientInstance = {
+const mockClientInstance: MockClientInstance = {
   onRequest: vi.fn(() => mockClientInstance),
-  connectWith: vi.fn(async (_stream, callback) => {
+  connectWith: vi.fn(async (_stream: unknown, callback: (ctx: MockCtx) => Promise<void>) => {
     await callback(mockCtx);
     return mockClientInstance;
   }),
@@ -64,7 +84,7 @@ vi.mock('node:child_process', () => ({
 
 // Mock stream conversions
 vi.mock('node:stream', async (importOriginal) => {
-  const actual = await importOriginal();
+  const actual = (await importOriginal()) as Record<string, unknown>;
   return {
     ...actual,
     Writable: { toWeb: vi.fn(() => ({})) },
@@ -74,12 +94,12 @@ vi.mock('node:stream', async (importOriginal) => {
 
 const { AcpClient } = await import('../src/acp-client.ts');
 
-const tmpSessionConfig = resolve(process.cwd(), 'test-session.jsonc');
+const tmpSessionConfig: string = resolve(process.cwd(), 'test-session.jsonc');
 
 describe('AcpClient', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockCtx.request.mockImplementation(async (method) => {
+    mockCtx.request.mockImplementation(async (method: string) => {
       if (method === 'initialize') {
         return { protocolVersion: 1, agentCapabilities: { loadSession: true } };
       }
@@ -114,7 +134,7 @@ describe('AcpClient', () => {
   });
 
   it('calls session/resume when resume capability is available', async () => {
-    mockCtx.request.mockImplementation(async (method) => {
+    mockCtx.request.mockImplementation(async (method: string) => {
       if (method === 'initialize') {
         return {
           protocolVersion: 1,
@@ -135,7 +155,7 @@ describe('AcpClient', () => {
   });
 
   it('throws when no load/resume capability and sessionId provided', async () => {
-    mockCtx.request.mockImplementation(async (method) => {
+    mockCtx.request.mockImplementation(async (method: string) => {
       if (method === 'initialize') {
         return { protocolVersion: 1, agentCapabilities: {} };
       }

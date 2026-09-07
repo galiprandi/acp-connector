@@ -1,21 +1,42 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { Routine } from '../src/config';
 
-const mockLoadConfig = vi.fn(() => ({ routines: [], cron: [] }));
-const mockSaveConfig = vi.fn();
+const mockLoadConfig: vi.Mock = vi.fn(() => ({ routines: [], cron: [] }));
+const mockSaveConfig: vi.Mock = vi.fn();
 
 vi.mock('../src/config.js', () => ({
   loadConfig: () => mockLoadConfig(),
-  saveConfig: (...args) => mockSaveConfig(...args),
+  saveConfig: (...args: unknown[]) => mockSaveConfig(...args),
 }));
 
 const { RoutineManager } = await import('../src/routines.js');
 
-function createManager(overrides = {}) {
-  const enqueue = vi.fn();
-  const sendMessage = vi.fn(async () => ({}));
-  const cronManager = {
+interface MockCronManager {
+  list: vi.Mock;
+  add: vi.Mock;
+  remove: vi.Mock;
+  toggle: vi.Mock;
+  run: vi.Mock;
+}
+
+interface CreateManagerOverrides {
+  routines?: Routine[];
+}
+
+interface CreateManagerResult {
+  // biome-ignore lint/suspicious/noExplicitAny: RoutineManager has private fields accessed in tests
+  manager: any;
+  enqueue: vi.Mock;
+  sendMessage: vi.Mock;
+  cronManager: MockCronManager;
+}
+
+function createManager(overrides: CreateManagerOverrides = {}): CreateManagerResult {
+  const enqueue: vi.Mock = vi.fn();
+  const sendMessage: vi.Mock = vi.fn(async () => ({}));
+  const cronManager: MockCronManager = {
     list: vi.fn(() => []),
-    add: vi.fn((job) => job),
+    add: vi.fn((job: unknown) => job),
     remove: vi.fn(() => true),
     toggle: vi.fn(() => true),
     run: vi.fn(() => true),

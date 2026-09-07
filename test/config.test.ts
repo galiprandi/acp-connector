@@ -1,11 +1,11 @@
 import { existsSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { defaultConfigPath, loadConfig, saveConfig } from '../src/config.ts';
+import { type BridgeConfig, defaultConfigPath, loadConfig, saveConfig } from '../src/config.ts';
 
-const tmpConfigPath = resolve(process.cwd(), 'acp-connector.jsonc');
+const tmpConfigPath: string = resolve(process.cwd(), 'acp-connector.jsonc');
 
-const validConfig = {
+const validConfig: BridgeConfig = {
   agentCmd: 'acp-agent serve',
   platforms: { telegram: { token: 'tok', allowedChatIds: [123] } },
 };
@@ -23,8 +23,8 @@ describe('config', () => {
     writeFileSync(tmpConfigPath, JSON.stringify(validConfig));
     const cfg = loadConfig();
     expect(cfg).not.toBeNull();
-    expect(cfg.agentCmd).toBe('acp-agent serve');
-    expect(cfg.platforms.telegram.allowedChatIds).toEqual([123]);
+    expect(cfg?.agentCmd).toBe('acp-agent serve');
+    expect(cfg?.platforms?.telegram?.allowedChatIds).toEqual([123]);
   });
 
   it('strips line comments', () => {
@@ -38,7 +38,7 @@ describe('config', () => {
     );
     const cfg = loadConfig();
     expect(cfg).not.toBeNull();
-    expect(cfg.agentCmd).toBe('acp-agent serve');
+    expect(cfg?.agentCmd).toBe('acp-agent serve');
   });
 
   it('strips block comments', () => {
@@ -52,7 +52,7 @@ describe('config', () => {
     );
     const cfg = loadConfig();
     expect(cfg).not.toBeNull();
-    expect(cfg.agentCmd).toBe('acp-agent serve');
+    expect(cfg?.agentCmd).toBe('acp-agent serve');
   });
 
   it('strips trailing commas', () => {
@@ -65,7 +65,7 @@ describe('config', () => {
     );
     const cfg = loadConfig();
     expect(cfg).not.toBeNull();
-    expect(cfg.platforms.telegram.allowedChatIds).toEqual([123]);
+    expect(cfg?.platforms?.telegram?.allowedChatIds).toEqual([123]);
   });
 
   it('does not strip // inside strings', () => {
@@ -78,14 +78,14 @@ describe('config', () => {
     );
     const cfg = loadConfig();
     expect(cfg).not.toBeNull();
-    expect(cfg.agentCmd).toBe('https://example.com');
+    expect(cfg?.agentCmd).toBe('https://example.com');
   });
 
   it('saveConfig writes valid JSON', () => {
     saveConfig(validConfig);
     const cfg = loadConfig();
     expect(cfg).not.toBeNull();
-    expect(cfg.agentCmd).toBe('acp-agent serve');
+    expect(cfg?.agentCmd).toBe('acp-agent serve');
   });
 
   it('defaultConfigPath resolves to cwd', () => {

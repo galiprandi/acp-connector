@@ -1,11 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { CronJob, CronManagerOptions } from '../src/cron';
 
-const mockTask = {
+const mockTask: { stop: vi.Mock } = {
   stop: vi.fn(),
 };
 
-const mockValidate = vi.fn(() => true);
-const mockSchedule = vi.fn(() => mockTask);
+const mockValidate: vi.Mock = vi.fn(() => true);
+const mockSchedule: vi.Mock = vi.fn(() => mockTask);
 
 vi.mock('node-cron', () => ({
   default: {
@@ -16,9 +17,19 @@ vi.mock('node-cron', () => ({
 
 const { CronManager } = await import('../src/cron.ts');
 
-function createManager(jobs = [], overrides = {}) {
-  const enqueue = vi.fn();
-  const onLog = vi.fn();
+interface CreateManagerResult {
+  // biome-ignore lint/suspicious/noExplicitAny: CronManager constructor type is complex in mock context
+  manager: any;
+  enqueue: vi.Mock;
+  onLog: vi.Mock;
+}
+
+function createManager(
+  jobs: CronJob[] = [],
+  overrides: Partial<CronManagerOptions> = {}
+): CreateManagerResult {
+  const enqueue: vi.Mock = vi.fn();
+  const onLog: vi.Mock = vi.fn();
   const manager = new CronManager({
     jobs,
     allowedChatIds: [123],
@@ -67,7 +78,7 @@ describe('CronManager edge cases', () => {
     manager.start();
     const result = manager.add({ name: 'job1', schedule: '0 10 * * *', prompt: 'world' });
     expect(result).toBeNull();
-    expect(manager.jobs.filter((j) => j.name === 'job1')).toHaveLength(1);
+    expect(manager.jobs.filter((j: CronJob) => j.name === 'job1')).toHaveLength(1);
   });
 
   it('remove() returns false for non-existent job', () => {

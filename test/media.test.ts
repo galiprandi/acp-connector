@@ -1,9 +1,21 @@
 import { existsSync, mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { AcpClient } from '../src/acp-client';
+
+type MockFn = ReturnType<typeof vi.fn>;
+
+interface MockBot {
+  on: MockFn;
+  sendMessage: MockFn;
+  editMessageText: MockFn;
+  answerCallbackQuery: MockFn;
+  stopPolling: MockFn;
+  getFileLink: MockFn;
+}
 
 // Mock node-telegram-bot-api
-const mockBot = {
+const mockBot: MockBot = {
   on: vi.fn(),
   sendMessage: vi.fn(async () => ({ message_id: 1 })),
   editMessageText: vi.fn(async () => ({})),
@@ -24,20 +36,36 @@ vi.mock('node-telegram-bot-api', () => ({
 }));
 
 // Mock fetch for downloads
-const mockFetch = vi.fn(async () => ({
+const mockFetch: MockFn = vi.fn(async () => ({
   arrayBuffer: async () => new TextEncoder().encode('fake-image-data').buffer,
 }));
 vi.stubGlobal('fetch', mockFetch);
 
-function createMockAcp() {
-  const updates = [];
+interface MockAcpUpdate {
+  kind: string;
+  update?: Record<string, unknown>;
+  stopReason?: string;
+}
+
+interface MockAcp {
+  prompt: MockFn;
+  nextUpdate: MockFn;
+  cancel: MockFn;
+  _pushUpdate: (update: MockAcpUpdate) => void;
+  _updates: MockAcpUpdate[];
+  promptCapabilities: { image: boolean } | null;
+}
+
+function createMockAcp(): MockAcp {
+  const updates: MockAcpUpdate[] = [];
   return {
     prompt: vi.fn(async () => {}),
     nextUpdate: vi.fn(async () => {
-      if (updates.length > 0) return updates.shift();
+      if (updates.length > 0) return updates.shift() as MockAcpUpdate;
       return { kind: 'stop', stopReason: 'end_turn' };
     }),
-    _pushUpdate: (update) => updates.push(update),
+    cancel: vi.fn(async () => {}),
+    _pushUpdate: (update: MockAcpUpdate): number => updates.push(update),
     _updates: updates,
     promptCapabilities: { image: true },
   };
@@ -46,16 +74,18 @@ function createMockAcp() {
 const { MediaHandler } = await import('../src/media.ts');
 const { BridgeBot } = await import('../src/bot.js');
 
-const TEST_UPLOADS_DIR = '/tmp/test-acp-connector-uploads';
+const TEST_UPLOADS_DIR: string = '/tmp/test-acp-connector-uploads';
 
-function createBot(opts = {}) {
+type BotOverrides = Partial<ConstructorParameters<typeof BridgeBot>[0]>;
+
+function createBot(opts: BotOverrides = {}) {
   const acp = createMockAcp();
   const mediaHandler = new MediaHandler({
     uploadsDir: TEST_UPLOADS_DIR,
     supportsImage: true,
   });
   const bot = new BridgeBot({
-    acp,
+    acp: acp as unknown as AcpClient,
     telegramToken: 'test-token',
     allowedChatIds: [123],
     agentCmd: 'acp-agent serve',
@@ -84,7 +114,7 @@ describe('MediaHandler', () => {
 
   it('saves file to disk', () => {
     const handler = new MediaHandler({ uploadsDir: TEST_UPLOADS_DIR, supportsImage: true });
-    const data = Buffer.from('fake-image');
+    const data: Buffer = Buffer.from('fake-image');
     const file = handler.saveFile(data, 'image/jpeg', 'jpg');
     expect(existsSync(file.path)).toBe(true);
     expect(file.mimeType).toBe('image/jpeg');
@@ -93,7 +123,7 @@ describe('MediaHandler', () => {
 
   it('creates ImageContent when agent supports image', () => {
     const handler = new MediaHandler({ uploadsDir: TEST_UPLOADS_DIR, supportsImage: true });
-    const data = Buffer.from('fake-image');
+    const data: Buffer = Buffer.from('fake-image');
     const file = handler.saveFile(data, 'image/jpeg', 'jpg');
     const blocks = handler.toContentBlocks(file);
     expect(blocks[0].type).toBe('image');
@@ -101,7 +131,7 @@ describe('MediaHandler', () => {
 
   it('creates ResourceLink when agent does not support image', () => {
     const handler = new MediaHandler({ uploadsDir: TEST_UPLOADS_DIR, supportsImage: false });
-    const data = Buffer.from('fake-image');
+    const data: Buffer = Buffer.from('fake-image');
     const file = handler.saveFile(data, 'image/jpeg', 'jpg');
     const blocks = handler.toContentBlocks(file);
     expect(blocks[0].type).toBe('resource_link');
@@ -109,7 +139,7 @@ describe('MediaHandler', () => {
 
   it('creates ResourceLink for non-image files', () => {
     const handler = new MediaHandler({ uploadsDir: TEST_UPLOADS_DIR, supportsImage: true });
-    const data = Buffer.from('fake-pdf');
+    const data: Buffer = Buffer.from('fake-pdf');
     const file = handler.saveFile(data, 'application/pdf', 'pdf');
     const blocks = handler.toContentBlocks(file);
     expect(blocks[0].type).toBe('resource_link');
@@ -117,7 +147,7 @@ describe('MediaHandler', () => {
 
   it('adds caption as text block', () => {
     const handler = new MediaHandler({ uploadsDir: TEST_UPLOADS_DIR, supportsImage: true });
-    const data = Buffer.from('fake-image');
+    const data: Buffer = Buffer.from('fake-image');
     const file = handler.saveFile(data, 'image/jpeg', 'jpg');
     const blocks = handler.toContentBlocks(file, 'look at this');
     expect(blocks.length).toBe(2);
@@ -133,7 +163,7 @@ describe('MediaHandler', () => {
   });
 
   it('creates uploads dir if it does not exist', () => {
-    const dir = join(TEST_UPLOADS_DIR, 'subdir');
+    const dir: string = join(TEST_UPLOADS_DIR, 'subdir');
     try {
       rmSync(dir, { recursive: true, force: true });
     } catch {}
@@ -201,7 +231,7 @@ describe('BridgeBot media handling', () => {
       supportsImage: false,
     });
     const bot = new BridgeBot({
-      acp,
+      acp: acp as unknown as AcpClient,
       telegramToken: 'test-token',
       allowedChatIds: [123],
       agentCmd: 'acp-agent serve',
@@ -240,7 +270,7 @@ describe('BridgeBot media handling', () => {
   it('rejects media when no mediaHandler configured', async () => {
     const acp = createMockAcp();
     const bot = new BridgeBot({
-      acp,
+      acp: acp as unknown as AcpClient,
       telegramToken: 'test-token',
       allowedChatIds: [123],
       agentCmd: 'acp-agent serve',
