@@ -584,7 +584,7 @@ See [AGENTS.md](AGENTS.md) for development setup, commit conventions, and releas
 
 - **Commits**: [Conventional Commits](https://www.conventionalcommits.org/) enforced by commitlint
 - **Linting**: [Biome](https://biomejs.dev/)
-- **Tests**: [Vitest](https://vitest.dev/) — `pnpm test` (219 tests)
+- **Tests**: [Vitest](https://vitest.dev/) — `pnpm test` (325 tests)
 - **PRs**: CI runs lint + tests + commitlint on every PR
 
 ***
