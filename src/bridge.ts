@@ -39,6 +39,7 @@ export async function run(): Promise<void> {
     agentCwd: config.agentCwd,
     sessionConfigPath: config.sessionConfigPath,
     sessionId: config.sessionId,
+    sessionMode: config.sessionMode,
   });
 
   const tg = config.platforms?.telegram;

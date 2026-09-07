@@ -21,6 +21,11 @@
   // ACP session (optional — omit to create a new session each run)
   // "sessionId": "some-session-id",
 
+  // Initial session mode (optional — applied after session/new, session/load, or session/resume)
+  // Agent-specific. Devin supports: "accept-edits", "smart", "ask", "plan", "bypass"
+  // "bypass" auto-approves all tool calls — no permission requests sent to the client.
+  // "sessionMode": "bypass",
+
   // MCP/session config path (optional)
   // The file is passed to the agent unchanged. Supports stdio, HTTP, SSE, and ACP transports.
   // Example acp_session.jsonc:

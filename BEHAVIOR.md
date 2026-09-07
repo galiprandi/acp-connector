@@ -45,6 +45,12 @@ DEBE / NO DEBE, agrupadas por módulo. Cada regla está respaldada por al menos 
 - DEBE responder `Usage: /session <id>` cuando `/session` no tiene argumentos.
 - DEBE rechazar `/session <id>` cuando está busy (responde `Cannot switch session while busy. Use /stop first.`).
 - DEBE responder `Failed to create session: <error>` cuando `newSession()` falla.
+- DEBE listar modos de sesión con `/mode` (responde `*Modes:*` con la lista de `availableModes`).
+- DEBE responder `No session modes available.` cuando el agente no expone modos.
+- DEBE cambiar de modo con `/mode <id>` (responde `🔧 Mode set to: <id> (<name>)`).
+- DEBE responder `Unknown mode <id>. Available: <list>` cuando el modo no existe.
+- DEBE responder `Failed to set mode: <error>` cuando `setSessionMode()` falla.
+- DEBE aplicar `sessionMode` de la config después de `session/new`, `session/load`, o `session/resume`.
 - DEBE detener el polling con `stop()`.
 - NO DEBE crashear al llamar `stop()` dos veces (double stop seguro).
 

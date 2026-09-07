@@ -97,3 +97,24 @@ src/
 - **Agent-agnostic**: no hardcoded agent references anywhere
 - **Config is truth**: all state in `acp-connector.jsonc`, persisted by routines
 - **Serialized queue**: one prompt at a time, no concurrent prompts
+
+## Testing with real agents
+
+When implementing or modifying ACP protocol features, **always test against both Devin and OpenCode** before committing:
+
+- **Devin** (`devin acp`): supports session modes (`bypass`, `accept-edits`, `smart`, `ask`, `plan`), session list, session resume, session load, image content
+- **OpenCode** (`opencode acp`): does NOT support session modes (rejects `session/set_mode`), supports session list, session resume, session close, session fork, image content, HTTP/SSE MCP
+
+This ensures features degrade gracefully when an agent doesn't support them. Non-fatal errors (e.g. unsupported session mode) should log a warning and continue, not crash the bridge.
+
+### Quick test procedure
+
+```bash
+# Test session/set_mode with Devin
+python3 /tmp/test_acp_mode.py  # should show ✅ set_mode SUCCESS
+
+# Test session/set_mode with OpenCode
+python3 /tmp/test_opencode_mode.py  # should show ❌ set_mode ERROR (expected)
+```
+
+Both outcomes are valid — the connector must handle each correctly.

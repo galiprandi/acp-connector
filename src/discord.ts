@@ -232,6 +232,8 @@ export class DiscordBot extends BaseBot {
         '  /new — start a fresh session (clears context)',
         '  /sessions — list available sessions',
         '  /session `<id>` — switch to an existing session',
+        '  /mode — list available session modes',
+        '  /mode `<id>` — switch session mode (e.g. /mode bypass)',
         '',
         '  /cron list — list scheduled jobs',
         '  /cron add `<schedule> <prompt>` — add a job',

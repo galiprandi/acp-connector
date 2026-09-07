@@ -4,7 +4,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 interface MockSession {
   sessionId: string;
-  modes: { currentModeId: string };
+  modes: {
+    currentModeId: string;
+    availableModes?: Array<{ id: string; name: string; description?: string }>;
+  };
   prompt: vi.Mock;
   nextUpdate: vi.Mock;
   dispose: vi.Mock;
@@ -25,7 +28,13 @@ interface MockClientInstance {
 // Mock the SDK before importing AcpClient
 const mockSession: MockSession = {
   sessionId: 'test-session-id',
-  modes: { currentModeId: 'default' },
+  modes: {
+    currentModeId: 'default',
+    availableModes: [
+      { id: 'default', name: 'Default' },
+      { id: 'bypass', name: 'Bypass', description: 'Auto-approve all' },
+    ],
+  },
   prompt: vi.fn(async () => {}),
   nextUpdate: vi.fn(async () => ({ kind: 'stop', stopReason: 'end_turn' })),
   dispose: vi.fn(),
@@ -69,6 +78,7 @@ vi.mock('@agentclientprotocol/sdk', () => ({
         new: 'session/new',
         list: 'session/list',
         cancel: 'session/cancel',
+        setMode: 'session/set_mode',
       },
     },
     client: { session: { requestPermission: 'session/request_permission' } },
@@ -379,5 +389,94 @@ describe('AcpClient', () => {
       loadSession: true,
       sessionCapabilities: { list: {}, resume: {} },
     });
+  });
+
+  it('setSessionMode calls session/set_mode with correct params', async () => {
+    const client = new AcpClient({ agentCmd: 'acp-agent serve' });
+    await client.start();
+    await client.setSessionMode('bypass');
+    expect(mockCtx.request).toHaveBeenCalledWith(
+      'session/set_mode',
+      expect.objectContaining({ sessionId: 'test-session-id', modeId: 'bypass' })
+    );
+    expect(client.modes?.currentModeId).toBe('bypass');
+  });
+
+  it('setSessionMode throws when no active session', async () => {
+    const client = new AcpClient({ agentCmd: 'acp-agent serve' });
+    await expect(client.setSessionMode('bypass')).rejects.toThrow('ACP context not available');
+  });
+
+  it('sets initial session mode after start when sessionMode provided', async () => {
+    const client = new AcpClient({ agentCmd: 'acp-agent serve', sessionMode: 'bypass' });
+    await client.start();
+    expect(mockCtx.request).toHaveBeenCalledWith(
+      'session/set_mode',
+      expect.objectContaining({ sessionId: 'test-session-id', modeId: 'bypass' })
+    );
+    expect(client.modes?.currentModeId).toBe('bypass');
+  });
+
+  it('does not call set_mode when no sessionMode configured', async () => {
+    const client = new AcpClient({ agentCmd: 'acp-agent serve' });
+    await client.start();
+    expect(mockCtx.request).not.toHaveBeenCalledWith('session/set_mode', expect.anything());
+  });
+
+  it('sets initial session mode after newSession', async () => {
+    const client = new AcpClient({ agentCmd: 'acp-agent serve', sessionMode: 'bypass' });
+    await client.start();
+    mockCtx.buildSession.mockReturnValueOnce({
+      start: vi.fn(async () => mockSession),
+    });
+    await client.newSession();
+    expect(mockCtx.request).toHaveBeenCalledWith(
+      'session/set_mode',
+      expect.objectContaining({ modeId: 'bypass' })
+    );
+  });
+
+  it('sets initial session mode after loadSession', async () => {
+    mockCtx.request.mockImplementation(async (method: string) => {
+      if (method === 'initialize') {
+        return {
+          protocolVersion: 1,
+          agentCapabilities: { loadSession: true },
+        };
+      }
+      return {};
+    });
+    const client = new AcpClient({ agentCmd: 'acp-agent serve', sessionMode: 'bypass' });
+    await client.start();
+    const loadedSession: MockSession = {
+      sessionId: 'loaded-session',
+      modes: { currentModeId: 'default' },
+      prompt: vi.fn(async () => {}),
+      nextUpdate: vi.fn(async () => ({ kind: 'stop', stopReason: 'end_turn' })),
+      dispose: vi.fn(),
+    };
+    mockCtx.attachSession.mockReturnValueOnce(loadedSession);
+    await client.loadSession('loaded-session');
+    expect(mockCtx.request).toHaveBeenCalledWith(
+      'session/set_mode',
+      expect.objectContaining({ sessionId: 'loaded-session', modeId: 'bypass' })
+    );
+  });
+
+  it('initial session mode failure is non-fatal (agent does not support modes)', async () => {
+    // Simulate an agent that rejects set_mode (e.g. OpenCode)
+    mockCtx.request.mockImplementation(async (method: string) => {
+      if (method === 'initialize') {
+        return { protocolVersion: 1, agentCapabilities: { loadSession: true } };
+      }
+      if (method === 'session/set_mode') {
+        throw new Error('Invalid params: mode not found: bypass');
+      }
+      return {};
+    });
+    const client = new AcpClient({ agentCmd: 'acp-agent serve', sessionMode: 'bypass' });
+    // Should not throw — start() resolves despite set_mode failure
+    await client.start();
+    expect(client.sessionId).toBe('test-session-id');
   });
 });

@@ -21,6 +21,7 @@ import type {
   ResumeSessionRequest,
   SessionInfo,
   SessionModeState,
+  SetSessionModeRequest,
   Stream,
 } from '@agentclientprotocol/sdk';
 import * as acp from '@agentclientprotocol/sdk';
@@ -44,6 +45,8 @@ interface AcpClientOptions {
   sessionConfigPath?: string;
   /** Session ID to load/resume. */
   sessionId?: string;
+  /** Initial session mode to set after session creation/load. */
+  sessionMode?: string;
   /** Permission request callback. */
   onPermission?: PermissionCallback;
 }
@@ -72,6 +75,7 @@ export class AcpClient {
   agentCwd: string;
   sessionConfigPath: string | null;
   resumeSessionId: string | null;
+  initialSessionMode: string | null;
   onPermission: PermissionCallback | null;
   proc: ChildProcess | null;
   session: ActiveSession | null;
@@ -97,12 +101,14 @@ export class AcpClient {
     agentCwd,
     sessionConfigPath,
     sessionId,
+    sessionMode,
     onPermission,
   }: AcpClientOptions) {
     this.agentCmd = agentCmd;
     this.agentCwd = agentCwd || process.cwd();
     this.sessionConfigPath = sessionConfigPath || null;
     this.resumeSessionId = sessionId || null;
+    this.initialSessionMode = sessionMode || null;
     this.onPermission = onPermission || null;
     this.proc = null;
     this.session = null;
@@ -238,6 +244,15 @@ export class AcpClient {
         this.session = session;
         this.sessionId = session.sessionId;
         this.modes = session.modes;
+        if (this.initialSessionMode) {
+          try {
+            await this.setSessionMode(this.initialSessionMode);
+          } catch (err) {
+            console.warn(
+              `⚠️ Failed to set initial session mode "${this.initialSessionMode}": ${(err as Error).message}`
+            );
+          }
+        }
         this._sessionResolve?.();
 
         await this._keepAlive;
@@ -293,6 +308,15 @@ export class AcpClient {
     this.session = session;
     this.sessionId = session.sessionId;
     this.modes = session.modes;
+    if (this.initialSessionMode) {
+      try {
+        await this.setSessionMode(this.initialSessionMode);
+      } catch (err) {
+        console.warn(
+          `⚠️ Failed to set initial session mode "${this.initialSessionMode}": ${(err as Error).message}`
+        );
+      }
+    }
     return session.sessionId;
   }
 
@@ -353,7 +377,33 @@ export class AcpClient {
     this.session = session;
     this.sessionId = session.sessionId;
     this.modes = session.modes;
+    if (this.initialSessionMode) {
+      try {
+        await this.setSessionMode(this.initialSessionMode);
+      } catch (err) {
+        console.warn(
+          `⚠️ Failed to set initial session mode "${this.initialSessionMode}": ${(err as Error).message}`
+        );
+      }
+    }
     return session.sessionId;
+  }
+
+  /**
+   * Set the current session mode via `session/set_mode`.
+   * @param modeId - The mode ID to set (must be one of availableModes).
+   * @returns void
+   */
+  async setSessionMode(modeId: string): Promise<void> {
+    if (!this._ctx) throw new Error('ACP context not available');
+    if (!this.sessionId) throw new Error('No active session');
+    await this._ctx.request(acp.methods.agent.session.setMode, {
+      sessionId: this.sessionId,
+      modeId,
+    } as SetSessionModeRequest);
+    if (this.modes) {
+      this.modes.currentModeId = modeId;
+    }
   }
 
   kill(): void {

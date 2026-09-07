@@ -73,6 +73,7 @@ vi.mock('@agentclientprotocol/sdk', () => ({
         new: 'session/new',
         list: 'session/list',
         cancel: 'session/cancel',
+        setMode: 'session/set_mode',
       },
     },
     client: { session: { requestPermission: 'session/request_permission' } },

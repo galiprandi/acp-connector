@@ -93,7 +93,7 @@ export abstract class BaseBot implements PlatformBot {
   ): Promise<boolean>;
 
   /**
-   * Handle session management commands: /new, /sessions, /session <id>.
+   * Handle session management commands: /new, /sessions, /session <id>, /mode, /mode <id>.
    * Returns true if the command was handled, false otherwise.
    * Uses sendMessage() so it works without an active prompt.
    */
@@ -113,6 +113,8 @@ export abstract class BaseBot implements PlatformBot {
         return this._handleListSessions(channelId);
       case 'session':
         return this._handleSwitchSession(channelId, arg);
+      case 'mode':
+        return this._handleModeCommand(channelId, arg);
       default:
         return false;
     }
@@ -168,6 +170,40 @@ export abstract class BaseBot implements PlatformBot {
       console.log(`🔄 switched to session: ${id}`);
     } catch (err) {
       await this.sendMessage(channelId, `Failed to switch session: ${(err as Error).message}`);
+    }
+    return true;
+  }
+
+  private async _handleModeCommand(channelId: string | number, arg: string): Promise<boolean> {
+    const modes = this.acp.modes;
+    if (!modes?.availableModes || modes.availableModes.length === 0) {
+      await this.sendMessage(channelId, 'No session modes available.');
+      return true;
+    }
+
+    if (!arg) {
+      const lines = modes.availableModes.map((m) => {
+        const marker = m.id === modes.currentModeId ? '▶' : ' ';
+        const desc = m.description ? ` — ${m.description}` : '';
+        return `${marker} \`${m.id}\` (${m.name})${desc}`;
+      });
+      await this.sendMessage(channelId, `*Modes:*\n${lines.join('\n')}`);
+      return true;
+    }
+
+    const mode = modes.availableModes.find((m) => m.id === arg);
+    if (!mode) {
+      const available = modes.availableModes.map((m) => m.id).join(', ');
+      await this.sendMessage(channelId, `Unknown mode \`${arg}\`. Available: ${available}`);
+      return true;
+    }
+
+    try {
+      await this.acp.setSessionMode(arg);
+      await this.sendMessage(channelId, `🔧 Mode set to: \`${arg}\` (${mode.name})`);
+      console.log(`🔧 mode set to: ${arg}`);
+    } catch (err) {
+      await this.sendMessage(channelId, `Failed to set mode: ${(err as Error).message}`);
     }
     return true;
   }

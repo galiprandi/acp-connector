@@ -54,6 +54,7 @@ export interface BridgeConfig {
   allowedChatIds?: number[];
   platforms?: PlatformsConfig;
   sessionId?: string;
+  sessionMode?: string;
   sessionConfigPath?: string;
   showThoughts?: boolean;
   streaming?: boolean;

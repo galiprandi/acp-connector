@@ -43,7 +43,12 @@ interface MockAcp {
   newSession: MockFn;
   listSessions: MockFn;
   loadSession: MockFn;
+  setSessionMode: MockFn;
   sessionId: string | null;
+  modes: {
+    currentModeId: string;
+    availableModes: Array<{ id: string; name: string; description?: string }>;
+  } | null;
   _pushUpdate: (update: MockAcpUpdate) => void;
   _updates: MockAcpUpdate[];
 }
@@ -64,7 +69,15 @@ function createMockAcp(): MockAcp {
       { sessionId: 's2', cwd: '/tmp', title: null, updatedAt: null },
     ]),
     loadSession: vi.fn(async (id: string) => id),
+    setSessionMode: vi.fn(async () => {}),
     sessionId: 'test-session-id',
+    modes: {
+      currentModeId: 'default',
+      availableModes: [
+        { id: 'default', name: 'Default' },
+        { id: 'bypass', name: 'Bypass', description: 'Auto-approve all tool calls' },
+      ],
+    },
     _pushUpdate: (update: MockAcpUpdate): number => updates.push(update),
     _updates: updates,
   };
@@ -506,5 +519,63 @@ describe('BridgeBot', () => {
       'Failed to create session: agent crashed',
       { parse_mode: 'Markdown' }
     );
+  });
+
+  it('/mode lists available modes', async () => {
+    const { bot } = createBot();
+    await bot.start();
+    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    await handler({ chat: { id: 123 }, text: '/mode' });
+    expect(mockBot.sendMessage).toHaveBeenCalledWith(123, expect.stringContaining('*Modes:*'), {
+      parse_mode: 'Markdown',
+    });
+    expect(mockBot.sendMessage).toHaveBeenCalledWith(123, expect.stringContaining('`bypass`'), {
+      parse_mode: 'Markdown',
+    });
+  });
+
+  it('/mode <id> switches mode', async () => {
+    const { bot, acp } = createBot();
+    await bot.start();
+    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    await handler({ chat: { id: 123 }, text: '/mode bypass' });
+    expect(acp.setSessionMode).toHaveBeenCalledWith('bypass');
+    expect(mockBot.sendMessage).toHaveBeenCalledWith(123, '🔧 Mode set to: `bypass` (Bypass)', {
+      parse_mode: 'Markdown',
+    });
+  });
+
+  it('/mode <unknown> sends available modes', async () => {
+    const { bot } = createBot();
+    await bot.start();
+    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    await handler({ chat: { id: 123 }, text: '/mode unknown' });
+    expect(mockBot.sendMessage).toHaveBeenCalledWith(
+      123,
+      expect.stringContaining('Unknown mode `unknown`'),
+      { parse_mode: 'Markdown' }
+    );
+  });
+
+  it('/mode when no modes available sends message', async () => {
+    const { bot, acp } = createBot();
+    acp.modes = null;
+    await bot.start();
+    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    await handler({ chat: { id: 123 }, text: '/mode' });
+    expect(mockBot.sendMessage).toHaveBeenCalledWith(123, 'No session modes available.', {
+      parse_mode: 'Markdown',
+    });
+  });
+
+  it('/mode on error sends error message', async () => {
+    const { bot, acp } = createBot();
+    await bot.start();
+    acp.setSessionMode.mockRejectedValueOnce(new Error('agent rejected'));
+    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    await handler({ chat: { id: 123 }, text: '/mode bypass' });
+    expect(mockBot.sendMessage).toHaveBeenCalledWith(123, 'Failed to set mode: agent rejected', {
+      parse_mode: 'Markdown',
+    });
   });
 });

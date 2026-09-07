@@ -5,6 +5,21 @@ All notable changes to acp-connector will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- Session mode support via `session/set_mode`:
+  - `/mode` — list available session modes reported by the agent
+  - `/mode <id>` — switch session mode (e.g. `/mode bypass` for Devin's auto-approve-all)
+  - `sessionMode` config option — set initial session mode applied after `session/new`, `session/load`, or `session/resume`
+- `AcpClient.setSessionMode(modeId)` — call `session/set_mode` on the active session
+- `AcpClient.initialSessionMode` — stored from config, applied automatically on session creation/load
+- 12 new tests (309 total)
+
+### Changed
+- Initial session mode application is non-fatal: if the agent rejects `session/set_mode` (e.g. OpenCode), the bridge logs a warning and continues instead of crashing
+- AGENTS.md now requires testing ACP features against both Devin and OpenCode before committing
+
 ## [0.4.0] - 2026-09-06
 
 ### Added

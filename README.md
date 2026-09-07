@@ -137,6 +137,7 @@ See [`acp-connector.example.jsonc`](acp-connector.example.jsonc) for the full re
 | `platforms.telegram` | `object` | no | — | `{ token, allowedChatIds }` — Telegram config |
 | `platforms.discord` | `object` | no | — | `{ token, allowedChannelIds }` — Discord config |
 | `sessionId` | `string` | no | — | ACP session ID to load/resume (omit to create new) |
+| `sessionMode` | `string` | no | — | Initial session mode (e.g. `"bypass"` for Devin's auto-approve-all) |
 | `sessionConfigPath` | `string` | no | — | Path to MCP/session config JSONC |
 | `showThoughts` | `boolean` | no | `false` | Forward agent thoughts to chat |
 | `streaming` | `boolean` | no | `true` | Stream responses with live message edits |
@@ -374,8 +375,23 @@ The bridge intercepts these commands before forwarding to the agent:
 | `/new` | Start a fresh session (clears accumulated context) |
 | `/sessions` | List available sessions (requires agent `session/list` capability) |
 | `/session <id>` | Switch to an existing session (uses `session/resume` or `session/load`) |
+| `/mode` | List available session modes reported by the agent |
+| `/mode <id>` | Switch session mode (e.g. `/mode bypass` for Devin's auto-approve-all) |
 
-`/new` and `/session` are refused while the agent is busy — use `/stop` first. `/sessions` gracefully degrades with an error message if the agent doesn't support `session/list`.
+`/new` and `/session` are refused while the agent is busy — use `/stop` first. `/sessions` gracefully degrades with an error message if the agent doesn't support `session/list`. `/mode` reports "No session modes available" if the agent doesn't expose modes.
+
+#### Initial session mode
+
+Set `sessionMode` in the config to apply a mode automatically when a session is created or loaded:
+
+```jsonc
+{
+  "agentCmd": "devin acp",
+  "sessionMode": "bypass"
+}
+```
+
+This calls `session/set_mode` after `session/new`, `session/load`, or `session/resume`. The mode ID is agent-specific — Devin supports `accept-edits`, `smart`, `ask`, `plan`, and `bypass`. Other agents may expose different modes.
 
 ### Cron management
 
