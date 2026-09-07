@@ -10,10 +10,10 @@ import {
   type Message,
   type TextChannel,
 } from 'discord.js';
-import type { AcpClient } from './acp-client';
-import type { PermissionResponse } from './base-bot';
-import { BaseBot } from './base-bot';
-import type { MediaHandler } from './media';
+import type { AcpClient } from './acp-client.js';
+import type { PermissionResponse } from './base-bot.js';
+import { BaseBot } from './base-bot.js';
+import type { MediaHandler } from './media.js';
 
 const DISCORD_MAX_LEN = 2000;
 

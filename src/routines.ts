@@ -1,6 +1,6 @@
-import type { Routine } from './config';
-import { loadConfig, saveConfig } from './config';
-import type { CronManager } from './cron';
+import type { Routine } from './config.js';
+import { loadConfig, saveConfig } from './config.js';
+import type { CronManager } from './cron.js';
 
 interface RoutineManagerOpts {
   routines: Routine[];
