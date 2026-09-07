@@ -116,21 +116,17 @@ The pre-commit hook runs `pnpm behavior` automatically, so BEHAVIOR.md stays in 
 
 ## Testing with real agents
 
-When implementing or modifying ACP protocol features, **always test against both Devin and OpenCode** before committing:
+When implementing or modifying ACP protocol features, **always test against both Devin and OpenCode before implementing** — not after. This lets you learn what each agent actually supports, how it responds, and design the feature accordingly.
 
 - **Devin** (`devin acp`): supports session modes (`bypass`, `accept-edits`, `smart`, `ask`, `plan`), session list, session resume, session load, image content
 - **OpenCode** (`opencode acp`): does NOT support session modes (rejects `session/set_mode`), supports session list, session resume, session close, session fork, image content, HTTP/SSE MCP
 
 This ensures features degrade gracefully when an agent doesn't support them. Non-fatal errors (e.g. unsupported session mode) should log a warning and continue, not crash the bridge.
 
-### Quick test procedure
+### Procedure
 
-```bash
-# Test session/set_mode with Devin
-python3 /tmp/test_acp_mode.py  # should show ✅ set_mode SUCCESS
-
-# Test session/set_mode with OpenCode
-python3 /tmp/test_opencode_mode.py  # should show ❌ set_mode ERROR (expected)
-```
-
-Both outcomes are valid — the connector must handle each correctly.
+1. Probe both agents with raw JSON-RPC to understand their capabilities and responses
+2. Note what each agent supports vs rejects
+3. Design the feature to handle both cases (supported and unsupported)
+4. Implement with tests covering both paths
+5. Validate the implementation against both agents again
