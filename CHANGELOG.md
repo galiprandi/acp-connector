@@ -5,6 +5,14 @@ All notable changes to acp-connector will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-09-25
+
+### Added
+- Typing indicator: `typing` chat action sent every ~4s while the agent processes a prompt (Telegram `sendChatAction`, Discord `sendTyping`), visible even when `showThoughts`/`showTools` are off
+- Agent crash detection: unexpected agent process exit notifies all allowed chats with a 🔄 Reconnect button
+- `AcpClient.restart()`: re-spawns `agentCmd` and resumes the previous session via `session/resume`/`session/load`, falling back to a fresh session when resume fails
+- `AcpClient.onExit` callback for agent process exit events
+
 ## [0.6.0] - 2026-09-25
 
 ### Added

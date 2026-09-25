@@ -24,6 +24,7 @@
 
 ## Module: AcpClient
 - auto-approves permission when no onPermission callback
+- calls onExit when the agent process exits unexpectedly
 - calls session/load when sessionId provided and loadSession capability is true
 - calls session/resume when resume capability is available
 - closeSession is a no-op when no session is active
@@ -33,6 +34,7 @@
 - delegates permission to onPermission callback
 - deleteSession sends session/delete request
 - deleteSession throws when agent does not support it
+- does not call onExit on intentional kill()
 - does not call set_mode when no sessionMode configured
 - initial session mode failure is non-fatal (agent does not support modes)
 - kill() disposes session and kills process
@@ -46,6 +48,8 @@
 - newSession creates a new session and updates sessionId
 - nextUpdate() delegates to session.nextUpdate
 - prompt() delegates to session.prompt
+- restart() falls back to a new session when resume fails
+- restart() respawns the agent and resumes the current session
 - setConfigOption calls session/set_config_option with select params
 - setConfigOption sends boolean type for boolean options
 - setConfigOption throws when no active session
@@ -133,7 +137,11 @@
 - hides plan update when showPlan is false
 - hides tool_call update when showTools is false
 - ignores thoughts when showThoughts=false
+- keeps typing while busy (interval resend)
+- notifyAgentExit sends a reconnect button to allowed chats
 - queues and forwards text to ACP
+- reconnect button triggers acp.restart and confirms
+- reconnect failure edits the message with the error
 - rejects non-text messages
 - rejects unauthorized chat ID
 - renders plan update when showPlan is true
@@ -144,6 +152,7 @@
 - sends error message when acp.prompt() rejects
 - sends permission buttons when agentCmd has no dangerous
 - sends stop reason placeholder when no output
+- sends typing action while processing a prompt
 - splits output >4096 chars into multiple messages
 - starts and sets up handlers
 - stop() stops polling
