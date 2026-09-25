@@ -5,6 +5,14 @@ All notable changes to acp-connector will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-09-25
+
+### Added
+- `/config` command: lists session config options reported by the agent, shows selectable values per option, and sets values via `session/set_config_option` (supports select, grouped select and boolean option types)
+- `/model` command: shortcut for `/config model` — e.g. `/model swe-2-high`
+- Dynamic `/help`: lists slash commands advertised by the agent via `available_commands_update` under an "Agent commands" section; omitted when the agent reports none
+- `config_option_update` and `available_commands_update` now sync client state
+
 ## [0.5.1] - 2026-09-07
 
 ### Fixed
