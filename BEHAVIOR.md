@@ -335,6 +335,12 @@
 - stop() closes the server
 - unknown route returns 404
 
+## Module: logger
+- debug level prints everything
+- defaults to info level (log + warn + error, no debug)
+- error level only prints errors
+- unknown level falls back to info
+
 ## Module: MediaHandler
 - adds caption as text block
 - creates ImageContent when agent supports image
