@@ -60,6 +60,7 @@ export abstract class BaseBot implements PlatformBot {
   protected permissionPending: PermissionPending | null;
   protected toolCalls: Map<string, { title?: string; status?: string; kind?: string }>;
   protected planText: string;
+  protected typingTimer: NodeJS.Timeout | null;
 
   protected abstract readonly maxLen: number;
 
@@ -93,11 +94,13 @@ export abstract class BaseBot implements PlatformBot {
     this.permissionPending = null;
     this.toolCalls = new Map();
     this.planText = '';
+    this.typingTimer = null;
   }
 
   abstract start(): Promise<void>;
   abstract stop(): void;
   abstract sendMessage(chatId: number | string, text: string): Promise<void>;
+  abstract notifyAgentExit(code: number | null): Promise<void>;
 
   protected abstract _sendNewMessage(text: string): Promise<{ messageId: number | string }>;
   protected abstract _editMessage(messageId: number | string, text: string): Promise<void>;
@@ -408,6 +411,7 @@ export abstract class BaseBot implements PlatformBot {
     this.streamDirty = false;
     this.currentChannelId = channelId;
     this.toolCalls = new Map();
+    this._startTypingLoop();
     this.planText = '';
 
     if (this.onPrompt) this.onPrompt(text, channelId);
@@ -446,11 +450,34 @@ export abstract class BaseBot implements PlatformBot {
       onComplete(this.streamBuffer, errorMsg);
     }
 
+    this._stopTypingLoop();
     this.busy = false;
     this.currentMessageId = null;
     this.streamBuffer = '';
     this._processQueue();
   }
+
+  /**
+   * Typing indicator loop. Telegram's sendChatAction expires after ~5s and
+   * Discord's sendTyping after ~10s — re-send every 4s while busy.
+   */
+  protected _startTypingLoop(): void {
+    this._sendTypingIndicator();
+    this.typingTimer = setInterval(() => {
+      this._sendTypingIndicator();
+    }, 4000);
+    this.typingTimer.unref?.();
+  }
+
+  protected _stopTypingLoop(): void {
+    if (this.typingTimer) {
+      clearInterval(this.typingTimer);
+      this.typingTimer = null;
+    }
+  }
+
+  /** Platform-specific typing action. No-op default for platforms without it. */
+  protected _sendTypingIndicator(): void {}
 
   // biome-ignore lint/suspicious/noExplicitAny: SDK update types are complex and dynamic
   protected _handleUpdate(update: any): void {

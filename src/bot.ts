@@ -17,6 +17,7 @@ export interface PlatformBot {
     onComplete?: (response: string, error?: string) => void
   ): Promise<void>;
   sendMessage(chatId: number | string, text: string): Promise<void>;
+  notifyAgentExit(code: number | null): Promise<void>;
   hasActivePrompt(): boolean;
   setMediaHandler(handler: MediaHandler): void;
   setCommandHandler(fn: ((text: string, chatId: number | string) => Promise<boolean>) | null): void;
@@ -403,6 +404,35 @@ export class BridgeBot extends BaseBot {
     if (!chatId || !this._isAllowed(chatId)) return;
 
     const data = query.data || '';
+    if (data === 'reconnect') {
+      this.bot.answerCallbackQuery(query.id);
+      try {
+        await this.bot.editMessageText('🔄 Reconnecting agent…', {
+          chat_id: chatId,
+          message_id: query.message?.message_id,
+        });
+      } catch {
+        // ignore
+      }
+      try {
+        await this.acp.restart();
+        const sessionNote = this.acp.sessionId
+          ? `session \`${this.acp.sessionId}\``
+          : 'new session';
+        await this.bot.editMessageText(`✅ Agent reconnected — ${sessionNote}`, {
+          chat_id: chatId,
+          message_id: query.message?.message_id,
+          parse_mode: 'Markdown',
+        });
+        console.log(`🔄 agent restarted, session: ${this.acp.sessionId}`);
+      } catch (err) {
+        await this.bot.editMessageText(`❌ Reconnect failed: ${(err as Error).message}`, {
+          chat_id: chatId,
+          message_id: query.message?.message_id,
+        });
+      }
+      return;
+    }
     if (data.startsWith('perm_') && this.permissionPending) {
       const [, outcome, ...rest] = data.split('_');
       const optionId = rest.join('_');
@@ -424,6 +454,31 @@ export class BridgeBot extends BaseBot {
       }
 
       this.bot.answerCallbackQuery(query.id);
+    }
+  }
+
+  protected _sendTypingIndicator(): void {
+    const chatId = this._currentChannel() as number;
+    if (!chatId) return;
+    try {
+      this.bot.sendChatAction(chatId, 'typing').catch(() => {});
+    } catch {
+      // typing indicator is best-effort
+    }
+  }
+
+  async notifyAgentExit(code: number | null): Promise<void> {
+    const detail = code !== null ? ` (exit code ${code})` : '';
+    for (const chatId of this.allowedChatIds) {
+      try {
+        await this.bot.sendMessage(chatId, `⚠️ Agent process exited${detail} — connection lost.`, {
+          reply_markup: {
+            inline_keyboard: [[{ text: '🔄 Reconnect', callback_data: 'reconnect' }]],
+          },
+        });
+      } catch (err) {
+        console.error(`Failed to notify chat ${chatId}:`, (err as Error).message);
+      }
     }
   }
 

@@ -466,6 +466,53 @@ describe('AcpClient', () => {
     await expect(client.setConfigOption('model', 'b')).rejects.toThrow('ACP context not available');
   });
 
+  it('calls onExit when the agent process exits unexpectedly', async () => {
+    const onExit = vi.fn();
+    const client = new AcpClient({ agentCmd: 'acp-agent serve', onExit });
+    await client.start();
+    const exitHandler = mockProc.on.mock.calls.find((c: unknown[]) => c[0] === 'exit')[1];
+    exitHandler(1, null);
+    expect(onExit).toHaveBeenCalledWith(1, null);
+  });
+
+  it('does not call onExit on intentional kill()', async () => {
+    const onExit = vi.fn();
+    const client = new AcpClient({ agentCmd: 'acp-agent serve', onExit });
+    await client.start();
+    client.kill();
+    const exitHandler = mockProc.on.mock.calls.find((c: unknown[]) => c[0] === 'exit')[1];
+    exitHandler(0, null);
+    expect(onExit).not.toHaveBeenCalled();
+  });
+
+  it('restart() respawns the agent and resumes the current session', async () => {
+    const client = new AcpClient({ agentCmd: 'acp-agent serve' });
+    await client.start();
+    expect(client.sessionId).toBe('test-session-id');
+    await client.restart();
+    expect(mockProc.kill).toHaveBeenCalled();
+    expect(mockCtx.request).toHaveBeenCalledWith(
+      'session/load',
+      expect.objectContaining({ sessionId: 'test-session-id' })
+    );
+    expect(client.sessionId).toBe('test-session-id');
+  });
+
+  it('restart() falls back to a new session when resume fails', async () => {
+    const client = new AcpClient({ agentCmd: 'acp-agent serve' });
+    await client.start();
+    mockCtx.request.mockImplementation(async (method: string) => {
+      if (method === 'initialize') {
+        return { protocolVersion: 1, agentCapabilities: { loadSession: true } };
+      }
+      if (method === 'session/load') throw new Error('session not found');
+      return {};
+    });
+    await client.restart();
+    expect(client.sessionId).toBe('test-session-id');
+    expect(mockCtx.buildSession).toHaveBeenCalled();
+  });
+
   it('sets initial session mode after start when sessionMode provided', async () => {
     const client = new AcpClient({ agentCmd: 'acp-agent serve', sessionMode: 'bypass' });
     await client.start();

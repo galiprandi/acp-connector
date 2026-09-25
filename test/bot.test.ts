@@ -8,6 +8,7 @@ interface MockBot {
   sendMessage: MockFn;
   editMessageText: MockFn;
   answerCallbackQuery: MockFn;
+  sendChatAction: MockFn;
   stopPolling: MockFn;
 }
 
@@ -17,6 +18,7 @@ const mockBot: MockBot = {
   sendMessage: vi.fn(async () => ({ message_id: 1 })),
   editMessageText: vi.fn(async () => ({})),
   answerCallbackQuery: vi.fn(async () => ({})),
+  sendChatAction: vi.fn(async () => ({})),
   stopPolling: vi.fn(),
 };
 
@@ -26,6 +28,7 @@ vi.mock('node-telegram-bot-api', () => ({
     sendMessage = mockBot.sendMessage;
     editMessageText = mockBot.editMessageText;
     answerCallbackQuery = mockBot.answerCallbackQuery;
+    sendChatAction = mockBot.sendChatAction;
     stopPolling = mockBot.stopPolling;
   },
 }));
@@ -47,6 +50,7 @@ interface MockAcp {
   deleteSession: MockFn;
   closeSession: MockFn;
   setConfigOption: MockFn;
+  restart: MockFn;
   sessionId: string | null;
   modes: {
     currentModeId: string;
@@ -89,6 +93,7 @@ function createMockAcp(): MockAcp {
     deleteSession: vi.fn(async () => {}),
     closeSession: vi.fn(async () => {}),
     setConfigOption: vi.fn(async () => {}),
+    restart: vi.fn(async () => {}),
     sessionId: 'test-session-id',
     modes: {
       currentModeId: 'default',
@@ -813,6 +818,77 @@ describe('BridgeBot', () => {
     const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
     await handler({ chat: { id: 123 }, text: 'work' });
     await vi.waitFor(() => expect(acp.availableCommands?.[0]?.name).toBe('newcmd'));
+  });
+
+  // --- Typing indicator ---
+
+  it('sends typing action while processing a prompt', async () => {
+    const { bot } = createBot();
+    await bot.start();
+    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    await handler({ chat: { id: 123 }, text: 'work' });
+    await vi.waitFor(() => expect(mockBot.sendChatAction).toHaveBeenCalledWith(123, 'typing'));
+  });
+
+  it('keeps typing while busy (interval resend)', async () => {
+    const { bot, acp } = createBot();
+    await bot.start();
+    acp.nextUpdate.mockReturnValue(new Promise(() => {})); // never stops
+    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    await handler({ chat: { id: 123 }, text: 'long task' });
+    await vi.waitFor(() => expect(bot.busy).toBe(true));
+    expect(mockBot.sendChatAction).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(4500);
+    expect(mockBot.sendChatAction).toHaveBeenCalledTimes(2);
+  });
+
+  // --- Agent exit / reconnect ---
+
+  it('notifyAgentExit sends a reconnect button to allowed chats', async () => {
+    const { bot } = createBot();
+    await bot.start();
+    await bot.notifyAgentExit(1);
+    expect(mockBot.sendMessage).toHaveBeenCalledWith(
+      123,
+      expect.stringContaining('connection lost'),
+      expect.objectContaining({
+        reply_markup: {
+          inline_keyboard: [[{ text: '🔄 Reconnect', callback_data: 'reconnect' }]],
+        },
+      })
+    );
+  });
+
+  it('reconnect button triggers acp.restart and confirms', async () => {
+    const { bot, acp } = createBot();
+    await bot.start();
+    const cbHandler = mockBot.on.mock.calls.find((c) => c[0] === 'callback_query')[1];
+    await cbHandler({
+      id: 'q1',
+      data: 'reconnect',
+      message: { chat: { id: 123 }, message_id: 42 },
+    });
+    expect(acp.restart).toHaveBeenCalled();
+    expect(mockBot.editMessageText).toHaveBeenCalledWith(
+      expect.stringContaining('Agent reconnected'),
+      expect.objectContaining({ chat_id: 123, message_id: 42 })
+    );
+  });
+
+  it('reconnect failure edits the message with the error', async () => {
+    const { bot, acp } = createBot();
+    await bot.start();
+    acp.restart.mockRejectedValueOnce(new Error('spawn failed'));
+    const cbHandler = mockBot.on.mock.calls.find((c) => c[0] === 'callback_query')[1];
+    await cbHandler({
+      id: 'q1',
+      data: 'reconnect',
+      message: { chat: { id: 123 }, message_id: 42 },
+    });
+    expect(mockBot.editMessageText).toHaveBeenCalledWith(
+      expect.stringContaining('Reconnect failed: spawn failed'),
+      expect.objectContaining({ chat_id: 123, message_id: 42 })
+    );
   });
 
   // --- Tool call updates ---

@@ -124,6 +124,14 @@ When implementing or modifying ACP protocol features, **always test against both
 
 This ensures features degrade gracefully when an agent doesn't support them. Non-fatal errors (e.g. unsupported session mode) should log a warning and continue, not crash the bridge.
 
+**Regression policy (critical):** this is a published npm package consumed by real deployments (Telegram/Discord bots). Never ship a regression. Before every release:
+
+1. Full suite green (`pnpm test`) + lint + typecheck — zero tolerance, no skipped tests
+2. Real-agent smoke test: run `AcpClient` (via tsx script) against `devin acp`, `opencode acp`, `pi acp`, and `antigravity` when available — verify session/new, prompt, and any feature touched (e.g. configOptions, restart, exit handling)
+3. Only then bump version, tag, and release
+
+Available local ACP agents for validation: `devin acp`, `opencode acp`, `pi acp`, `antigravity` (if installed).
+
 ### Procedure
 
 1. Probe both agents with raw JSON-RPC to understand their capabilities and responses

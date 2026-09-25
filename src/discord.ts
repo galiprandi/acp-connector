@@ -373,6 +373,24 @@ export class DiscordBot extends BaseBot {
     if (!channelId || !this._isAllowed(channelId)) return;
 
     const data = interaction.customId || '';
+    if (data === 'reconnect') {
+      try {
+        await interaction.update({ content: '🔄 Reconnecting agent…', components: [] });
+      } catch {
+        // ignore
+      }
+      try {
+        await this.acp.restart();
+        const sessionNote = this.acp.sessionId
+          ? `session \`${this.acp.sessionId}\``
+          : 'new session';
+        await interaction.editReply(`✅ Agent reconnected — ${sessionNote}`);
+        console.log(`🔄 agent restarted, session: ${this.acp.sessionId}`);
+      } catch (err) {
+        await interaction.editReply(`❌ Reconnect failed: ${(err as Error).message}`);
+      }
+      return;
+    }
     if (data.startsWith('perm_') && this.permissionPending) {
       const [, outcome, ...rest] = data.split('_');
       const optionId = rest.join('_');
@@ -388,6 +406,38 @@ export class DiscordBot extends BaseBot {
         });
       } catch {
         // ignore
+      }
+    }
+  }
+
+  protected _sendTypingIndicator(): void {
+    const channelId = this._currentChannel();
+    if (!channelId) return;
+    try {
+      const channel = this.client.channels.cache.get(String(channelId)) as TextChannel;
+      channel?.sendTyping().catch(() => {});
+    } catch {
+      // typing indicator is best-effort
+    }
+  }
+
+  async notifyAgentExit(code: number | null): Promise<void> {
+    const detail = code !== null ? ` (exit code ${code})` : '';
+    const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId('reconnect')
+        .setLabel('🔄 Reconnect')
+        .setStyle(ButtonStyle.Primary)
+    );
+    for (const channelId of this.allowedChannelIds) {
+      try {
+        const channel = this.client.channels.cache.get(channelId) as TextChannel;
+        await channel?.send({
+          content: `⚠️ Agent process exited${detail} — connection lost.`,
+          components: [row],
+        });
+      } catch (err) {
+        console.error(`Failed to notify channel ${channelId}:`, (err as Error).message);
       }
     }
   }

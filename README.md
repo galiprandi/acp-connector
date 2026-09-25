@@ -457,6 +457,13 @@ The bridge will call `session/load` or `session/resume` (depending on agent capa
 
 ***
 
+## ⚡ Status feedback
+
+- **Typing indicator**: while the agent works on a prompt, the bridge sends a `typing` chat action every ~4s (Telegram `sendChatAction`, Discord `sendTyping`) — visible even when `showThoughts`/`showTools` are off.
+- **Agent crash detection**: if the agent process exits unexpectedly, all allowed chats get a notification with a **🔄 Reconnect** inline button. Tapping it re-spawns `agentCmd` and resumes the previous session when possible (via `session/resume`/`session/load`), falling back to a fresh session if resume fails.
+
+***
+
 ## 🖥 Self-hosting
 
 ### systemd

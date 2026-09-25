@@ -140,6 +140,17 @@ export async function run(): Promise<void> {
     }),
   });
 
+  // Notify all allowed chats when the agent process dies — each platform
+  // bot sends a message with a "Reconnect" button that calls acp.restart()
+  acp.onExit = (code) => {
+    console.error(`⚠️ Agent process exited (code=${code})`);
+    for (const bot of bots) {
+      bot.notifyAgentExit(code).catch((err) => {
+        console.error('Failed to send agent-exit notification:', (err as Error).message);
+      });
+    }
+  };
+
   // Wire permission handler — route to the bot that has an active prompt
   // biome-ignore lint/suspicious/noExplicitAny: SDK permission types are complex
   acp.onPermission = (params: any) => {

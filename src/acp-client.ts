@@ -53,6 +53,8 @@ interface AcpClientOptions {
   sessionMode?: string;
   /** Permission request callback. */
   onPermission?: PermissionCallback;
+  /** Called when the agent process exits unexpectedly (not via kill()). */
+  onExit?: (code: number | null, signal: string | null) => void;
 }
 
 /**
@@ -81,6 +83,7 @@ export class AcpClient {
   resumeSessionId: string | null;
   initialSessionMode: string | null;
   onPermission: PermissionCallback | null;
+  onExit: ((code: number | null, signal: string | null) => void) | null;
   proc: ChildProcess | null;
   session: ActiveSession | null;
   protocolVersion: ProtocolVersion | null;
@@ -109,6 +112,7 @@ export class AcpClient {
     sessionId,
     sessionMode,
     onPermission,
+    onExit,
   }: AcpClientOptions) {
     this.agentCmd = agentCmd;
     this.agentCwd = agentCwd || process.cwd();
@@ -116,6 +120,7 @@ export class AcpClient {
     this.resumeSessionId = sessionId || null;
     this.initialSessionMode = sessionMode || null;
     this.onPermission = onPermission || null;
+    this.onExit = onExit || null;
     this.proc = null;
     this.session = null;
     this.protocolVersion = null;
@@ -164,8 +169,11 @@ export class AcpClient {
       }
     });
 
-    this.proc.on('exit', () => {
+    const proc = this.proc;
+    proc.on('exit', (code, signal) => {
+      if (this.proc !== proc) return; // stale process after restart()
       if (this._disconnect) this._disconnect();
+      if (!this._killed && this.onExit) this.onExit(code, signal);
     });
 
     this.proc.on('error', (err: Error) => {
@@ -474,6 +482,49 @@ export class AcpClient {
       this.configOptions = response.configOptions;
     }
     return this.configOptions ?? [];
+  }
+
+  /**
+   * Restart the agent process and re-initialize the protocol.
+   * Resumes the current session if one exists (session/resume or
+   * session/load), otherwise creates a fresh session.
+   */
+  async restart(): Promise<void> {
+    if (this.sessionId) this.resumeSessionId = this.sessionId;
+    this._killed = true; // suppress onExit for the intentional kill
+    if (this.proc) this.proc.kill();
+    if (this.session) {
+      try {
+        this.session.dispose();
+      } catch {
+        // session may already be disposed
+      }
+      this.session = null;
+    }
+    this.proc = null;
+    this._ctx = null;
+    this.modes = null;
+    this.configOptions = null;
+    this.availableCommands = null;
+    this._started = false;
+    this._killed = false;
+    try {
+      await this.start();
+    } catch (err) {
+      if (!this.resumeSessionId) throw err;
+      // Resume failed (session gone or agent can't load it) — start fresh
+      console.warn(
+        `⚠️ Could not resume session ${this.resumeSessionId}: ${(err as Error).message}. Starting a new session.`
+      );
+      this.resumeSessionId = null;
+      this.sessionId = null;
+      // Spawned before connect failed — kill it if present
+      (this.proc as ChildProcess | null)?.kill();
+      this.proc = null;
+      this._started = false;
+      this._killed = false;
+      await this.start();
+    }
   }
 
   kill(): void {
