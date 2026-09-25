@@ -380,8 +380,14 @@ The bridge intercepts these commands before forwarding to the agent:
 | `/delete <id>` | Delete a session (requires agent `session/delete` capability) |
 | `/mode` | List available session modes reported by the agent |
 | `/mode <id>` | Switch session mode (e.g. `/mode bypass` for Devin's auto-approve-all) |
+| `/config` | List session config options reported by the agent (model, thought level, etc.) |
+| `/config <id>` | Show the selectable values for an option |
+| `/config <id> <value>` | Set an option via `session/set_config_option` (value ID, or `true`/`false` for boolean options) |
+| `/model [value]` | Shortcut for `/config model [value]` — e.g. `/model swe-2-high` |
 
-`/new` and `/session` are refused while the agent is busy — use `/stop` first. `/sessions` gracefully degrades with an error message if the agent doesn't support `session/list`. `/delete` cannot delete the active session (use `/new` first). `/mode` reports "No session modes available" if the agent doesn't expose modes.
+`/new` and `/session` are refused while the agent is busy — use `/stop` first. `/sessions` gracefully degrades with an error message if the agent doesn't support `session/list`. `/delete` cannot delete the active session (use `/new` first). `/mode` reports "No session modes available" if the agent doesn't expose modes. `/config` reports "No config options reported by the agent" if the agent doesn't expose `configOptions`.
+
+`/help` is dynamic: besides the built-in commands it lists the slash commands the agent advertises via `available_commands_update` under an *Agent commands* section (Devin and OpenCode advertise theirs; agents that report none, like pi, simply omit the section). Typing an agent command forwards it to the agent as a prompt.
 
 #### Initial session mode
 

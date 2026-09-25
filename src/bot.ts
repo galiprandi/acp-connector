@@ -286,6 +286,9 @@ export class BridgeBot extends BaseBot {
     }
 
     if (text !== '/start' && text !== '/help') return false;
+    const agentCommandLines = this._agentCommandsHelpLines();
+    const agentSection =
+      agentCommandLines.length > 0 ? ['', '*Agent commands:*', ...agentCommandLines] : [];
     await this.bot.sendMessage(
       cid,
       [
@@ -301,6 +304,9 @@ export class BridgeBot extends BaseBot {
         '  /delete `<id>` — delete a session',
         '  /mode — list available session modes',
         '  /mode `<id>` — switch session mode (e.g. /mode bypass)',
+        '  /config — list session config options',
+        '  /config `<id> [value]` — show or set an option',
+        '  /model `[value]` — show or set the model',
         '',
         '  /cron list — list scheduled jobs',
         '  /cron add `<schedule> <prompt>` — add a job',
@@ -313,6 +319,7 @@ export class BridgeBot extends BaseBot {
         '  /routine remove `<name>` — remove a routine',
         '',
         '  /run `<name>` — run a routine',
+        ...agentSection,
         '',
         'Any other text is sent to the agent.',
         '',

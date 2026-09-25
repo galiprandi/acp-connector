@@ -6,6 +6,7 @@ import type {
   ActiveSession,
   ActiveSessionMessage,
   AgentCapabilities,
+  AvailableCommand,
   ClientContext,
   ContentBlock,
   InitializeResponse,
@@ -19,8 +20,11 @@ import type {
   RequestPermissionRequest,
   RequestPermissionResponse,
   ResumeSessionRequest,
+  SessionConfigOption,
   SessionInfo,
   SessionModeState,
+  SetSessionConfigOptionRequest,
+  SetSessionConfigOptionResponse,
   SetSessionModeRequest,
   Stream,
 } from '@agentclientprotocol/sdk';
@@ -82,6 +86,8 @@ export class AcpClient {
   protocolVersion: ProtocolVersion | null;
   sessionId: string | null;
   modes: SessionModeState | null | undefined;
+  configOptions: SessionConfigOption[] | null;
+  availableCommands: AvailableCommand[] | null;
   promptCapabilities: PromptCapabilities | null;
   agentCapabilities: AgentCapabilities | null;
   private _ctx: SessionClientContext | null;
@@ -115,6 +121,8 @@ export class AcpClient {
     this.protocolVersion = null;
     this.sessionId = null;
     this.modes = null;
+    this.configOptions = null;
+    this.availableCommands = null;
     this.promptCapabilities = null;
     this.agentCapabilities = null;
     this._ctx = null;
@@ -244,6 +252,7 @@ export class AcpClient {
         this.session = session;
         this.sessionId = session.sessionId;
         this.modes = session.modes;
+        this.configOptions = session.newSessionResponse?.configOptions ?? null;
         if (this.initialSessionMode) {
           try {
             await this.setSessionMode(this.initialSessionMode);
@@ -342,6 +351,7 @@ export class AcpClient {
     this.session = session;
     this.sessionId = session.sessionId;
     this.modes = session.modes;
+    this.configOptions = session.newSessionResponse?.configOptions ?? null;
     if (this.initialSessionMode) {
       try {
         await this.setSessionMode(this.initialSessionMode);
@@ -411,6 +421,7 @@ export class AcpClient {
     this.session = session;
     this.sessionId = session.sessionId;
     this.modes = session.modes;
+    this.configOptions = session.newSessionResponse?.configOptions ?? null;
     if (this.initialSessionMode) {
       try {
         await this.setSessionMode(this.initialSessionMode);
@@ -438,6 +449,31 @@ export class AcpClient {
     if (this.modes) {
       this.modes.currentModeId = modeId;
     }
+  }
+
+  /**
+   * Set a session configuration option via `session/set_config_option`.
+   * Select-type options take a value ID; boolean options take 'true'/'false'.
+   * @param configId - The config option ID (e.g. "model").
+   * @param value - The value ID, or 'true'/'false' for boolean options.
+   * @returns The updated full set of config options.
+   */
+  async setConfigOption(configId: string, value: string): Promise<SessionConfigOption[]> {
+    if (!this._ctx) throw new Error('ACP context not available');
+    if (!this.sessionId) throw new Error('No active session');
+    const option = this.configOptions?.find((o) => o.id === configId);
+    const params: SetSessionConfigOptionRequest =
+      option?.type === 'boolean'
+        ? { sessionId: this.sessionId, configId, type: 'boolean', value: value === 'true' }
+        : { sessionId: this.sessionId, configId, value };
+    const response = (await this._ctx.request(
+      acp.methods.agent.session.setConfigOption,
+      params
+    )) as SetSessionConfigOptionResponse;
+    if (response.configOptions) {
+      this.configOptions = response.configOptions;
+    }
+    return this.configOptions ?? [];
   }
 
   kill(): void {

@@ -1,4 +1,9 @@
-import type { ContentBlock } from '@agentclientprotocol/sdk';
+import type {
+  ContentBlock,
+  SessionConfigOption,
+  SessionConfigSelectGroup,
+  SessionConfigSelectOption,
+} from '@agentclientprotocol/sdk';
 import type { AcpClient } from './acp-client.js';
 import type { PlatformBot } from './bot.js';
 import type { MediaHandler } from './media.js';
@@ -129,6 +134,10 @@ export abstract class BaseBot implements PlatformBot {
         return this._handleDeleteSession(channelId, arg);
       case 'mode':
         return this._handleModeCommand(channelId, arg);
+      case 'config':
+        return this._handleConfigCommand(channelId, parts.slice(1));
+      case 'model':
+        return this._handleConfigCommand(channelId, ['model', ...parts.slice(1)]);
       default:
         return false;
     }
@@ -239,6 +248,112 @@ export abstract class BaseBot implements PlatformBot {
       await this.sendMessage(channelId, `Failed to set mode: ${(err as Error).message}`);
     }
     return true;
+  }
+
+  /**
+   * Handle the /config command: generic session config options per ACP
+   * `session/set_config_option`. `/model` is an alias for `/config model`.
+   *   /config                — list all options with current values
+   *   /config <id>           — list the option's selectable values
+   *   /config <id> <value>   — set the option value (value ID, or true/false)
+   */
+  private async _handleConfigCommand(channelId: string | number, args: string[]): Promise<boolean> {
+    const options = this.acp.configOptions;
+    if (!options || options.length === 0) {
+      await this.sendMessage(channelId, 'No config options reported by the agent.');
+      return true;
+    }
+
+    const [configId, ...rest] = args;
+    const value = rest.join(' ').trim();
+
+    if (!configId) {
+      const lines = options.map(
+        (o) => `  \`${o.id}\` (${o.name}) — ${this._configCurrentValue(o)}`
+      );
+      await this.sendMessage(channelId, `*Config options:*\n${lines.join('\n')}`);
+      return true;
+    }
+
+    const option = options.find((o) => o.id === configId);
+    if (!option) {
+      const available = options.map((o) => o.id).join(', ');
+      await this.sendMessage(channelId, `Unknown option \`${configId}\`. Available: ${available}`);
+      return true;
+    }
+
+    if (!value) {
+      await this.sendMessage(channelId, this._formatConfigOptionDetail(option));
+      return true;
+    }
+
+    if (option.type === 'boolean') {
+      if (value !== 'true' && value !== 'false') {
+        await this.sendMessage(channelId, `Option \`${configId}\` is boolean. Use: true or false`);
+        return true;
+      }
+    } else {
+      const match = this._configSelectOptions(option).find((o) => o.value === value);
+      if (!match) {
+        const available = this._configSelectOptions(option)
+          .map((o) => o.value)
+          .join(', ');
+        await this.sendMessage(channelId, `Unknown value \`${value}\`. Available: ${available}`);
+        return true;
+      }
+    }
+
+    try {
+      await this.acp.setConfigOption(configId, value);
+      await this.sendMessage(channelId, `⚙️ \`${configId}\` set to: \`${value}\``);
+      console.log(`⚙️ config ${configId} set to: ${value}`);
+    } catch (err) {
+      await this.sendMessage(channelId, `Failed to set option: ${(err as Error).message}`);
+    }
+    return true;
+  }
+
+  private _configSelectOptions(option: SessionConfigOption): SessionConfigSelectOption[] {
+    if (option.type === 'boolean') return [];
+    const raw = option.options || [];
+    // Options may be a flat list or grouped ({group, name, options[]})
+    if (raw.length > 0 && 'options' in raw[0]) {
+      return (raw as SessionConfigSelectGroup[]).flatMap((g) => g.options);
+    }
+    return raw as SessionConfigSelectOption[];
+  }
+
+  private _configCurrentValue(option: SessionConfigOption): string {
+    if (option.type === 'boolean') return String(option.currentValue);
+    const match = this._configSelectOptions(option).find((o) => o.value === option.currentValue);
+    return match ? `\`${match.value}\` (${match.name})` : `\`${option.currentValue}\``;
+  }
+
+  private _formatConfigOptionDetail(option: SessionConfigOption): string {
+    const header = `*\`${option.id}\`* (${option.name})${option.description ? ` — ${option.description}` : ''}`;
+    if (option.type === 'boolean') {
+      return `${header}\nCurrent: \`${option.currentValue}\`. Use: /config ${option.id} true|false`;
+    }
+    const lines = this._configSelectOptions(option).map((o) => {
+      const marker = o.value === option.currentValue ? '▶' : ' ';
+      const desc = o.description ? ` — ${o.description}` : '';
+      return `${marker} \`${o.value}\` (${o.name})${desc}`;
+    });
+    return `${header}\n${lines.join('\n')}`;
+  }
+
+  /**
+   * Help lines for slash commands advertised by the agent via
+   * `available_commands_update`. Empty when the agent reports none (e.g. pi).
+   */
+  protected _agentCommandsHelpLines(): string[] {
+    const commands = this.acp.availableCommands;
+    if (!commands || commands.length === 0) return [];
+    return commands.map((c) => {
+      const hint = c.input?.hint ? ` ${c.input.hint}` : '';
+      const desc = c.description ? ` — ${c.description}` : '';
+      return `  /${c.name}${hint}${desc}`;
+    });
   }
 
   setMediaHandler(handler: MediaHandler): void {
@@ -440,12 +555,14 @@ export abstract class BaseBot implements PlatformBot {
         }
         break;
       case 'available_commands_update':
-        // Agent-advertised slash commands — stored but not yet surfaced in /help
-        // Future: include in /help output
+        if (update.availableCommands) {
+          this.acp.availableCommands = update.availableCommands;
+        }
         break;
       case 'config_option_update':
-        // Agent-driven config option change — stored but not yet surfaced
-        // Future: update config option state for /config command
+        if (update.configOptions) {
+          this.acp.configOptions = update.configOptions;
+        }
         break;
       case 'session_info_update':
         // Session metadata update (title, etc.) — informational only

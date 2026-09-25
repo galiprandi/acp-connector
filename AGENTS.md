@@ -118,8 +118,9 @@ The pre-commit hook runs `pnpm behavior` automatically, so BEHAVIOR.md stays in 
 
 When implementing or modifying ACP protocol features, **always test against both Devin and OpenCode before implementing** — not after. This lets you learn what each agent actually supports, how it responds, and design the feature accordingly.
 
-- **Devin** (`devin acp`): supports session modes (`bypass`, `accept-edits`, `smart`, `ask`, `plan`), session list, session resume, session load, image content
-- **OpenCode** (`opencode acp`): does NOT support session modes (rejects `session/set_mode`), supports session list, session resume, session close, session fork, image content, HTTP/SSE MCP
+- **Devin** (`devin acp`): supports session modes (`bypass`, `accept-edits`, `smart`, `ask`, `plan`), session config options (`mode` + `model` via `session/set_config_option`), session list, session resume, session load, image content
+- **OpenCode** (`opencode acp`): does NOT support `session/set_mode` (rejects it), but DOES expose `configOptions` (mode + model) and supports `session/set_config_option` — prefers the generic config-option path over set_mode; also supports session list, session resume, session close, session fork, image content, HTTP/SSE MCP
+- **Available commands**: Devin (~47: built-ins + skills) and OpenCode (~20) advertise `available_commands_update`; pi does not advertise commands — `/help` omits the section gracefully
 
 This ensures features degrade gracefully when an agent doesn't support them. Non-fatal errors (e.g. unsupported session mode) should log a warning and continue, not crash the bridge.
 

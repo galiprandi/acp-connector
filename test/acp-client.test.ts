@@ -79,6 +79,7 @@ vi.mock('@agentclientprotocol/sdk', () => ({
         list: 'session/list',
         cancel: 'session/cancel',
         setMode: 'session/set_mode',
+        setConfigOption: 'session/set_config_option',
         close: 'session/close',
         delete: 'session/delete',
       },
@@ -407,6 +408,62 @@ describe('AcpClient', () => {
   it('setSessionMode throws when no active session', async () => {
     const client = new AcpClient({ agentCmd: 'acp-agent serve' });
     await expect(client.setSessionMode('bypass')).rejects.toThrow('ACP context not available');
+  });
+
+  it('setConfigOption calls session/set_config_option with select params', async () => {
+    const client = new AcpClient({ agentCmd: 'acp-agent serve' });
+    await client.start();
+    client.configOptions = [
+      {
+        id: 'model',
+        name: 'Model',
+        type: 'select',
+        currentValue: 'a',
+        options: [
+          { value: 'a', name: 'A' },
+          { value: 'b', name: 'B' },
+        ],
+      },
+    ] as never;
+    mockCtx.request.mockResolvedValueOnce({
+      configOptions: [
+        {
+          id: 'model',
+          name: 'Model',
+          type: 'select',
+          currentValue: 'b',
+          options: [
+            { value: 'a', name: 'A' },
+            { value: 'b', name: 'B' },
+          ],
+        },
+      ],
+    });
+    await client.setConfigOption('model', 'b');
+    expect(mockCtx.request).toHaveBeenCalledWith(
+      'session/set_config_option',
+      expect.objectContaining({ sessionId: 'test-session-id', configId: 'model', value: 'b' })
+    );
+    expect(client.configOptions?.[0]?.currentValue).toBe('b');
+  });
+
+  it('setConfigOption sends boolean type for boolean options', async () => {
+    const client = new AcpClient({ agentCmd: 'acp-agent serve' });
+    await client.start();
+    client.configOptions = [
+      { id: 'verbose', name: 'Verbose', type: 'boolean', currentValue: false },
+    ] as never;
+    mockCtx.request.mockResolvedValueOnce({ configOptions: [] });
+    await client.setConfigOption('verbose', 'true');
+    expect(mockCtx.request).toHaveBeenCalledWith(
+      'session/set_config_option',
+      expect.objectContaining({ configId: 'verbose', type: 'boolean', value: true })
+    );
+  });
+
+  it('setConfigOption throws when no active session', async () => {
+    const client = new AcpClient({ agentCmd: 'acp-agent serve' });
+    await expect(client.setConfigOption('model', 'b')).rejects.toThrow('ACP context not available');
   });
 
   it('sets initial session mode after start when sessionMode provided', async () => {

@@ -46,6 +46,9 @@
 - newSession creates a new session and updates sessionId
 - nextUpdate() delegates to session.nextUpdate
 - prompt() delegates to session.prompt
+- setConfigOption calls session/set_config_option with select params
+- setConfigOption sends boolean type for boolean options
+- setConfigOption throws when no active session
 - setSessionMode calls session/set_mode with correct params
 - setSessionMode throws when no active session
 - sets initial session mode after loadSession
@@ -82,15 +85,28 @@
 - splits long output over 4096 chars
 
 ## Module: BridgeBot
+- /config <boolean> true sets a boolean option
+- /config <boolean> with non-boolean value sends hint
+- /config <id> <unknown value> sends available values
+- /config <id> <value> sets the option
+- /config <id> lists the option values with current marker
+- /config <unknown> sends available option ids
+- /config lists all config options with current values
+- /config on error sends error message
+- /config with no config options sends message
 - /delete <id> deletes a session
 - /delete active session is rejected
 - /delete on error sends error message
 - /delete without arg shows usage
+- /help includes agent-advertised commands
+- /help omits agent section when agent reports no commands
 - /mode <id> switches mode
 - /mode <unknown> sends available modes
 - /mode lists available modes
 - /mode on error sends error message
 - /mode when no modes available sends message
+- /model <value> is an alias for /config model <value>
+- /model without value lists model options
 - /new on error sends error message
 - /new when busy refuses with message
 - /new when idle creates new session
@@ -104,6 +120,8 @@
 - /stop when busy cancels the agent
 - /stop when idle responds nothing to stop
 - auto-approves permission when agentCmd includes dangerous
+- available_commands_update refreshes acp.availableCommands
+- config_option_update refreshes acp.configOptions
 - delegates bridge commands to onCommand
 - enqueuePrompt adds to queue and processes
 - enqueuePrompt with onComplete calls it with error on failure

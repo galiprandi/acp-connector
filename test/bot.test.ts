@@ -46,11 +46,25 @@ interface MockAcp {
   setSessionMode: MockFn;
   deleteSession: MockFn;
   closeSession: MockFn;
+  setConfigOption: MockFn;
   sessionId: string | null;
   modes: {
     currentModeId: string;
     availableModes: Array<{ id: string; name: string; description?: string }>;
   } | null;
+  configOptions: Array<{
+    id: string;
+    name: string;
+    description?: string;
+    type: string;
+    currentValue: unknown;
+    options?: unknown[];
+  }> | null;
+  availableCommands: Array<{
+    name: string;
+    description?: string;
+    input?: { hint?: string };
+  }> | null;
   _pushUpdate: (update: MockAcpUpdate) => void;
   _updates: MockAcpUpdate[];
 }
@@ -74,6 +88,7 @@ function createMockAcp(): MockAcp {
     setSessionMode: vi.fn(async () => {}),
     deleteSession: vi.fn(async () => {}),
     closeSession: vi.fn(async () => {}),
+    setConfigOption: vi.fn(async () => {}),
     sessionId: 'test-session-id',
     modes: {
       currentModeId: 'default',
@@ -82,6 +97,28 @@ function createMockAcp(): MockAcp {
         { id: 'bypass', name: 'Bypass', description: 'Auto-approve all tool calls' },
       ],
     },
+    configOptions: [
+      {
+        id: 'model',
+        name: 'Model',
+        type: 'select',
+        currentValue: 'model-a',
+        options: [
+          { value: 'model-a', name: 'Model A' },
+          { value: 'model-b', name: 'Model B', description: 'Fast' },
+        ],
+      },
+      {
+        id: 'verbose',
+        name: 'Verbose',
+        type: 'boolean',
+        currentValue: false,
+      },
+    ],
+    availableCommands: [
+      { name: 'compact', description: 'Force conversation compaction' },
+      { name: 'rename', description: 'Rename this session', input: { hint: '<new title>' } },
+    ],
     _pushUpdate: (update: MockAcpUpdate): number => updates.push(update),
     _updates: updates,
   };
@@ -581,6 +618,201 @@ describe('BridgeBot', () => {
     expect(mockBot.sendMessage).toHaveBeenCalledWith(123, 'Failed to set mode: agent rejected', {
       parse_mode: 'Markdown',
     });
+  });
+
+  it('/config lists all config options with current values', async () => {
+    const { bot } = createBot();
+    await bot.start();
+    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    await handler({ chat: { id: 123 }, text: '/config' });
+    expect(mockBot.sendMessage).toHaveBeenCalledWith(
+      123,
+      expect.stringContaining('*Config options:*'),
+      { parse_mode: 'Markdown' }
+    );
+    expect(mockBot.sendMessage).toHaveBeenCalledWith(123, expect.stringContaining('`model`'), {
+      parse_mode: 'Markdown',
+    });
+    expect(mockBot.sendMessage).toHaveBeenCalledWith(123, expect.stringContaining('`model-a`'), {
+      parse_mode: 'Markdown',
+    });
+  });
+
+  it('/config <id> lists the option values with current marker', async () => {
+    const { bot } = createBot();
+    await bot.start();
+    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    await handler({ chat: { id: 123 }, text: '/config model' });
+    expect(mockBot.sendMessage).toHaveBeenCalledWith(
+      123,
+      expect.stringContaining('▶ `model-a` (Model A)'),
+      { parse_mode: 'Markdown' }
+    );
+    expect(mockBot.sendMessage).toHaveBeenCalledWith(123, expect.stringContaining('`model-b`'), {
+      parse_mode: 'Markdown',
+    });
+  });
+
+  it('/config <id> <value> sets the option', async () => {
+    const { bot, acp } = createBot();
+    await bot.start();
+    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    await handler({ chat: { id: 123 }, text: '/config model model-b' });
+    expect(acp.setConfigOption).toHaveBeenCalledWith('model', 'model-b');
+    expect(mockBot.sendMessage).toHaveBeenCalledWith(123, '⚙️ `model` set to: `model-b`', {
+      parse_mode: 'Markdown',
+    });
+  });
+
+  it('/model <value> is an alias for /config model <value>', async () => {
+    const { bot, acp } = createBot();
+    await bot.start();
+    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    await handler({ chat: { id: 123 }, text: '/model model-b' });
+    expect(acp.setConfigOption).toHaveBeenCalledWith('model', 'model-b');
+  });
+
+  it('/model without value lists model options', async () => {
+    const { bot } = createBot();
+    await bot.start();
+    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    await handler({ chat: { id: 123 }, text: '/model' });
+    expect(mockBot.sendMessage).toHaveBeenCalledWith(123, expect.stringContaining('`model-b`'), {
+      parse_mode: 'Markdown',
+    });
+  });
+
+  it('/config <unknown> sends available option ids', async () => {
+    const { bot } = createBot();
+    await bot.start();
+    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    await handler({ chat: { id: 123 }, text: '/config nope' });
+    expect(mockBot.sendMessage).toHaveBeenCalledWith(
+      123,
+      expect.stringContaining('Unknown option `nope`. Available: model, verbose'),
+      { parse_mode: 'Markdown' }
+    );
+  });
+
+  it('/config <id> <unknown value> sends available values', async () => {
+    const { bot, acp } = createBot();
+    await bot.start();
+    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    await handler({ chat: { id: 123 }, text: '/config model nope' });
+    expect(acp.setConfigOption).not.toHaveBeenCalled();
+    expect(mockBot.sendMessage).toHaveBeenCalledWith(
+      123,
+      expect.stringContaining('Unknown value `nope`. Available: model-a, model-b'),
+      { parse_mode: 'Markdown' }
+    );
+  });
+
+  it('/config <boolean> true sets a boolean option', async () => {
+    const { bot, acp } = createBot();
+    await bot.start();
+    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    await handler({ chat: { id: 123 }, text: '/config verbose true' });
+    expect(acp.setConfigOption).toHaveBeenCalledWith('verbose', 'true');
+  });
+
+  it('/config <boolean> with non-boolean value sends hint', async () => {
+    const { bot, acp } = createBot();
+    await bot.start();
+    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    await handler({ chat: { id: 123 }, text: '/config verbose maybe' });
+    expect(acp.setConfigOption).not.toHaveBeenCalled();
+    expect(mockBot.sendMessage).toHaveBeenCalledWith(
+      123,
+      'Option `verbose` is boolean. Use: true or false',
+      { parse_mode: 'Markdown' }
+    );
+  });
+
+  it('/config with no config options sends message', async () => {
+    const { bot, acp } = createBot();
+    acp.configOptions = null;
+    await bot.start();
+    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    await handler({ chat: { id: 123 }, text: '/config' });
+    expect(mockBot.sendMessage).toHaveBeenCalledWith(
+      123,
+      'No config options reported by the agent.',
+      { parse_mode: 'Markdown' }
+    );
+  });
+
+  it('/config on error sends error message', async () => {
+    const { bot, acp } = createBot();
+    await bot.start();
+    acp.setConfigOption.mockRejectedValueOnce(new Error('agent rejected'));
+    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    await handler({ chat: { id: 123 }, text: '/config model model-b' });
+    expect(mockBot.sendMessage).toHaveBeenCalledWith(123, 'Failed to set option: agent rejected', {
+      parse_mode: 'Markdown',
+    });
+  });
+
+  it('config_option_update refreshes acp.configOptions', async () => {
+    const { bot, acp } = createBot();
+    await bot.start();
+    acp._pushUpdate({
+      kind: 'update',
+      update: {
+        sessionUpdate: 'config_option_update',
+        configOptions: [{ id: 'model', name: 'Model', type: 'select', currentValue: 'model-b' }],
+      },
+    });
+    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    await handler({ chat: { id: 123 }, text: 'work' });
+    await vi.waitFor(() => expect(acp.configOptions?.[0]?.currentValue).toBe('model-b'));
+  });
+
+  it('/help includes agent-advertised commands', async () => {
+    const { bot } = createBot();
+    await bot.start();
+    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    await handler({ chat: { id: 123 }, text: '/help' });
+    expect(mockBot.sendMessage).toHaveBeenCalledWith(
+      123,
+      expect.stringContaining('*Agent commands:*'),
+      { parse_mode: 'Markdown' }
+    );
+    expect(mockBot.sendMessage).toHaveBeenCalledWith(
+      123,
+      expect.stringContaining('/compact — Force conversation compaction'),
+      { parse_mode: 'Markdown' }
+    );
+    expect(mockBot.sendMessage).toHaveBeenCalledWith(
+      123,
+      expect.stringContaining('/rename <new title> — Rename this session'),
+      { parse_mode: 'Markdown' }
+    );
+  });
+
+  it('/help omits agent section when agent reports no commands', async () => {
+    const { bot, acp } = createBot();
+    acp.availableCommands = null;
+    await bot.start();
+    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    await handler({ chat: { id: 123 }, text: '/help' });
+    const text = mockBot.sendMessage.mock.calls[0][1];
+    expect(text).not.toContain('Agent commands');
+    expect(text).toContain('*Commands:*');
+  });
+
+  it('available_commands_update refreshes acp.availableCommands', async () => {
+    const { bot, acp } = createBot();
+    await bot.start();
+    acp._pushUpdate({
+      kind: 'update',
+      update: {
+        sessionUpdate: 'available_commands_update',
+        availableCommands: [{ name: 'newcmd', description: 'A new command' }],
+      },
+    });
+    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    await handler({ chat: { id: 123 }, text: 'work' });
+    await vi.waitFor(() => expect(acp.availableCommands?.[0]?.name).toBe('newcmd'));
   });
 
   // --- Tool call updates ---
