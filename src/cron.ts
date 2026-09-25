@@ -1,4 +1,5 @@
 import cron, { type ScheduledTask } from 'node-cron';
+import { log } from './logger.js';
 
 /**
  * A scheduled prompt injection job.
@@ -53,7 +54,7 @@ export class CronManager {
     this.jobs = jobs || [];
     this.allowedChatIds = allowedChatIds || [];
     this.enqueue = enqueue;
-    this.onLog = onLog || ((msg) => console.log(msg));
+    this.onLog = onLog || ((msg) => log.info(msg));
     this._tasks = new Map();
   }
 

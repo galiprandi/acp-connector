@@ -30,6 +30,7 @@ import type {
 } from '@agentclientprotocol/sdk';
 import * as acp from '@agentclientprotocol/sdk';
 import { stripJsonc } from './config.js';
+import { log } from './logger.js';
 
 const require = createRequire(import.meta.url);
 const pkg = require('../package.json') as { version: string };
@@ -147,7 +148,7 @@ export class AcpClient {
       return JSON.parse(stripJsonc(raw)) as Record<string, unknown>;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      console.error(`Failed to read session config from ${this.sessionConfigPath}: ${message}`);
+      log.error(`Failed to read session config from ${this.sessionConfigPath}: ${message}`);
       return null;
     }
   }
@@ -165,7 +166,7 @@ export class AcpClient {
     this.proc.stderr?.on('data', (data: Buffer) => {
       const line = data.toString().trim();
       if (line && /\bERROR\b|\bFATAL\b|\berror:\b|\bfatal:\b|Invalid params/.test(line)) {
-        console.error(`⚠️  ${line.slice(0, 200)}`);
+        log.error(`⚠️  ${line.slice(0, 200)}`);
       }
     });
 
@@ -265,7 +266,7 @@ export class AcpClient {
           try {
             await this.setSessionMode(this.initialSessionMode);
           } catch (err) {
-            console.warn(
+            log.warn(
               `⚠️ Failed to set initial session mode "${this.initialSessionMode}": ${(err as Error).message}`
             );
           }
@@ -364,7 +365,7 @@ export class AcpClient {
       try {
         await this.setSessionMode(this.initialSessionMode);
       } catch (err) {
-        console.warn(
+        log.warn(
           `⚠️ Failed to set initial session mode "${this.initialSessionMode}": ${(err as Error).message}`
         );
       }
@@ -434,7 +435,7 @@ export class AcpClient {
       try {
         await this.setSessionMode(this.initialSessionMode);
       } catch (err) {
-        console.warn(
+        log.warn(
           `⚠️ Failed to set initial session mode "${this.initialSessionMode}": ${(err as Error).message}`
         );
       }
@@ -513,7 +514,7 @@ export class AcpClient {
     } catch (err) {
       if (!this.resumeSessionId) throw err;
       // Resume failed (session gone or agent can't load it) — start fresh
-      console.warn(
+      log.warn(
         `⚠️ Could not resume session ${this.resumeSessionId}: ${(err as Error).message}. Starting a new session.`
       );
       this.resumeSessionId = null;

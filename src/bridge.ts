@@ -5,6 +5,7 @@ import { type BridgeConfig, loadConfig } from './config.js';
 import { CronManager } from './cron.js';
 import { DiscordBot } from './discord.js';
 import { HttpServer } from './http.js';
+import { log, setLogLevel } from './logger.js';
 import { MediaHandler } from './media.js';
 import { RoutineManager } from './routines.js';
 
@@ -14,9 +15,9 @@ function printBanner(): void {
   const top = `┌${'─'.repeat(inner.length)}┐`;
   const mid = `│${inner}│`;
   const bot = `└${'─'.repeat(inner.length)}┘`;
-  console.log(top);
-  console.log(mid);
-  console.log(bot);
+  log.info(top);
+  log.info(mid);
+  log.info(bot);
 }
 
 export async function run(): Promise<void> {
@@ -24,13 +25,15 @@ export async function run(): Promise<void> {
   try {
     config = loadConfig();
   } catch (err) {
-    console.error(`Invalid config: ${(err as Error).message}`);
+    log.error(`Invalid config: ${(err as Error).message}`);
     process.exit(1);
   }
   if (!config) {
-    console.error('No acp-connector.jsonc found. Run: npx acp-connector setup');
+    log.error('No acp-connector.jsonc found. Run: npx acp-connector setup');
     process.exit(1);
   }
+
+  setLogLevel(config.logLevel);
 
   printBanner();
 
@@ -46,7 +49,7 @@ export async function run(): Promise<void> {
   const dc = config.platforms?.discord;
 
   if (!tg && !dc) {
-    console.error('No platform configured. Run: npx acp-connector setup');
+    log.error('No platform configured. Run: npx acp-connector setup');
     process.exit(1);
   }
 
@@ -143,10 +146,10 @@ export async function run(): Promise<void> {
   // Notify all allowed chats when the agent process dies — each platform
   // bot sends a message with a "Reconnect" button that calls acp.restart()
   acp.onExit = (code) => {
-    console.error(`⚠️ Agent process exited (code=${code})`);
+    log.error(`⚠️ Agent process exited (code=${code})`);
     for (const bot of bots) {
       bot.notifyAgentExit(code).catch((err) => {
-        console.error('Failed to send agent-exit notification:', (err as Error).message);
+        log.error('Failed to send agent-exit notification:', (err as Error).message);
       });
     }
   };
@@ -168,7 +171,7 @@ export async function run(): Promise<void> {
   try {
     await acp.start();
   } catch (err) {
-    console.error('Failed to start ACP:', (err as Error).message);
+    log.error('Failed to start ACP:', (err as Error).message);
     process.exit(1);
   }
 
@@ -192,31 +195,31 @@ export async function run(): Promise<void> {
   await httpServer.start();
 
   const mode = acp.modes?.currentModeId || 'default';
-  console.log('');
-  console.log(`  🆔  Session:  ${acp.sessionId}${config.sessionId ? ' (restored)' : ''}`);
-  console.log(`  ⚙️  Mode:     ${mode}`);
+  log.info('');
+  log.info(`  🆔  Session:  ${acp.sessionId}${config.sessionId ? ' (restored)' : ''}`);
+  log.info(`  ⚙️  Mode:     ${mode}`);
   if (tg) {
-    console.log(`  💬  TG Chats:    ${tg.allowedChatIds.join(', ') || 'none (setup mode)'}`);
+    log.info(`  💬  TG Chats:    ${tg.allowedChatIds.join(', ') || 'none (setup mode)'}`);
   }
   if (dc) {
-    console.log(`  💬  DC Channels: ${dc.allowedChannelIds.join(', ') || 'none (setup mode)'}`);
+    log.info(`  💬  DC Channels: ${dc.allowedChannelIds.join(', ') || 'none (setup mode)'}`);
   }
-  console.log(`  🖥️  Command:  ${config.agentCmd}`);
+  log.info(`  🖥️  Command:  ${config.agentCmd}`);
   if (config.sessionConfigPath) {
-    console.log(`  📋  Config:   ${config.sessionConfigPath}`);
+    log.info(`  📋  Config:   ${config.sessionConfigPath}`);
   }
   if (config.cron && config.cron.length > 0) {
-    console.log(`  ⏰  Cron:     ${config.cron.length} job(s)`);
+    log.info(`  ⏰  Cron:     ${config.cron.length} job(s)`);
   }
   if (config.http?.enabled) {
-    console.log(`  🌐  HTTP:     port ${config.http.port || 7780}`);
+    log.info(`  🌐  HTTP:     port ${config.http.port || 7780}`);
   }
-  console.log('');
-  console.log('  ─────────────────────────────────');
-  console.log('');
+  log.info('');
+  log.info('  ─────────────────────────────────');
+  log.info('');
 
   const shutdown = (sig: string) => {
-    console.log(`\n${sig} received, shutting down...`);
+    log.info(`\n${sig} received, shutting down...`);
     httpServer.stop();
     cronManager.stop();
     for (const bot of bots) {

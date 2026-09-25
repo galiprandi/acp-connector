@@ -82,4 +82,9 @@
   //   "maxBodySize": 1048576,     // 1MB
   //   "rateLimit": 60             // requests per minute
   // }
+
+  // Media handling (optional)
+  // "media": {
+  //   "uploadsDir": "/tmp/acp-connector-uploads"  // where received files are saved (default shown)
+  // }
 }

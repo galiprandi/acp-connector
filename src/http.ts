@@ -1,6 +1,7 @@
 import type { IncomingMessage, Server, ServerResponse } from 'node:http';
 import { createServer } from 'node:http';
 import type { ContentBlock } from '@agentclientprotocol/sdk';
+import { log } from './logger.js';
 
 const DEFAULT_MAX_BODY = 1024 * 1024; // 1MB
 const DEFAULT_RATE_LIMIT = 60; // requests per minute
@@ -155,7 +156,7 @@ export class HttpServer {
         const addr = this._server?.address();
         const actualPort =
           (addr && typeof addr === 'object' && 'port' in addr ? addr.port : null) ?? this.port;
-        console.log(`🌐 HTTP server on ${this.host}:${actualPort}`);
+        log.info(`🌐 HTTP server on ${this.host}:${actualPort}`);
         resolve();
       });
     });
@@ -270,7 +271,7 @@ export class HttpServer {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ response, error: error || null }),
           }).catch((err: unknown) => {
-            console.error(`Webhook callback failed: ${(err as Error).message}`);
+            log.error(`Webhook callback failed: ${(err as Error).message}`);
           });
         };
       }

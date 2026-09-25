@@ -1,6 +1,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { ContentBlock } from '@agentclientprotocol/sdk';
+import { log } from './logger.js';
 
 const DEFAULT_UPLOADS_DIR = '/tmp/acp-connector-uploads';
 
@@ -41,7 +42,7 @@ export class MediaHandler {
     const filename = `media_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`;
     const path = join(this.uploadsDir, filename);
     writeFileSync(path, data);
-    console.log(`📄 file saved: ${path}`);
+    log.info(`📄 file saved: ${path}`);
     return { path, mimeType, filename, data: data.toString('base64') };
   }
 

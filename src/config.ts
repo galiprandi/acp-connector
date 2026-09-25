@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { type LogLevel, log } from './logger.js';
 
 export interface CronJob {
   name: string;
@@ -60,7 +61,7 @@ export interface BridgeConfig {
   showTools?: boolean;
   showPlan?: boolean;
   streaming?: boolean;
-  logLevel?: 'error' | 'info' | 'debug';
+  logLevel?: LogLevel;
   cron?: CronJob[];
   routines?: Routine[];
   http?: HttpConfig;
@@ -144,7 +145,7 @@ function validateConfig(config: unknown): asserts config is BridgeConfig {
 
 function migrateLegacyConfig(config: BridgeConfig): BridgeConfig {
   if (config.telegramToken && !config.platforms?.telegram) {
-    console.warn('⚠️ telegramToken at root is deprecated. Move to platforms.telegram.token.');
+    log.warn('⚠️ telegramToken at root is deprecated. Move to platforms.telegram.token.');
     config.platforms = config.platforms || {};
     config.platforms.telegram = {
       token: config.telegramToken,

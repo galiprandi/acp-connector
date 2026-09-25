@@ -13,6 +13,7 @@ import {
 import type { AcpClient } from './acp-client.js';
 import type { PermissionResponse } from './base-bot.js';
 import { BaseBot } from './base-bot.js';
+import { log } from './logger.js';
 import type { MediaHandler } from './media.js';
 
 const DISCORD_MAX_LEN = 2000;
@@ -89,7 +90,7 @@ export class DiscordBot extends BaseBot {
     this.client.on(Events.InteractionCreate, (interaction) =>
       this._onInteraction(interaction as ButtonInteraction)
     );
-    this.client.on(Events.Error, (err) => console.error('Discord error:', err.message));
+    this.client.on(Events.Error, (err) => log.error('Discord error:', err.message));
   }
 
   private _isAllowed(channelId: string): boolean {
@@ -141,7 +142,7 @@ export class DiscordBot extends BaseBot {
     const text = msg.content || '';
 
     if (!this._isAllowed(channelId)) {
-      console.log(`🚫 [${channelId}] ${this._sanitize(text)}`);
+      log.info(`🚫 [${channelId}] ${this._sanitize(text)}`);
       if (this.allowedChannelIds.size === 0) {
         await (msg.channel as TextChannel).send(
           [
@@ -174,7 +175,7 @@ export class DiscordBot extends BaseBot {
     }
 
     const preview = text.slice(0, 80).replace(/\n/g, ' ');
-    console.log(`👤 ${preview}${text.length > 80 ? '…' : ''}`);
+    log.info(`👤 ${preview}${text.length > 80 ? '…' : ''}`);
 
     this.queue.push({ channelId, text });
     this._processQueue();
@@ -200,11 +201,11 @@ export class DiscordBot extends BaseBot {
         allBlocks.push({ type: 'text', text: caption } as ContentBlock);
       }
       const preview = caption ? `📷 ${caption.slice(0, 60)}` : `📷 ${msg.attachments.size} file(s)`;
-      console.log(`👤 ${preview}`);
+      log.info(`👤 ${preview}`);
       this.queue.push({ channelId, text: caption || '[📄 file]', blocks: allBlocks });
       this._processQueue();
     } catch (err) {
-      console.error('Discord media download failed:', (err as Error).message);
+      log.error('Discord media download failed:', (err as Error).message);
       const channel = this.client.channels.cache.get(channelId) as TextChannel;
       await channel?.send(`Error downloading media: ${(err as Error).message}`);
     }
@@ -227,7 +228,7 @@ export class DiscordBot extends BaseBot {
         await this.acp.cancel();
         this.queue = [];
         await channel?.send('⏹ Stopped.');
-        console.log('⏹ stop requested');
+        log.info('⏹ stop requested');
       } catch (err) {
         await channel?.send(`Stop failed: ${(err as Error).message}`);
       }
@@ -281,7 +282,7 @@ export class DiscordBot extends BaseBot {
   async _handlePermission(params: any): Promise<any> {
     const cmd = (this.agentCmd || '').toLowerCase();
     if (cmd.includes('dangerous') || cmd.includes('bypass') || cmd.includes('yolo')) {
-      console.log('⚡ auto-approved');
+      log.info('⚡ auto-approved');
       const allowOpt = params.options?.find(
         // biome-ignore lint/suspicious/noExplicitAny: SDK option type
         (o: any) => o.kind.startsWith('allow')
@@ -309,7 +310,7 @@ export class DiscordBot extends BaseBot {
     }
 
     const desc = this._formatPermission(params);
-    console.log(`🔐 permiso: ${desc.slice(0, 60)}`);
+    log.info(`🔐 permiso: ${desc.slice(0, 60)}`);
 
     try {
       const channel = this.client.channels.cache.get(channelId) as TextChannel;
@@ -355,7 +356,7 @@ export class DiscordBot extends BaseBot {
         this.permissionPending = { resolve };
       });
     } catch (err) {
-      console.error('Discord permission send failed:', (err as Error).message);
+      log.error('Discord permission send failed:', (err as Error).message);
       const allowOpt = params.options?.find(
         // biome-ignore lint/suspicious/noExplicitAny: SDK option type
         (o: any) => o.kind.startsWith('allow')
@@ -385,7 +386,7 @@ export class DiscordBot extends BaseBot {
           ? `session \`${this.acp.sessionId}\``
           : 'new session';
         await interaction.editReply(`✅ Agent reconnected — ${sessionNote}`);
-        console.log(`🔄 agent restarted, session: ${this.acp.sessionId}`);
+        log.info(`🔄 agent restarted, session: ${this.acp.sessionId}`);
       } catch (err) {
         await interaction.editReply(`❌ Reconnect failed: ${(err as Error).message}`);
       }
@@ -437,7 +438,7 @@ export class DiscordBot extends BaseBot {
           components: [row],
         });
       } catch (err) {
-        console.error(`Failed to notify channel ${channelId}:`, (err as Error).message);
+        log.error(`Failed to notify channel ${channelId}:`, (err as Error).message);
       }
     }
   }

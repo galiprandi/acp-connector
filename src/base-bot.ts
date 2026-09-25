@@ -6,6 +6,7 @@ import type {
 } from '@agentclientprotocol/sdk';
 import type { AcpClient } from './acp-client.js';
 import type { PlatformBot } from './bot.js';
+import { log } from './logger.js';
 import type { MediaHandler } from './media.js';
 
 const STREAM_BATCH_MS = 800;
@@ -154,7 +155,7 @@ export abstract class BaseBot implements PlatformBot {
     try {
       const newId = await this.acp.newSession();
       await this.sendMessage(channelId, `🆕 New session started: \`${newId}\``);
-      console.log(`🆕 new session: ${newId}`);
+      log.info(`🆕 new session: ${newId}`);
     } catch (err) {
       await this.sendMessage(channelId, `Failed to create session: ${(err as Error).message}`);
     }
@@ -193,7 +194,7 @@ export abstract class BaseBot implements PlatformBot {
     try {
       const id = await this.acp.loadSession(arg);
       await this.sendMessage(channelId, `🔄 Switched to session: \`${id}\``);
-      console.log(`🔄 switched to session: ${id}`);
+      log.info(`🔄 switched to session: ${id}`);
     } catch (err) {
       await this.sendMessage(channelId, `Failed to switch session: ${(err as Error).message}`);
     }
@@ -212,7 +213,7 @@ export abstract class BaseBot implements PlatformBot {
     try {
       await this.acp.deleteSession(arg);
       await this.sendMessage(channelId, `🗑 Deleted session: \`${arg}\``);
-      console.log(`🗑 deleted session: ${arg}`);
+      log.info(`🗑 deleted session: ${arg}`);
     } catch (err) {
       await this.sendMessage(channelId, `Failed to delete session: ${(err as Error).message}`);
     }
@@ -246,7 +247,7 @@ export abstract class BaseBot implements PlatformBot {
     try {
       await this.acp.setSessionMode(arg);
       await this.sendMessage(channelId, `🔧 Mode set to: \`${arg}\` (${mode.name})`);
-      console.log(`🔧 mode set to: ${arg}`);
+      log.info(`🔧 mode set to: ${arg}`);
     } catch (err) {
       await this.sendMessage(channelId, `Failed to set mode: ${(err as Error).message}`);
     }
@@ -309,7 +310,7 @@ export abstract class BaseBot implements PlatformBot {
     try {
       await this.acp.setConfigOption(configId, value);
       await this.sendMessage(channelId, `⚙️ \`${configId}\` set to: \`${value}\``);
-      console.log(`⚙️ config ${configId} set to: ${value}`);
+      log.info(`⚙️ config ${configId} set to: ${value}`);
     } catch (err) {
       await this.sendMessage(channelId, `Failed to set option: ${(err as Error).message}`);
     }
@@ -433,7 +434,7 @@ export abstract class BaseBot implements PlatformBot {
 
       const respLen = this.streamBuffer.length;
       const respPreview = this.streamBuffer.slice(0, 80).replace(/\n/g, ' ');
-      console.log(`🤖 ${respPreview}${respLen > 80 ? '…' : ''}`);
+      log.info(`🤖 ${respPreview}${respLen > 80 ? '…' : ''}`);
 
       if (!this.streamBuffer && this.currentChannelId) {
         const stopReason = message?.stopReason;

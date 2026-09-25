@@ -1,6 +1,7 @@
 import type { Routine } from './config.js';
 import { loadConfig, saveConfig } from './config.js';
 import type { CronManager } from './cron.js';
+import { log } from './logger.js';
 
 interface RoutineManagerOpts {
   routines: Routine[];
@@ -247,7 +248,7 @@ export class RoutineManager {
       );
       return true;
     }
-    console.log(`📝 routine "${name}" fired`);
+    log.info(`📝 routine "${name}" fired`);
     this.enqueue(routine.prompt, chatId);
     return true;
   }

@@ -3,6 +3,7 @@ import TelegramBot from 'node-telegram-bot-api';
 import type { AcpClient } from './acp-client.js';
 import type { PermissionResponse } from './base-bot.js';
 import { BaseBot } from './base-bot.js';
+import { log } from './logger.js';
 import type { MediaHandler } from './media.js';
 
 const TG_MAX_LEN = 4096;
@@ -82,7 +83,7 @@ export class BridgeBot extends BaseBot {
   private _setupHandlers(): void {
     this.bot.on('message', (msg) => this._onMessage(msg));
     this.bot.on('callback_query', (query) => this._onCallbackQuery(query));
-    this.bot.on('polling_error', (err) => console.error('TG polling error:', err.message));
+    this.bot.on('polling_error', (err) => log.error('TG polling error:', err.message));
   }
 
   private _isAllowed(chatId: number): boolean {
@@ -159,7 +160,7 @@ export class BridgeBot extends BaseBot {
     const text = msg.text || '';
 
     if (!this._isAllowed(chatId)) {
-      console.log(`🚫 [${chatId}] ${this._sanitize(text)}`);
+      log.info(`🚫 [${chatId}] ${this._sanitize(text)}`);
       if (this.allowedChatIds.size === 0) {
         await this.bot.sendMessage(
           chatId,
@@ -199,7 +200,7 @@ export class BridgeBot extends BaseBot {
     }
 
     const preview = text.slice(0, 80).replace(/\n/g, ' ');
-    console.log(`👤 ${preview}${text.length > 80 ? '…' : ''}`);
+    log.info(`👤 ${preview}${text.length > 80 ? '…' : ''}`);
 
     this.queue.push({ channelId: chatId, text });
     this._processQueue();
@@ -257,11 +258,11 @@ export class BridgeBot extends BaseBot {
         caption || undefined
       );
       const preview = caption ? `📷 ${caption.slice(0, 60)}` : `📷 ${mimeType}`;
-      console.log(`👤 ${preview}`);
+      log.info(`👤 ${preview}`);
       this.queue.push({ channelId: chatId, text: caption || `[📄 file]`, blocks });
       this._processQueue();
     } catch (err) {
-      console.error('Media download failed:', (err as Error).message);
+      log.error('Media download failed:', (err as Error).message);
       await this.bot.sendMessage(chatId, `Error downloading media: ${(err as Error).message}`);
     }
   }
@@ -279,7 +280,7 @@ export class BridgeBot extends BaseBot {
         await this.acp.cancel();
         this.queue = [];
         await this.bot.sendMessage(cid, '⏹ Stopped.');
-        console.log('⏹ stop requested');
+        log.info('⏹ stop requested');
       } catch (err) {
         await this.bot.sendMessage(cid, `Stop failed: ${(err as Error).message}`);
       }
@@ -335,7 +336,7 @@ export class BridgeBot extends BaseBot {
   async _handlePermission(params: any): Promise<any> {
     const cmd = (this.agentCmd || '').toLowerCase();
     if (cmd.includes('dangerous') || cmd.includes('bypass') || cmd.includes('yolo')) {
-      console.log('⚡ auto-approved');
+      log.info('⚡ auto-approved');
       const allowOpt = params.options?.find(
         // biome-ignore lint/suspicious/noExplicitAny: SDK option type
         (o: any) => o.kind.startsWith('allow')
@@ -363,7 +364,7 @@ export class BridgeBot extends BaseBot {
     }
 
     const desc = this._formatPermission(params);
-    console.log(`🔐 permiso: ${desc.slice(0, 60)}`);
+    log.info(`🔐 permiso: ${desc.slice(0, 60)}`);
 
     try {
       const allowOpt = params.options?.find(
@@ -424,7 +425,7 @@ export class BridgeBot extends BaseBot {
           message_id: query.message?.message_id,
           parse_mode: 'Markdown',
         });
-        console.log(`🔄 agent restarted, session: ${this.acp.sessionId}`);
+        log.info(`🔄 agent restarted, session: ${this.acp.sessionId}`);
       } catch (err) {
         await this.bot.editMessageText(`❌ Reconnect failed: ${(err as Error).message}`, {
           chat_id: chatId,
@@ -477,7 +478,7 @@ export class BridgeBot extends BaseBot {
           },
         });
       } catch (err) {
-        console.error(`Failed to notify chat ${chatId}:`, (err as Error).message);
+        log.error(`Failed to notify chat ${chatId}:`, (err as Error).message);
       }
     }
   }
