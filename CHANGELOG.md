@@ -5,6 +5,12 @@ All notable changes to acp-connector will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2026-10-04
+
+### Added
+- Queued-message reaction: when a prompt arrives while the bot is busy, the bridge reacts to the user's message with a queued indicator — 😴 on Telegram (⏳ is not in Telegram's reaction whitelist), ⏳ on Discord — and clears it once the prompt starts processing. Applies to both text and media messages.
+- 3 new tests (366 total)
+
 ## [0.8.0] - 2026-10-04
 
 ### Added

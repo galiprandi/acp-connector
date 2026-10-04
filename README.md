@@ -121,6 +121,8 @@ Send a message to your bot on Telegram. Your agent will respond. That's it.
 5. Agent responses **stream back** to Telegram with live message edits
 6. **Permissions** are forwarded as inline buttons (or auto-approved)
 
+When a prompt arrives while the bot is busy, the bridge reacts to the user's message with a queued indicator (😴 on Telegram, ⏳ on Discord) and clears it once the prompt starts processing.
+
 ***
 
 ## ⚙️ Configuration

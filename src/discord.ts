@@ -138,6 +138,24 @@ export class DiscordBot extends BaseBot {
     await channel?.send(text);
   }
 
+  protected async _addQueuedReaction(
+    channelId: string | number,
+    messageId: string | number
+  ): Promise<void> {
+    const channel = this.client.channels.cache.get(String(channelId)) as TextChannel;
+    const message = await channel?.messages.fetch(String(messageId)).catch(() => null);
+    await message?.react('⏳');
+  }
+
+  protected async _clearQueuedReaction(
+    channelId: string | number,
+    messageId: string | number
+  ): Promise<void> {
+    const channel = this.client.channels.cache.get(String(channelId)) as TextChannel;
+    const message = await channel?.messages.fetch(String(messageId)).catch(() => null);
+    await message?.reactions.cache.get('⏳')?.users.remove(this.client.user?.id);
+  }
+
   private async _onMessage(msg: Message): Promise<void> {
     if (msg.author.bot) return;
 
@@ -180,8 +198,7 @@ export class DiscordBot extends BaseBot {
     const preview = text.slice(0, 80).replace(/\n/g, ' ');
     log.info(`👤 ${preview}${text.length > 80 ? '…' : ''}`);
 
-    this.queue.push({ channelId, text });
-    this._processQueue();
+    this._enqueueUserMessage(channelId, msg.id, text);
   }
 
   private async _handleDiscordMedia(msg: Message, channelId: string): Promise<void> {
@@ -205,8 +222,7 @@ export class DiscordBot extends BaseBot {
       }
       const preview = caption ? `📷 ${caption.slice(0, 60)}` : `📷 ${msg.attachments.size} file(s)`;
       log.info(`👤 ${preview}`);
-      this.queue.push({ channelId, text: caption || '[📄 file]', blocks: allBlocks });
-      this._processQueue();
+      this._enqueueUserMessage(channelId, msg.id, caption || '[📄 file]', allBlocks);
     } catch (err) {
       log.error('Discord media download failed:', (err as Error).message);
       const channel = this.client.channels.cache.get(channelId) as TextChannel;

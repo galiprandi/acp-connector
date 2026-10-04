@@ -159,6 +159,24 @@ export class BridgeBot extends BaseBot {
     await this.bot.sendMessage(target, text);
   }
 
+  protected async _addQueuedReaction(
+    channelId: string | number,
+    messageId: string | number
+  ): Promise<void> {
+    await this.bot.setMessageReaction(channelId as number, messageId as number, {
+      reaction: [{ type: 'emoji', emoji: '😴' }],
+    });
+  }
+
+  protected async _clearQueuedReaction(
+    channelId: string | number,
+    messageId: string | number
+  ): Promise<void> {
+    await this.bot.setMessageReaction(channelId as number, messageId as number, {
+      reaction: [],
+    });
+  }
+
   private async _onMessage(msg: TelegramBot.Message): Promise<void> {
     const chatId = msg.chat.id;
     const text = msg.text || '';
@@ -206,8 +224,7 @@ export class BridgeBot extends BaseBot {
     const preview = text.slice(0, 80).replace(/\n/g, ' ');
     log.info(`👤 ${preview}${text.length > 80 ? '…' : ''}`);
 
-    this.queue.push({ channelId: chatId, text });
-    this._processQueue();
+    this._enqueueUserMessage(chatId, msg.message_id, text);
   }
 
   private async _handleMedia(msg: TelegramBot.Message, chatId: number): Promise<void> {
@@ -263,8 +280,7 @@ export class BridgeBot extends BaseBot {
       );
       const preview = caption ? `📷 ${caption.slice(0, 60)}` : `📷 ${mimeType}`;
       log.info(`👤 ${preview}`);
-      this.queue.push({ channelId: chatId, text: caption || `[📄 file]`, blocks });
-      this._processQueue();
+      this._enqueueUserMessage(chatId, msg.message_id, caption || `[📄 file]`, blocks);
     } catch (err) {
       log.error('Media download failed:', (err as Error).message);
       await this.bot.sendMessage(chatId, `Error downloading media: ${(err as Error).message}`);

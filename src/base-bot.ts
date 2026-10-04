@@ -29,6 +29,10 @@ export interface QueueItem {
   text: string;
   blocks?: ContentBlock[];
   onComplete?: (response: string, error?: string) => void;
+  /** Original user message id — used to react/clear a queued indicator. */
+  messageId?: string | number;
+  /** True if a ⏳ reaction was added to messageId while queued. */
+  queuedReaction?: boolean;
 }
 
 export interface PermissionResponse {
@@ -111,6 +115,14 @@ export abstract class BaseBot implements PlatformBot {
   protected abstract _editMessage(messageId: number | string, text: string): Promise<void>;
   protected abstract _sendOverflowChunk(chunk: string): Promise<void>;
   protected abstract _sendPlain(text: string, chatId?: string | number): Promise<void>;
+  protected abstract _addQueuedReaction(
+    channelId: string | number,
+    messageId: string | number
+  ): Promise<void>;
+  protected abstract _clearQueuedReaction(
+    channelId: string | number,
+    messageId: string | number
+  ): Promise<void>;
   protected abstract _currentChannel(): string | number | null;
   protected abstract _handleBuiltinCommand(
     text: string,
@@ -413,11 +425,38 @@ export abstract class BaseBot implements PlatformBot {
     this._processQueue();
   }
 
+  /**
+   * Enqueue a user-sent message. If the bot is busy, reacts to the user's
+   * message with ⏳ to signal it's queued; the reaction is cleared when the
+   * item starts processing.
+   */
+  protected _enqueueUserMessage(
+    channelId: string | number,
+    messageId: string | number,
+    text: string,
+    blocks?: ContentBlock[]
+  ): void {
+    const item: QueueItem = { channelId, text, blocks, messageId };
+    if (this.busy) {
+      item.queuedReaction = true;
+      this._addQueuedReaction(channelId, messageId).catch(() => {
+        item.queuedReaction = false;
+      });
+    }
+    this.queue.push(item);
+    this._processQueue();
+  }
+
   protected async _processQueue(): Promise<void> {
     if (this.busy || this.queue.length === 0) return;
 
     // biome-ignore lint/style/noNonNullAssertion: queue is non-empty (checked above)
-    const { channelId, text, blocks, onComplete } = this.queue.shift()!;
+    const item = this.queue.shift()!;
+    const { channelId, text, blocks, onComplete } = item;
+
+    if (item.queuedReaction && item.messageId !== undefined) {
+      this._clearQueuedReaction(channelId, item.messageId).catch(() => {});
+    }
     this.busy = true;
     this.streamBuffer = '';
     this.currentMessageId = null;

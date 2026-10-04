@@ -159,6 +159,15 @@
 - streams agent_message_chunk and edits single message
 - updates current mode on current_mode_update
 
+## Module: echoInjectedPrompts
+- defaults to true when not specified
+- does not echo when echoInjectedPrompts is false
+- does not echo when no source is provided (direct user message)
+- echoes cron-sourced prompt with cron label
+- echoes http-sourced prompt with http label
+- echoes routine-sourced prompt with routine label
+- truncates long prompts in echo to 200 chars
+
 ## Module: bridge
 - exits with error when ACP fails to start
 - exits with error when no config found

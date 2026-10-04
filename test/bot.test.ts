@@ -9,6 +9,7 @@ interface MockBot {
   editMessageText: MockFn;
   answerCallbackQuery: MockFn;
   sendChatAction: MockFn;
+  setMessageReaction: MockFn;
   stopPolling: MockFn;
 }
 
@@ -19,6 +20,7 @@ const mockBot: MockBot = {
   editMessageText: vi.fn(async () => ({})),
   answerCallbackQuery: vi.fn(async () => ({})),
   sendChatAction: vi.fn(async () => ({})),
+  setMessageReaction: vi.fn(async () => true),
   stopPolling: vi.fn(),
 };
 
@@ -29,6 +31,7 @@ vi.mock('node-telegram-bot-api', () => ({
     editMessageText = mockBot.editMessageText;
     answerCallbackQuery = mockBot.answerCallbackQuery;
     sendChatAction = mockBot.sendChatAction;
+    setMessageReaction = mockBot.setMessageReaction;
     stopPolling = mockBot.stopPolling;
   },
 }));
@@ -1160,5 +1163,70 @@ describe('echoInjectedPrompts', () => {
       (c) => typeof c[1] === 'string' && c[1].includes('[cron]')
     );
     expect(echoCall).toBeDefined();
+  });
+});
+
+describe('queued reaction', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('adds 😴 reaction to user message while bot is busy', async () => {
+    const { bot, acp } = createBot();
+    await bot.start();
+    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+
+    // Keep the first prompt blocked so the bot stays busy
+    let release: ((v: MockAcpUpdate) => void) | undefined;
+    acp.nextUpdate.mockImplementationOnce(
+      () =>
+        new Promise((r) => {
+          release = r;
+        })
+    );
+    await handler({ chat: { id: 123 }, message_id: 1, text: 'first prompt' });
+    await handler({ chat: { id: 123 }, message_id: 2, text: 'second prompt' });
+
+    expect(mockBot.setMessageReaction).toHaveBeenCalledWith(123, 2, {
+      reaction: [{ type: 'emoji', emoji: '😴' }],
+    });
+    release?.({ kind: 'stop', stopReason: 'end_turn' });
+    await vi.advanceTimersByTimeAsync(1000);
+  });
+
+  it('clears the reaction when the queued item starts processing', async () => {
+    const { bot, acp } = createBot();
+    await bot.start();
+    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+
+    let release: ((v: MockAcpUpdate) => void) | undefined;
+    acp.nextUpdate.mockImplementationOnce(
+      () =>
+        new Promise((r) => {
+          release = r;
+        })
+    );
+    await handler({ chat: { id: 123 }, message_id: 1, text: 'first prompt' });
+    await handler({ chat: { id: 123 }, message_id: 2, text: 'second prompt' });
+
+    release?.({ kind: 'stop', stopReason: 'end_turn' });
+    await vi.advanceTimersByTimeAsync(1000);
+
+    expect(mockBot.setMessageReaction).toHaveBeenCalledWith(123, 2, {
+      reaction: [],
+    });
+  });
+
+  it('does not react when bot is not busy', async () => {
+    const { bot } = createBot();
+    await bot.start();
+    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    await handler({ chat: { id: 123 }, message_id: 1, text: 'hello' });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(mockBot.setMessageReaction).not.toHaveBeenCalled();
   });
 });
