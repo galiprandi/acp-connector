@@ -61,6 +61,7 @@ export interface BridgeConfig {
   showTools?: boolean;
   showPlan?: boolean;
   streaming?: boolean;
+  echoInjectedPrompts?: boolean;
   logLevel?: LogLevel;
   cron?: CronJob[];
   routines?: Routine[];

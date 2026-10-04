@@ -27,6 +27,7 @@ interface DiscordBotOpts {
   showTools?: boolean;
   showPlan?: boolean;
   streaming?: boolean;
+  echoInjectedPrompts?: boolean;
   mediaHandler?: MediaHandler | null;
   onCommand?: ((text: string, chatId: number | string) => Promise<boolean>) | null;
   onPrompt?: ((text: string, chatId: number | string) => void) | null;
@@ -49,6 +50,7 @@ export class DiscordBot extends BaseBot {
     showTools = true,
     showPlan = true,
     streaming = true,
+    echoInjectedPrompts = true,
     mediaHandler = null,
     onCommand = null,
     onPrompt = null,
@@ -60,6 +62,7 @@ export class DiscordBot extends BaseBot {
       showTools,
       showPlan,
       streaming,
+      echoInjectedPrompts,
       mediaHandler,
       onCommand,
       onPrompt,
@@ -128,10 +131,10 @@ export class DiscordBot extends BaseBot {
     }
   }
 
-  protected async _sendPlain(text: string): Promise<void> {
-    const channelId = this._currentChannel() as string;
-    if (!channelId) return;
-    const channel = this.client.channels.cache.get(channelId) as TextChannel;
+  protected async _sendPlain(text: string, chatId?: string | number): Promise<void> {
+    const target = (chatId ?? this._currentChannel()) as string;
+    if (!target) return;
+    const channel = this.client.channels.cache.get(target) as TextChannel;
     await channel?.send(text);
   }
 

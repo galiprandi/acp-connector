@@ -18,6 +18,7 @@ export interface BaseBotOpts {
   showTools: boolean;
   showPlan: boolean;
   streaming: boolean;
+  echoInjectedPrompts: boolean;
   mediaHandler: MediaHandler | null;
   onCommand: ((text: string, chatId: number | string) => Promise<boolean>) | null;
   onPrompt: ((text: string, chatId: number | string) => void) | null;
@@ -48,6 +49,7 @@ export abstract class BaseBot implements PlatformBot {
   protected showTools: boolean;
   protected showPlan: boolean;
   protected streaming: boolean;
+  protected echoInjectedPrompts: boolean;
   protected mediaHandler: MediaHandler | null;
   onCommand: ((text: string, chatId: number | string) => Promise<boolean>) | null;
   protected onPrompt: ((text: string, chatId: number | string) => void) | null;
@@ -72,6 +74,7 @@ export abstract class BaseBot implements PlatformBot {
     showTools,
     showPlan,
     streaming,
+    echoInjectedPrompts,
     mediaHandler,
     onCommand,
     onPrompt,
@@ -82,6 +85,7 @@ export abstract class BaseBot implements PlatformBot {
     this.showTools = showTools;
     this.showPlan = showPlan;
     this.streaming = streaming;
+    this.echoInjectedPrompts = echoInjectedPrompts;
     this.mediaHandler = mediaHandler;
     this.onCommand = onCommand;
     this.onPrompt = onPrompt;
@@ -106,7 +110,7 @@ export abstract class BaseBot implements PlatformBot {
   protected abstract _sendNewMessage(text: string): Promise<{ messageId: number | string }>;
   protected abstract _editMessage(messageId: number | string, text: string): Promise<void>;
   protected abstract _sendOverflowChunk(chunk: string): Promise<void>;
-  protected abstract _sendPlain(text: string): Promise<void>;
+  protected abstract _sendPlain(text: string, chatId?: string | number): Promise<void>;
   protected abstract _currentChannel(): string | number | null;
   protected abstract _handleBuiltinCommand(
     text: string,
@@ -389,13 +393,21 @@ export abstract class BaseBot implements PlatformBot {
     text: string,
     chatId?: number | string,
     blocks?: ContentBlock[],
-    onComplete?: (response: string, error?: string) => void
+    onComplete?: (response: string, error?: string) => void,
+    source?: 'cron' | 'http' | 'routine'
   ): Promise<void> {
     if (!chatId) return;
     if (await this._handleBuiltinCommand(text, chatId)) return;
     if (text.startsWith('/') && this.onCommand) {
       const handled = await this.onCommand(text, chatId);
       if (handled) return;
+    }
+    if (this.echoInjectedPrompts && source) {
+      const icon = source === 'cron' ? '⏰' : source === 'http' ? '🌐' : '🔁';
+      const label = `[${source}]`;
+      const preview = text.slice(0, 200).replace(/\n/g, ' ');
+      const suffix = text.length > 200 ? '…' : '';
+      await this._sendPlain(`${icon} ${label} ${preview}${suffix}`, chatId);
     }
     this.queue.push({ channelId: chatId, text, blocks, onComplete });
     this._processQueue();

@@ -15,7 +15,8 @@ export interface PlatformBot {
     text: string,
     chatId?: number | string,
     blocks?: ContentBlock[],
-    onComplete?: (response: string, error?: string) => void
+    onComplete?: (response: string, error?: string) => void,
+    source?: 'cron' | 'http' | 'routine'
   ): Promise<void>;
   sendMessage(chatId: number | string, text: string): Promise<void>;
   notifyAgentExit(code: number | null): Promise<void>;
@@ -33,6 +34,7 @@ interface BridgeBotOpts {
   showTools?: boolean;
   showPlan?: boolean;
   streaming?: boolean;
+  echoInjectedPrompts?: boolean;
   mediaHandler?: MediaHandler | null;
   onCommand?: ((text: string, chatId: number | string) => Promise<boolean>) | null;
   onPrompt?: ((text: string, chatId: number | string) => void) | null;
@@ -53,6 +55,7 @@ export class BridgeBot extends BaseBot {
     showTools = true,
     showPlan = true,
     streaming = true,
+    echoInjectedPrompts = true,
     mediaHandler = null,
     onCommand = null,
     onPrompt = null,
@@ -64,6 +67,7 @@ export class BridgeBot extends BaseBot {
       showTools,
       showPlan,
       streaming,
+      echoInjectedPrompts,
       mediaHandler,
       onCommand,
       onPrompt,
@@ -149,10 +153,10 @@ export class BridgeBot extends BaseBot {
     }
   }
 
-  protected async _sendPlain(text: string): Promise<void> {
-    const chatId = this._currentChannel() as number;
-    if (!chatId) return;
-    await this.bot.sendMessage(chatId, text);
+  protected async _sendPlain(text: string, chatId?: string | number): Promise<void> {
+    const target = (chatId ?? this._currentChannel()) as number;
+    if (!target) return;
+    await this.bot.sendMessage(target, text);
   }
 
   private async _onMessage(msg: TelegramBot.Message): Promise<void> {

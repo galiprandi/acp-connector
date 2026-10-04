@@ -143,6 +143,7 @@ See [`acp-connector.example.jsonc`](acp-connector.example.jsonc) for the full re
 | `showTools` | `boolean` | no | `true` | Show tool calls (e.g. "Read file", "Run tests") in chat. Set to `false` when only the final answer matters |
 | `showPlan` | `boolean` | no | `true` | Show agent plan/checklist in chat |
 | `streaming` | `boolean` | no | `true` | Stream responses with live message edits |
+| `echoInjectedPrompts` | `boolean` | no | `true` | Echo prompts injected via cron, HTTP, or routines into the chat with a source label (`⏰ [cron]`, `🌐 [http]`, `🔁 [routine]`) so you can see what triggered the agent's response |
 | `logLevel` | `string` | no | `"info"` | Bridge log verbosity: `"error"` (errors only) \| `"warn"` \| `"info"` \| `"debug"`. Does not affect the agent subprocess's own stderr output |
 | `cron` | `CronJob[]` | no | `[]` | Scheduled jobs (see below) |
 | `routines` | `Routine[]` | no | `[]` | Named reusable prompts |

@@ -51,6 +51,11 @@
   // Stream responses with message edits (default: true)
   "streaming": true,
 
+  // Echo prompts injected via cron, HTTP, or routines into the chat (default: true)
+  // Shows the prompt text with a source label (⏰ [cron], 🌐 [http], 🔁 [routine])
+  // so you can see what triggered the agent's response
+  "echoInjectedPrompts": true,
+
   // Log level: "error" | "info" | "debug" (default: "info")
   "logLevel": "info",
 

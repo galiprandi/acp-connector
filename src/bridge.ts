@@ -67,6 +67,7 @@ export async function run(): Promise<void> {
       showTools: config.showTools,
       showPlan: config.showPlan,
       streaming: config.streaming,
+      echoInjectedPrompts: config.echoInjectedPrompts,
     });
     bots.push(bot);
     primaryBot = bot;
@@ -82,6 +83,7 @@ export async function run(): Promise<void> {
       showTools: config.showTools,
       showPlan: config.showPlan,
       streaming: config.streaming,
+      echoInjectedPrompts: config.echoInjectedPrompts,
     });
     bots.push(bot);
     if (!primaryBot) primaryBot = bot;
@@ -97,7 +99,7 @@ export async function run(): Promise<void> {
     enqueue: (text, chatId) => {
       // Enqueue to all bots — each will process if chatId matches
       for (const bot of bots) {
-        bot.enqueuePrompt(text, chatId);
+        bot.enqueuePrompt(text, chatId, undefined, undefined, 'cron');
       }
     },
   });
@@ -107,7 +109,7 @@ export async function run(): Promise<void> {
     cronManager,
     enqueue: (text, chatId) => {
       for (const bot of bots) {
-        bot.enqueuePrompt(text, chatId);
+        bot.enqueuePrompt(text, chatId, undefined, undefined, 'routine');
       }
     },
     sendMessage: async (chatId, text) => {
@@ -133,7 +135,7 @@ export async function run(): Promise<void> {
     rateLimit: config.http?.rateLimit || 60,
     enqueue: (text, chatId, blocks, onComplete) => {
       for (const bot of bots) {
-        bot.enqueuePrompt(text, chatId, blocks, onComplete);
+        bot.enqueuePrompt(text, chatId, blocks, onComplete, 'http');
       }
     },
     getHealth: () => ({

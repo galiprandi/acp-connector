@@ -5,6 +5,12 @@ All notable changes to acp-connector will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-10-04
+
+### Added
+- `echoInjectedPrompts` config option (default: `true`) — prompts injected via cron, HTTP, or routines are now echoed into the chat with a source label (`⏰ [cron]`, `🌐 [http]`, `🔁 [routine]`) before the agent processes them. This makes it clear what triggered the agent's response when the prompt didn't come from a direct user message. Set to `false` to suppress the echo.
+- 38 new tests (363 total)
+
 ## [0.7.1] - 2026-09-25
 
 ### Fixed

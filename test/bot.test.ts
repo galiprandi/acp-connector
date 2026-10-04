@@ -1077,3 +1077,88 @@ describe('BridgeBot', () => {
     );
   });
 });
+
+describe('echoInjectedPrompts', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('echoes cron-sourced prompt with cron label', async () => {
+    const { bot, acp } = createBot();
+    await bot.start();
+    bot.enqueuePrompt('summarize today', 123, undefined, undefined, 'cron');
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(mockBot.sendMessage).toHaveBeenCalledWith(123, '⏰ [cron] summarize today');
+    expect(acp.prompt).toHaveBeenCalledWith('summarize today');
+  });
+
+  it('echoes http-sourced prompt with http label', async () => {
+    const { bot } = createBot();
+    await bot.start();
+    bot.enqueuePrompt('what is the weather', 123, undefined, undefined, 'http');
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(mockBot.sendMessage).toHaveBeenCalledWith(123, '🌐 [http] what is the weather');
+  });
+
+  it('echoes routine-sourced prompt with routine label', async () => {
+    const { bot } = createBot();
+    await bot.start();
+    bot.enqueuePrompt('review the latest PRs', 123, undefined, undefined, 'routine');
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(mockBot.sendMessage).toHaveBeenCalledWith(123, '🔁 [routine] review the latest PRs');
+  });
+
+  it('does not echo when no source is provided (direct user message)', async () => {
+    const { bot, acp } = createBot();
+    await bot.start();
+    bot.enqueuePrompt('test prompt', 123);
+    await vi.advanceTimersByTimeAsync(1000);
+    // No echo message should be sent — only the agent response
+    const calls = mockBot.sendMessage.mock.calls.filter(
+      (c) => c[1] !== 'Hello back' && c[1] !== 'test prompt'
+    );
+    expect(calls.some((c) => c[1]?.includes('[cron]') || c[1]?.includes('[http]'))).toBe(false);
+    expect(acp.prompt).toHaveBeenCalledWith('test prompt');
+  });
+
+  it('does not echo when echoInjectedPrompts is false', async () => {
+    const { bot, acp } = createBot({ echoInjectedPrompts: false });
+    await bot.start();
+    bot.enqueuePrompt('summarize today', 123, undefined, undefined, 'cron');
+    await vi.advanceTimersByTimeAsync(1000);
+    const echoCalls = mockBot.sendMessage.mock.calls.filter(
+      (c) => typeof c[1] === 'string' && c[1].includes('[cron]')
+    );
+    expect(echoCalls).toHaveLength(0);
+    expect(acp.prompt).toHaveBeenCalledWith('summarize today');
+  });
+
+  it('truncates long prompts in echo to 200 chars', async () => {
+    const { bot } = createBot();
+    await bot.start();
+    const longPrompt = 'a'.repeat(250);
+    bot.enqueuePrompt(longPrompt, 123, undefined, undefined, 'cron');
+    await vi.advanceTimersByTimeAsync(1000);
+    const echoCall = mockBot.sendMessage.mock.calls.find(
+      (c) => typeof c[1] === 'string' && c[1].includes('[cron]')
+    );
+    expect(echoCall).toBeDefined();
+    // "⏰ [cron] " (10 chars) + 200 'a' + "…" = 211
+    expect(echoCall[1]).toBe(`⏰ [cron] ${'a'.repeat(200)}…`);
+  });
+
+  it('defaults to true when not specified', async () => {
+    const { bot } = createBot();
+    await bot.start();
+    bot.enqueuePrompt('test', 123, undefined, undefined, 'cron');
+    await vi.advanceTimersByTimeAsync(1000);
+    const echoCall = mockBot.sendMessage.mock.calls.find(
+      (c) => typeof c[1] === 'string' && c[1].includes('[cron]')
+    );
+    expect(echoCall).toBeDefined();
+  });
+});
