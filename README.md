@@ -123,6 +123,8 @@ Send a message to your bot on Telegram. Your agent will respond. That's it.
 
 When a prompt arrives while the bot is busy, the bridge reacts to the user's message with a queued indicator (😴 on Telegram, ⏳ on Discord) and clears it once the prompt starts processing.
 
+Replying to a message (Telegram `reply_to_message`, Discord `msg.reference`) injects the quoted text as context: the prompt is forwarded as `[in reply to @user: "quoted text"] your prompt`, truncated at 300 chars. Works on both text and media captions.
+
 ***
 
 ## ⚙️ Configuration
@@ -372,6 +374,10 @@ The bridge intercepts these commands before forwarding to the agent:
 | Command | Description |
 |---|---|
 | `/stop` | Cancel the current task (sends `session/cancel` to the agent) |
+| `/queue` | List pending prompts waiting in the queue |
+| `/queue cancel <n>` | Remove the pending prompt at position `n` |
+| `/queue clear` | Remove all pending prompts |
+| `/status` | Show agent state (busy/idle), session ID, mode, queue length and uptime |
 
 ### Session management
 

@@ -68,6 +68,7 @@ export abstract class BaseBot implements PlatformBot {
   protected toolCalls: Map<string, { title?: string; status?: string; kind?: string }>;
   protected planText: string;
   protected typingTimer: NodeJS.Timeout | null;
+  protected startedAt: number;
 
   protected abstract readonly maxLen: number;
 
@@ -104,6 +105,7 @@ export abstract class BaseBot implements PlatformBot {
     this.toolCalls = new Map();
     this.planText = '';
     this.typingTimer = null;
+    this.startedAt = Date.now();
   }
 
   abstract start(): Promise<void>;
@@ -158,6 +160,10 @@ export abstract class BaseBot implements PlatformBot {
         return this._handleConfigCommand(channelId, parts.slice(1));
       case 'model':
         return this._handleConfigCommand(channelId, ['model', ...parts.slice(1)]);
+      case 'queue':
+        return this._handleQueueCommand(channelId, arg);
+      case 'status':
+        return this._handleStatusCommand(channelId);
       default:
         return false;
     }
@@ -233,6 +239,73 @@ export abstract class BaseBot implements PlatformBot {
     } catch (err) {
       await this.sendMessage(channelId, `Failed to delete session: ${(err as Error).message}`);
     }
+    return true;
+  }
+
+  private async _handleQueueCommand(channelId: string | number, arg: string): Promise<boolean> {
+    const sub = arg.split(/\s+/)[0]?.toLowerCase();
+
+    if (sub === 'clear') {
+      const count = this.queue.length;
+      for (const item of this.queue) {
+        if (item.queuedReaction && item.messageId !== undefined) {
+          this._clearQueuedReaction(item.channelId, item.messageId).catch(() => {});
+        }
+      }
+      this.queue = [];
+      await this.sendMessage(
+        channelId,
+        count === 0 ? 'Queue is already empty.' : `🗑 Cleared ${count} queued prompt(s).`
+      );
+      return true;
+    }
+
+    if (sub === 'cancel') {
+      const idx = parseInt(arg.split(/\s+/)[1] ?? '', 10);
+      if (Number.isNaN(idx) || idx < 1 || idx > this.queue.length) {
+        await this.sendMessage(channelId, 'Usage: /queue cancel `<position>`');
+        return true;
+      }
+      const [removed] = this.queue.splice(idx - 1, 1);
+      if (removed.queuedReaction && removed.messageId !== undefined) {
+        this._clearQueuedReaction(removed.channelId, removed.messageId).catch(() => {});
+      }
+      const preview = removed.text.slice(0, 60).replace(/\n/g, ' ');
+      await this.sendMessage(
+        channelId,
+        `🗑 Cancelled queued prompt ${idx}: ${preview}${removed.text.length > 60 ? '…' : ''}`
+      );
+      return true;
+    }
+
+    if (this.queue.length === 0) {
+      await this.sendMessage(channelId, 'Queue is empty.');
+      return true;
+    }
+    const lines = this.queue.map((item, i) => {
+      const preview = item.text.slice(0, 60).replace(/\n/g, ' ');
+      return `${i + 1}. ${preview}${item.text.length > 60 ? '…' : ''}`;
+    });
+    await this.sendMessage(channelId, `*Queued prompts:*\n${lines.join('\n')}`);
+    return true;
+  }
+
+  private async _handleStatusCommand(channelId: string | number): Promise<boolean> {
+    const uptimeMs = Date.now() - this.startedAt;
+    const mins = Math.floor(uptimeMs / 60000);
+    const hours = Math.floor(mins / 60);
+    const uptime = hours > 0 ? `${hours}h ${mins % 60}m` : `${mins}m`;
+    const state = this.busy ? 'busy' : 'idle';
+    const mode = this.acp.modes?.currentModeId || 'default';
+    const lines = [
+      `🟢 agent: ${state}`,
+      `📋 queue: ${this.queue.length} pending`,
+      `🆔 session: \`${this.acp.sessionId || 'none'}\``,
+      `⚙️ mode: \`${mode}\``,
+      `🖥️ agent: \`${this.agentCmd}\``,
+      `⏱ uptime: ${uptime}`,
+    ];
+    await this.sendMessage(channelId, lines.join('\n'));
     return true;
   }
 

@@ -168,6 +168,11 @@
 - echoes routine-sourced prompt with routine label
 - truncates long prompts in echo to 200 chars
 
+## Module: queued reaction
+- adds 😴 reaction to user message while bot is busy
+- clears the reaction when the queued item starts processing
+- does not react when bot is not busy
+
 ## Module: bridge
 - exits with error when ACP fails to start
 - exits with error when no config found

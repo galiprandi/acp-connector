@@ -1230,3 +1230,187 @@ describe('queued reaction', () => {
     expect(mockBot.setMessageReaction).not.toHaveBeenCalled();
   });
 });
+
+describe('reply-to context', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('prepends replied-to message text as context', async () => {
+    const { bot, acp } = createBot();
+    await bot.start();
+    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    await handler({
+      chat: { id: 123 },
+      message_id: 2,
+      text: 'what do you mean?',
+      reply_to_message: { text: 'earlier message', from: { username: 'gali' } },
+    });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(acp.prompt).toHaveBeenCalledWith(
+      '[in reply to @gali: "earlier message"] what do you mean?'
+    );
+  });
+
+  it('omits author when replied message has no username', async () => {
+    const { bot, acp } = createBot();
+    await bot.start();
+    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    await handler({
+      chat: { id: 123 },
+      message_id: 2,
+      text: 'ok?',
+      reply_to_message: { text: 'quoted text', from: {} },
+    });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(acp.prompt).toHaveBeenCalledWith('[in reply to: "quoted text"] ok?');
+  });
+
+  it('ignores replies to messages with no text or caption', async () => {
+    const { bot, acp } = createBot();
+    await bot.start();
+    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    await handler({
+      chat: { id: 123 },
+      message_id: 2,
+      text: 'plain prompt',
+      reply_to_message: { photo: [{ file_id: 'x' }] },
+    });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(acp.prompt).toHaveBeenCalledWith('plain prompt');
+  });
+
+  it('truncates long quoted text at 300 chars', async () => {
+    const { bot, acp } = createBot();
+    await bot.start();
+    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    await handler({
+      chat: { id: 123 },
+      message_id: 2,
+      text: 'sure',
+      reply_to_message: { text: 'q'.repeat(400), from: {} },
+    });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(acp.prompt).toHaveBeenCalledWith(`[in reply to: "${'q'.repeat(300)}…"] sure`);
+  });
+});
+
+describe('/queue and /status', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  function blockAgent(acp: MockAcp) {
+    let release: ((v: MockAcpUpdate) => void) | undefined;
+    acp.nextUpdate.mockImplementationOnce(
+      () =>
+        new Promise((r) => {
+          release = r;
+        })
+    );
+    return () => release?.({ kind: 'stop', stopReason: 'end_turn' });
+  }
+
+  it('/queue lists pending prompts', async () => {
+    const { bot, acp } = createBot();
+    await bot.start();
+    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    const unblock = blockAgent(acp);
+    await handler({ chat: { id: 123 }, message_id: 1, text: 'busy prompt' });
+    await handler({ chat: { id: 123 }, message_id: 2, text: 'queued one' });
+    await handler({ chat: { id: 123 }, message_id: 3, text: 'queued two' });
+
+    await handler({ chat: { id: 123 }, message_id: 4, text: '/queue' });
+    const call = mockBot.sendMessage.mock.calls.find(
+      (c) => typeof c[1] === 'string' && c[1].includes('Queued prompts')
+    );
+    expect(call).toBeDefined();
+    expect(call[1]).toContain('1. queued one');
+    expect(call[1]).toContain('2. queued two');
+    unblock();
+    await vi.advanceTimersByTimeAsync(1000);
+  });
+
+  it('/queue on empty queue reports empty', async () => {
+    const { bot } = createBot();
+    await bot.start();
+    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    await handler({ chat: { id: 123 }, message_id: 1, text: '/queue' });
+    expect(mockBot.sendMessage).toHaveBeenCalledWith(123, 'Queue is empty.', {
+      parse_mode: 'Markdown',
+    });
+  });
+
+  it('/queue cancel removes the item at position', async () => {
+    const { bot, acp } = createBot();
+    await bot.start();
+    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    const unblock = blockAgent(acp);
+    await handler({ chat: { id: 123 }, message_id: 1, text: 'busy prompt' });
+    await handler({ chat: { id: 123 }, message_id: 2, text: 'first queued' });
+    await handler({ chat: { id: 123 }, message_id: 3, text: 'second queued' });
+
+    await handler({ chat: { id: 123 }, message_id: 4, text: '/queue cancel 1' });
+    expect(mockBot.sendMessage).toHaveBeenCalledWith(
+      123,
+      '🗑 Cancelled queued prompt 1: first queued',
+      { parse_mode: 'Markdown' }
+    );
+    // Cleared the queued reaction on the removed item
+    expect(mockBot.setMessageReaction).toHaveBeenCalledWith(123, 2, { reaction: [] });
+    unblock();
+    await vi.advanceTimersByTimeAsync(1000);
+  });
+
+  it('/queue cancel with invalid index shows usage', async () => {
+    const { bot } = createBot();
+    await bot.start();
+    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    await handler({ chat: { id: 123 }, message_id: 1, text: '/queue cancel 9' });
+    expect(mockBot.sendMessage).toHaveBeenCalledWith(123, 'Usage: /queue cancel `<position>`', {
+      parse_mode: 'Markdown',
+    });
+  });
+
+  it('/queue clear removes all pending prompts', async () => {
+    const { bot, acp } = createBot();
+    await bot.start();
+    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    const unblock = blockAgent(acp);
+    await handler({ chat: { id: 123 }, message_id: 1, text: 'busy prompt' });
+    await handler({ chat: { id: 123 }, message_id: 2, text: 'one' });
+    await handler({ chat: { id: 123 }, message_id: 3, text: 'two' });
+
+    await handler({ chat: { id: 123 }, message_id: 4, text: '/queue clear' });
+    expect(mockBot.sendMessage).toHaveBeenCalledWith(123, '🗑 Cleared 2 queued prompt(s).', {
+      parse_mode: 'Markdown',
+    });
+    unblock();
+    await vi.advanceTimersByTimeAsync(1000);
+    // Only the first prompt was processed — the queue stayed cleared
+    expect(acp.prompt).toHaveBeenCalledTimes(1);
+  });
+
+  it('/status reports agent state, session, queue and uptime', async () => {
+    const { bot } = createBot();
+    await bot.start();
+    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    await handler({ chat: { id: 123 }, message_id: 1, text: '/status' });
+    const call = mockBot.sendMessage.mock.calls.find(
+      (c) => typeof c[1] === 'string' && c[1].includes('agent:')
+    );
+    expect(call).toBeDefined();
+    expect(call[1]).toContain('queue: 0 pending');
+    expect(call[1]).toContain('session:');
+    expect(call[1]).toContain('uptime:');
+    expect(call[1]).toContain('`acp-agent serve`');
+  });
+});

@@ -224,7 +224,17 @@ export class BridgeBot extends BaseBot {
     const preview = text.slice(0, 80).replace(/\n/g, ' ');
     log.info(`👤 ${preview}${text.length > 80 ? '…' : ''}`);
 
-    this._enqueueUserMessage(chatId, msg.message_id, text);
+    this._enqueueUserMessage(chatId, msg.message_id, `${this._replyContext(msg)}${text}`);
+  }
+
+  private _replyContext(msg: TelegramBot.Message): string {
+    const reply = msg.reply_to_message;
+    const quote = (reply?.text || reply?.caption || '').trim();
+    if (!reply || !quote) return '';
+    const author = reply.from?.username ? ` @${reply.from.username}` : '';
+    const snippet = quote.slice(0, 300).replace(/\n/g, ' ');
+    const suffix = quote.length > 300 ? '…' : '';
+    return `[in reply to${author}: "${snippet}${suffix}"] `;
   }
 
   private async _handleMedia(msg: TelegramBot.Message, chatId: number): Promise<void> {
@@ -280,7 +290,12 @@ export class BridgeBot extends BaseBot {
       );
       const preview = caption ? `📷 ${caption.slice(0, 60)}` : `📷 ${mimeType}`;
       log.info(`👤 ${preview}`);
-      this._enqueueUserMessage(chatId, msg.message_id, caption || `[📄 file]`, blocks);
+      this._enqueueUserMessage(
+        chatId,
+        msg.message_id,
+        `${this._replyContext(msg)}${caption || `[📄 file]`}`,
+        blocks
+      );
     } catch (err) {
       log.error('Media download failed:', (err as Error).message);
       await this.bot.sendMessage(chatId, `Error downloading media: ${(err as Error).message}`);
@@ -329,6 +344,10 @@ export class BridgeBot extends BaseBot {
         '  /config — list session config options',
         '  /config `<id> [value]` — show or set an option',
         '  /model `[value]` — show or set the model',
+        '  /queue — list pending prompts',
+        '  /queue cancel `<n>` — remove a pending prompt',
+        '  /queue clear — remove all pending prompts',
+        '  /status — agent state, session, queue and uptime',
         '',
         '  /cron list — list scheduled jobs',
         '  /cron add `<schedule> <prompt>` — add a job',

@@ -198,7 +198,19 @@ export class DiscordBot extends BaseBot {
     const preview = text.slice(0, 80).replace(/\n/g, ' ');
     log.info(`👤 ${preview}${text.length > 80 ? '…' : ''}`);
 
-    this._enqueueUserMessage(channelId, msg.id, text);
+    const context = await this._replyContext(msg);
+    this._enqueueUserMessage(channelId, msg.id, `${context}${text}`);
+  }
+
+  private async _replyContext(msg: Message): Promise<string> {
+    if (!msg.reference?.messageId) return '';
+    const ref = await msg.fetchReference().catch(() => null);
+    const quote = (ref?.content || '').trim();
+    if (!ref || !quote) return '';
+    const author = ref.author?.username ? ` @${ref.author.username}` : '';
+    const snippet = quote.slice(0, 300).replace(/\n/g, ' ');
+    const suffix = quote.length > 300 ? '…' : '';
+    return `[in reply to${author}: "${snippet}${suffix}"] `;
   }
 
   private async _handleDiscordMedia(msg: Message, channelId: string): Promise<void> {
@@ -222,7 +234,8 @@ export class DiscordBot extends BaseBot {
       }
       const preview = caption ? `📷 ${caption.slice(0, 60)}` : `📷 ${msg.attachments.size} file(s)`;
       log.info(`👤 ${preview}`);
-      this._enqueueUserMessage(channelId, msg.id, caption || '[📄 file]', allBlocks);
+      const context = await this._replyContext(msg);
+      this._enqueueUserMessage(channelId, msg.id, `${context}${caption || '[📄 file]'}`, allBlocks);
     } catch (err) {
       log.error('Discord media download failed:', (err as Error).message);
       const channel = this.client.channels.cache.get(channelId) as TextChannel;
@@ -275,6 +288,10 @@ export class DiscordBot extends BaseBot {
         '  /config — list session config options',
         '  /config `<id> [value]` — show or set an option',
         '  /model `[value]` — show or set the model',
+        '  /queue — list pending prompts',
+        '  /queue cancel `<n>` — remove a pending prompt',
+        '  /queue clear — remove all pending prompts',
+        '  /status — agent state, session, queue and uptime',
         '',
         '  /cron list — list scheduled jobs',
         '  /cron add `<schedule> <prompt>` — add a job',

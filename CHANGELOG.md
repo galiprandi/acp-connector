@@ -5,6 +5,17 @@ All notable changes to acp-connector will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0] - 2026-10-04
+
+### Added
+- Reply-to context: replying to a message (Telegram `reply_to_message`, Discord `msg.reference`) injects the quoted text as context — the prompt is forwarded as `[in reply to @user: "quoted text"] your prompt`, truncated at 300 chars. Works on both text and media captions.
+- `/queue` command — lists pending prompts in the serialized queue
+- `/queue cancel <n>` — removes the pending prompt at position `n` (clears its queued reaction)
+- `/queue clear` — removes all pending prompts
+- `/status` command — reports agent state (busy/idle), session ID, current mode, queue length and bridge uptime
+- `/help` now lists the new `/queue` and `/status` commands
+- 10 new tests (376 total)
+
 ## [0.9.0] - 2026-10-04
 
 ### Added
