@@ -4,7 +4,7 @@ import { type AgentCard, buildAgentCard } from './agent-card.js';
 import type { A2aConfig } from './config.js';
 import type { EnqueueFn } from './http.js';
 import { log } from './logger.js';
-import type { NetworkStore } from './network.js';
+import type { AuditLog, NetworkStore } from './network.js';
 
 /** Peer identity header. Phase-1 trust model: the id must be an approved peer. */
 export const PEER_ID_HEADER = 'x-a2a-peer-id';
@@ -22,6 +22,8 @@ export interface A2aServerOptions {
   onJoin?: (req: { id: string; cardUrl: string; card?: Record<string, unknown> }) => Promise<void>;
   /** Called when an approved peer confirms us back (double opt-in completes). */
   onConfirm?: (peerId: string) => Promise<void>;
+  /** Optional audit trail for inbound/outbound tasks. */
+  audit?: AuditLog;
 }
 
 interface JsonRpcRequest {
@@ -255,6 +257,11 @@ export class A2aServer {
 
     const peerId = String(req.headers[PEER_ID_HEADER] ?? '');
     if (!peerId || !this.opts.network.isApproved(peerId)) {
+      this.opts.audit?.write({
+        event: 'task_rejected',
+        peer: peerId || 'unknown',
+        detail: 'not approved',
+      });
       res.writeHead(200);
       res.end(JSON.stringify(rpcError(rpc.id, ERR_UNAUTHORIZED, 'Peer is not approved')));
       return;
@@ -278,6 +285,7 @@ export class A2aServer {
       return;
     }
     if (taskId) this.opts.network.markTaskSeen(taskId);
+    this.opts.audit?.write({ event: 'task_in', peer: peerId, taskId });
 
     const text = (msg?.parts ?? [])
       .filter((p) => p.kind === 'text' && typeof p.text === 'string')
@@ -325,6 +333,7 @@ export class A2aServer {
       return;
     }
     const taskId = body.taskId ?? `d-${Date.now()}`;
+    this.opts.audit?.write({ event: 'task_out', peer: body.to, taskId });
     const origin = new URL(peer.cardUrl).origin;
     const rpcRes = await fetch(`${origin}/`, {
       method: 'POST',

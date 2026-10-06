@@ -190,3 +190,17 @@ describe('upsert safety', () => {
     expect(store.getPeer('lean')?.joinedAt).toBe(joined);
   });
 });
+
+describe('audit log', () => {
+  it('appends JSONL entries to audit.log next to network.json', async () => {
+    const { AuditLog } = await import('../src/network.ts');
+    const audit = new AuditLog(join(dir, 'audit.log'));
+    audit.write({ event: 'peer_approved', peer: 'lean' });
+    audit.write({ event: 'task_in', peer: 'lean', taskId: 't1' });
+    const lines = readFileSync(join(dir, 'audit.log'), 'utf8').trim().split('\n');
+    expect(lines).toHaveLength(2);
+    const first = JSON.parse(lines[0]);
+    expect(first.event).toBe('peer_approved');
+    expect(first.ts).toBeDefined();
+  });
+});

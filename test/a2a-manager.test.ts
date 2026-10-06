@@ -174,3 +174,63 @@ describe('startup reminders and discovery', () => {
     expect(network.getPeer('lean')?.status).toBe('approved');
   });
 });
+
+describe('peer card refresh and registry announce', () => {
+  it('refreshPeerCard fetches the well-known card into the peer record', async () => {
+    const card = { name: 'Lean', skills: [{ id: 'edu.adapt' }] };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify(card)))
+    );
+    try {
+      network.upsertPeer({
+        id: 'lean',
+        cardUrl: 'http://p:1/.well-known/agent-card.json',
+        status: 'approved',
+        source: 'discovered',
+      });
+      await manager.refreshPeerCard('lean');
+      expect(network.getPeer('lean')?.card).toEqual(card);
+      expect(network.getPeer('lean')?.lastSeen).toBeDefined();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('refreshPeerCard leaves the card untouched on fetch failure', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        throw new Error('down');
+      })
+    );
+    try {
+      network.upsertPeer({ ...pendingPeer, status: 'approved' });
+      await manager.refreshPeerCard('lean');
+      expect(network.getPeer('lean')?.card).toEqual(pendingPeer.card);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('announceToRegistry POSTs self card to the registry', async () => {
+    const spy = vi.fn(async () => new Response('{"status":"ok"}'));
+    vi.stubGlobal('fetch', spy);
+    try {
+      manager = new A2aManager({
+        network,
+        selfId: 'donna',
+        notify,
+        selfCardUrl: 'http://me:1/.well-known/agent-card.json',
+        selfCard: { name: 'Donna' },
+      });
+      await manager.announceToRegistry('http://registry:9');
+      expect(spy).toHaveBeenCalledWith(
+        'http://registry:9/a2a/registry/announce',
+        expect.objectContaining({ method: 'POST' })
+      );
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});

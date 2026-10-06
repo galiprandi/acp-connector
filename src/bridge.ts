@@ -14,7 +14,7 @@ import { HttpServer } from './http.js';
 import { log, setLogLevel } from './logger.js';
 import { LoopbackBot } from './loopback.js';
 import { MediaHandler } from './media.js';
-import { NetworkStore } from './network.js';
+import { AuditLog, NetworkStore } from './network.js';
 import { RoutineManager } from './routines.js';
 
 function printBanner(): void {
@@ -160,10 +160,12 @@ export async function run(): Promise<void> {
   // A2A manager: pairing + /a2a commands (created early for command wiring)
   let a2aManager: A2aManager | null = null;
   let a2aNetwork: NetworkStore | null = null;
+  let a2aAudit: AuditLog | null = null;
+  let a2aSyncTimer: ReturnType<typeof setInterval> | null = null;
   if (config.a2a?.enabled) {
-    a2aNetwork = new NetworkStore(
-      resolve(config.agentCwd ?? process.cwd(), '.acp-connector', 'network.json')
-    );
+    const stateDir = resolve(config.agentCwd ?? process.cwd(), '.acp-connector');
+    a2aNetwork = new NetworkStore(resolve(stateDir, 'network.json'));
+    a2aAudit = new AuditLog(resolve(stateDir, 'audit.log'));
     const ownerChatIds: Array<number | string> = [
       ...(tg?.allowedChatIds ?? []),
       ...(dc?.allowedChannelIds ?? []),
@@ -182,6 +184,7 @@ export async function run(): Promise<void> {
       selfId: config.a2a.id ?? config.a2a.card?.name?.toLowerCase() ?? 'agent',
       selfCardUrl,
       selfCard,
+      audit: a2aAudit ?? undefined,
       notify: async (text) => {
         for (const bot of bots) {
           for (const chatId of ownerChatIds) {
@@ -301,6 +304,7 @@ export async function run(): Promise<void> {
       },
       onJoin: (req) => a2aManager.handleJoinRequest(req),
       onConfirm: (peerId) => a2aManager.handleConfirm(peerId),
+      audit: a2aAudit ?? undefined,
     });
     await a2aServer.start();
 
@@ -313,9 +317,24 @@ export async function run(): Promise<void> {
       selfCardUrl: a2aServer.cardUrl(),
     });
     await a2aDiscovery.start();
-    const found = await a2aDiscovery.discover();
-    await a2aManager.notifyDiscovered(found.map((p) => ({ id: p.id, cardUrl: p.cardUrl })));
+    const discovery = a2aDiscovery;
+    const syncNetwork = async () => {
+      const found = await discovery.discover();
+      await a2aManager.notifyDiscovered(found.map((p) => ({ id: p.id, cardUrl: p.cardUrl })));
+      // Refresh real cards (well-known URI) for approved peers and announce
+      // ourselves to the registry if one is configured.
+      for (const p of a2aNetwork.listPeers('approved')) {
+        await a2aManager.refreshPeerCard(p.id).catch(() => {});
+      }
+      if (config.a2a?.registry) {
+        await a2aManager.announceToRegistry(config.a2a.registry).catch(() => {});
+      }
+      a2aNetwork.save();
+    };
+    await syncNetwork();
     await a2aManager.remindPending();
+    a2aSyncTimer = setInterval(() => syncNetwork().catch(() => {}), 5 * 60 * 1000);
+    a2aSyncTimer.unref?.();
   }
 
   const mode = acp.modes?.currentModeId || 'default';
@@ -344,6 +363,7 @@ export async function run(): Promise<void> {
 
   const shutdown = (sig: string) => {
     log.info(`\n${sig} received, shutting down...`);
+    if (a2aSyncTimer) clearInterval(a2aSyncTimer);
     a2aDiscovery?.stop();
     a2aServer?.stop();
     httpServer.stop();

@@ -1,4 +1,11 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  writeFileSync,
+} from 'node:fs';
 import { dirname } from 'node:path';
 
 export const NETWORK_SCHEMA_VERSION = 1;
@@ -155,6 +162,33 @@ export class NetworkStore {
     }
     if (chain.length >= maxDepth) {
       throw new Error(`Delegation depth limit exceeded (${maxDepth})`);
+    }
+  }
+}
+
+export interface AuditEntry {
+  event: string;
+  peer?: string;
+  taskId?: string;
+  detail?: string;
+  [key: string]: unknown;
+}
+
+/**
+ * Append-only audit trail for network events: joins, approvals,
+ * delegations, revocations. Separate from network.json — that file is
+ * current state, this log is history.
+ */
+export class AuditLog {
+  constructor(private filePath: string) {}
+
+  write(entry: AuditEntry): void {
+    try {
+      mkdirSync(dirname(this.filePath), { recursive: true });
+      const line = JSON.stringify({ ts: new Date().toISOString(), ...entry });
+      appendFileSync(this.filePath, `${line}\n`);
+    } catch {
+      // Audit must never break the bridge.
     }
   }
 }

@@ -1,5 +1,5 @@
 import { log } from './logger.js';
-import type { NetworkStore, PeerStatus } from './network.js';
+import type { AuditLog, NetworkStore, PeerStatus } from './network.js';
 
 export type NotifyFn = (text: string) => Promise<void>;
 export type ReplyFn = (chatId: number | string, text: string) => Promise<void>;
@@ -19,6 +19,8 @@ export interface A2aManagerOptions {
   selfCardUrl?: string;
   /** This agent's own Agent Card, sent to peers during join. */
   selfCard?: Record<string, unknown>;
+  /** Optional audit trail for membership events. */
+  audit?: AuditLog;
   /** Called whenever an approval changes (peer approved or us confirmed). */
   onMembershipChanged?: () => Promise<void>;
 }
@@ -44,6 +46,7 @@ export class A2aManager {
   private notify: NotifyFn;
   private selfCardUrl?: string;
   private selfCard?: Record<string, unknown>;
+  private audit?: AuditLog;
   onMembershipChanged?: () => Promise<void>;
 
   constructor(opts: A2aManagerOptions) {
@@ -52,6 +55,7 @@ export class A2aManager {
     this.notify = opts.notify;
     this.selfCardUrl = opts.selfCardUrl;
     this.selfCard = opts.selfCard;
+    this.audit = opts.audit;
     if (opts.onMembershipChanged) this.onMembershipChanged = opts.onMembershipChanged;
   }
 
@@ -73,6 +77,7 @@ export class A2aManager {
       });
     }
     this.network.save();
+    this.audit?.write({ event: 'join_request', peer: req.id, detail: req.cardUrl });
 
     const skills = Array.isArray(req.card?.skills)
       ? (req.card.skills as Array<{ id: string }>).map((s) => s.id).join(', ')
@@ -94,6 +99,7 @@ export class A2aManager {
     const peer = this.network.getPeer(id);
     if (!peer) throw new Error(`Unknown peer: ${id}`);
     const base = new URL(peer.cardUrl).origin;
+    this.audit?.write({ event: 'join_sent', peer: id, detail: peer.cardUrl });
     const res = await fetch(`${base}/a2a/join`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -111,6 +117,7 @@ export class A2aManager {
     if (peer && peer.status === 'pending') {
       this.network.setStatus(peerId, 'approved');
       this.network.save();
+      this.audit?.write({ event: 'peer_confirmed', peer: peerId });
       await this.notify(`✅ ${peerId} approved our join request — peer is now trusted.`);
       await this.onMembershipChanged?.();
     }
@@ -131,6 +138,8 @@ export class A2aManager {
     }
     if (fresh.length === 0) return;
     this.network.save();
+    for (const p of fresh)
+      this.audit?.write({ event: 'peer_discovered', peer: p.id, detail: p.cardUrl });
     await this.notify(
       `🔎 Discovered ${fresh.length} agent(s) on the network:\n` +
         fresh.map((p) => `  • ${p.id} (${p.cardUrl})`).join('\n') +
@@ -150,6 +159,37 @@ export class A2aManager {
         pending.map((p) => `  • ${p.id}`).join('\n') +
         '\n\n/a2a approve|reject|ignore <id>'
     );
+  }
+
+  /**
+   * Fetches a peer's real Agent Card (well-known URI) into its record and
+   * updates lastSeen. Failures are silent — a down peer is not an error.
+   */
+  async refreshPeerCard(id: string): Promise<void> {
+    const peer = this.network.getPeer(id);
+    if (!peer?.cardUrl) return;
+    try {
+      const res = await fetch(peer.cardUrl);
+      if (res.ok) {
+        peer.card = (await res.json()) as Record<string, unknown>;
+        peer.lastSeen = new Date().toISOString();
+        this.network.save();
+      }
+    } catch {
+      // peer offline — leave record untouched
+    }
+  }
+
+  /**
+   * Announces this agent to a curated registry (discovery-only role).
+   */
+  async announceToRegistry(registryUrl: string): Promise<void> {
+    const base = registryUrl.replace(/\/$/, '');
+    await fetch(`${base}/a2a/registry/announce`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: this.selfId, cardUrl: this.selfCardUrl, card: this.selfCard }),
+    });
   }
 
   /** Handles the /a2a command family. Returns false for other commands. */
@@ -229,6 +269,7 @@ export class A2aManager {
     try {
       this.network.setStatus(id, target);
       this.network.save();
+      this.audit?.write({ event: `peer_${target}`, peer: id });
       await this.reply(chatId, `${STATUS_ICON[target]} ${id} → ${target}`);
       // Double opt-in completion: tell the requester we approved them.
       if (action === 'approve') {

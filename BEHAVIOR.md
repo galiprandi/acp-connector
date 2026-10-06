@@ -536,6 +536,10 @@
 ## Module: corrupt state file
 - recovers by backing up the corrupt file and starting fresh
 
+## Module: upsert safety
+- never downgrades an approved peer to pending on rediscovery
+- preserves joinedAt when an approved peer is rediscovered
+
 ## Module: RoutineManager edge cases
 - /cron add with 4-token schedule fails (needs 5)
 - /cron add with multi-word prompt works

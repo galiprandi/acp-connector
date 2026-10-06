@@ -539,6 +539,11 @@ Same owner does **not** imply auto-approval. Pending requests persist in
   on every operator entry point (Telegram, Discord, `/prompt`, cron, routines)
 - Task-id dedup prevents retries re-executing side effects; delegation-chain
   metadata + a depth limit prevent A→B→A loops
+- Approved peers' cards are refreshed periodically from their well-known URI —
+  new skills propagate automatically; if a registry is configured, the instance
+  announces itself on the same interval
+- Every membership and task event is appended to `.acp-connector/audit.log`
+  (JSONL) — who delegated what, approvals, rejections, discoveries
 
 ### Registry role
 
