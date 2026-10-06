@@ -163,3 +163,12 @@ describe('delegation chain', () => {
     expect(() => store.checkDelegationChain(['lean'], 'donna')).not.toThrow();
   });
 });
+
+describe('corrupt state file', () => {
+  it('recovers by backing up the corrupt file and starting fresh', () => {
+    writeFileSync(path, '{broken json!!!');
+    const s = new NetworkStore(path);
+    expect(s.listPeers()).toEqual([]);
+    expect(existsSync(`${path}.corrupt`)).toBe(true);
+  });
+});

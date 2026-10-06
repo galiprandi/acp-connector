@@ -13,6 +13,15 @@
 - /a2a revoke revokes an approved peer
 - returns false for non-/a2a commands
 
+## Module: join/confirm handshake
+- handleConfirm approves a pending peer and notifies
+- handleConfirm ignores non-pending peers
+- joinPeer POSTs our card to the peer origin
+
+## Module: startup reminders and discovery
+- notifyDiscovered only announces peers not already known
+- remindPending notifies about pending requests only when they exist
+
 ## Module: A2aServer
 - deduplicates repeated task ids
 - enqueues prompts from approved peers and returns an agent message
@@ -33,6 +42,12 @@
 - GET /a2a/peers lists approved peers with their skills
 - POST /a2a/delegate forwards a task to an approved peer via message/send
 - POST /a2a/delegate rejects unknown or unapproved peers
+
+## Module: edge cases
+- delegate rejects peers without cardUrl
+- delegate returns 502 when the peer errors
+- handles messages with no text parts
+- returns parse error for malformed JSON-RPC bodies
 
 ## Module: AcpClient edge cases
 - default permission handling with no options array returns cancelled
@@ -97,6 +112,9 @@
 ## Module: AcpClient._sessionParams
 - injects extra MCP servers into session params
 - keeps mcpServers empty when none are provided
+
+## Module: _sessionParams with session config file
+- merges extra MCP servers with user-configured ones
 
 ## Module: buildAgentCard
 - includes declared security schemes
@@ -228,6 +246,9 @@
 - /queue lists pending prompts
 - /queue on empty queue reports empty
 - /status reports agent state, session, queue and uptime
+
+## Module: command source isolation
+- runs commands for http-injected prompts but never for a2a content
 
 ## Module: bridge
 - exits with error when ACP fails to start
@@ -431,6 +452,14 @@
 - defaults to info level (log + warn + error, no debug)
 - error level only prints errors
 - unknown level falls back to info
+
+## Module: LoopbackBot
+- auto-approves the first allow* permission option
+- cancels when no allow option exists
+- processes a prompt and resolves onComplete with the response
+- resolves onComplete with the error when the agent fails
+- runs commands for operator sources (http/cron/routine) but never for a2a content
+- serializes prompts — second waits for the first
 
 ## Module: MediaHandler
 - adds caption as text block

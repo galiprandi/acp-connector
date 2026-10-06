@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 
 export const NETWORK_SCHEMA_VERSION = 1;
@@ -45,7 +45,23 @@ export class NetworkStore {
 
   constructor(private filePath: string) {
     if (existsSync(filePath)) {
-      const parsed = JSON.parse(readFileSync(filePath, 'utf8')) as NetworkState;
+      let raw: string;
+      let parsed: NetworkState;
+      try {
+        raw = readFileSync(filePath, 'utf8');
+        parsed = JSON.parse(raw) as NetworkState;
+      } catch {
+        // Corrupt runtime state must not kill the bridge: back it up and
+        // start fresh — peers can be re-approved, a dead bridge cannot.
+        renameSync(filePath, `${filePath}.corrupt`);
+        this.state = {
+          schemaVersion: NETWORK_SCHEMA_VERSION,
+          role: 'peer',
+          peers: [],
+          seenTaskIds: [],
+        };
+        return;
+      }
       if (parsed.schemaVersion !== NETWORK_SCHEMA_VERSION) {
         throw new Error(
           `Unsupported network.json schemaVersion ${parsed.schemaVersion} (expected ${NETWORK_SCHEMA_VERSION})`
