@@ -48,6 +48,11 @@
 - notifyDiscovered only announces peers not already known
 - remindPending notifies about pending requests only when they exist
 
+## Module: peer card refresh and registry announce
+- announceToRegistry POSTs self card to the registry
+- refreshPeerCard fetches the well-known card into the peer record
+- refreshPeerCard leaves the card untouched on fetch failure
+
 ## Module: A2aServer
 - deduplicates repeated task ids
 - enqueues prompts from approved peers and returns an agent message
@@ -539,6 +544,9 @@
 ## Module: upsert safety
 - never downgrades an approved peer to pending on rediscovery
 - preserves joinedAt when an approved peer is rediscovered
+
+## Module: audit log
+- appends JSONL entries to audit.log next to network.json
 
 ## Module: RoutineManager edge cases
 - /cron add with 4-token schedule fails (needs 5)

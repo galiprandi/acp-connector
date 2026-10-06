@@ -146,7 +146,11 @@ This ensures features degrade gracefully when an agent doesn't support them. Non
 2. Real-agent smoke test: run `AcpClient` (via tsx script) against `devin acp`, `opencode acp`, `pi acp`, and `antigravity` when available — verify session/new, prompt, and any feature touched (e.g. configOptions, restart, exit handling)
 3. Only then bump version, tag, and release
 
-Available local ACP agents for validation: `devin acp`, `opencode acp`, `pi acp`, `antigravity` (if installed).
+Available local ACP agents for validation: `devin acp`, `opencode acp`,
+`npx pi-acp` (pi needs the adapter — plain `pi acp` doesn't exist in pi ≥1.0),
+`npx agy-acp` (antigravity has no native ACP mode in agy 1.3.x — the adapter
+wraps the binary). Verified with live A2A delegation: devin orchestrating
+opencode, pi-acp and agy-acp peers.
 
 ### Procedure
 

@@ -342,7 +342,12 @@ Any agent that implements the [Agent Client Protocol](https://agentclientprotoco
 | [Codex](https://openai.com/codex) | `codex acp` |
 | [Gemini CLI](https://github.com/google-gemini/gemini-cli) | `gemini acp` |
 | [OpenCode](https://github.com/sst/opencode) | `opencode acp` |
+| [pi](https://github.com/badlogic/pi) | `npx pi-acp` (via [pi-acp](https://github.com/svkozak/pi-acp) adapter) |
+| [Antigravity](https://antigravity.google) | `npx agy-acp` (via `agy-acp` adapter) |
 | Any ACP agent | `<your-agent> acp` |
+
+Verified end-to-end with A2A delegation: `devin acp` orchestrating `opencode acp`,
+`pi-acp` and `agy-acp` peers.
 
 ***
 
