@@ -52,6 +52,8 @@ interface AcpClientOptions {
   sessionId?: string;
   /** Initial session mode to set after session creation/load. */
   sessionMode?: string;
+  /** Extra MCP servers to attach to every session (merged into session params). */
+  mcpServers?: unknown[];
   /** Permission request callback. */
   onPermission?: PermissionCallback;
   /** Called when the agent process exits unexpectedly (not via kill()). */
@@ -81,6 +83,7 @@ export class AcpClient {
   agentCmd: string;
   agentCwd: string;
   sessionConfigPath: string | null;
+  extraMcpServers: unknown[];
   resumeSessionId: string | null;
   initialSessionMode: string | null;
   onPermission: PermissionCallback | null;
@@ -112,12 +115,14 @@ export class AcpClient {
     sessionConfigPath,
     sessionId,
     sessionMode,
+    mcpServers,
     onPermission,
     onExit,
   }: AcpClientOptions) {
     this.agentCmd = agentCmd;
     this.agentCwd = agentCwd || process.cwd();
     this.sessionConfigPath = sessionConfigPath || null;
+    this.extraMcpServers = mcpServers || [];
     this.resumeSessionId = sessionId || null;
     this.initialSessionMode = sessionMode || null;
     this.onPermission = onPermission || null;
@@ -151,6 +156,22 @@ export class AcpClient {
       log.error(`Failed to read session config from ${this.sessionConfigPath}: ${message}`);
       return null;
     }
+  }
+
+  /**
+   * Session params for session/new|load|resume: user session config plus
+   * any extra MCP servers injected by the bridge (e.g. the A2A network).
+   */
+  _sessionParams(fallback: Record<string, unknown>): Record<string, unknown> {
+    const config = this._loadSessionConfig();
+    const params: Record<string, unknown> = config
+      ? { ...config, ...fallback }
+      : { cwd: this.agentCwd, ...fallback };
+    if (this.extraMcpServers.length > 0) {
+      const existing = Array.isArray(params.mcpServers) ? params.mcpServers : [];
+      params.mcpServers = [...existing, ...this.extraMcpServers];
+    }
+    return params;
   }
 
   async start(): Promise<void> {
@@ -195,9 +216,6 @@ export class AcpClient {
       this._sessionResolve = resolve;
       this._sessionReject = reject;
     });
-
-    const sessionConfig = this._loadSessionConfig();
-
     acp
       .client({ name: 'acp-connector', version: pkg.version } as acp.AppOptions)
       .onRequest(acp.methods.client.session.requestPermission, (ctx) =>
@@ -216,16 +234,9 @@ export class AcpClient {
 
         let session: ActiveSession;
         if (this.resumeSessionId) {
-          const loadParams: ResumeSessionRequest | LoadSessionRequest = sessionConfig
-            ? ({
-                sessionId: this.resumeSessionId,
-                ...(sessionConfig as Partial<ResumeSessionRequest>),
-              } as ResumeSessionRequest)
-            : {
-                sessionId: this.resumeSessionId,
-                cwd: this.agentCwd,
-                mcpServers: [],
-              };
+          const loadParams = this._sessionParams({
+            sessionId: this.resumeSessionId,
+          }) as ResumeSessionRequest | LoadSessionRequest;
 
           const caps: AgentCapabilities = initResult.agentCapabilities || {};
           const canResume = caps.sessionCapabilities?.resume !== undefined;
@@ -253,9 +264,7 @@ export class AcpClient {
             throw new Error('Agent does not support session/resume or session/load');
           }
         } else {
-          const builder = sessionConfig
-            ? ctx.buildSession(sessionConfig as NewSessionRequest)
-            : ctx.buildSession(this.agentCwd);
+          const builder = ctx.buildSession(this._sessionParams({}) as NewSessionRequest);
           session = await builder.start();
         }
         this.session = session;
@@ -352,10 +361,7 @@ export class AcpClient {
     if (!this._ctx) throw new Error('ACP context not available');
     await this.closeSession();
     if (this.session) this.session.dispose();
-    const sessionConfig = this._loadSessionConfig();
-    const builder = sessionConfig
-      ? this._ctx.buildSession(sessionConfig as NewSessionRequest)
-      : this._ctx.buildSession(this.agentCwd);
+    const builder = this._ctx.buildSession(this._sessionParams({}) as NewSessionRequest);
     const session = await builder.start();
     this.session = session;
     this.sessionId = session.sessionId;
@@ -405,10 +411,9 @@ export class AcpClient {
 
     if (this.session) this.session.dispose();
 
-    const sessionConfig = this._loadSessionConfig();
-    const loadParams: ResumeSessionRequest | LoadSessionRequest = sessionConfig
-      ? ({ sessionId, ...(sessionConfig as Partial<ResumeSessionRequest>) } as ResumeSessionRequest)
-      : { sessionId, cwd: this.agentCwd, mcpServers: [] };
+    const loadParams = this._sessionParams({ sessionId }) as
+      | ResumeSessionRequest
+      | LoadSessionRequest;
 
     let response: Partial<NewSessionResponse>;
     if (canResume) {

@@ -657,3 +657,26 @@ describe('AcpClient', () => {
     );
   });
 });
+
+describe('AcpClient._sessionParams', () => {
+  it('injects extra MCP servers into session params', () => {
+    const client = new AcpClient({
+      agentCmd: 'acp-agent serve',
+      mcpServers: [{ name: 'a2a-network', command: 'node', args: ['x.js'], env: [] }],
+    });
+    const params = client._sessionParams({ sessionId: 's1' }) as {
+      mcpServers: unknown[];
+      cwd: string;
+    };
+    expect(params.mcpServers).toHaveLength(1);
+    expect((params.mcpServers[0] as { name: string }).name).toBe('a2a-network');
+    expect(params.cwd).toBeDefined();
+    expect(params.sessionId).toBe('s1');
+  });
+
+  it('keeps mcpServers empty when none are provided', () => {
+    const client = new AcpClient({ agentCmd: 'acp-agent serve' });
+    const params = client._sessionParams({}) as { mcpServers?: unknown[] };
+    expect(params.mcpServers).toBeUndefined();
+  });
+});

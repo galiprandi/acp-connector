@@ -4,3 +4,4 @@ acp-connector.jsonc
 coverage/
 dist/
 .context/
+.acp-connector/

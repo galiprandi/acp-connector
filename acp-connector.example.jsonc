@@ -91,5 +91,28 @@
   // Media handling (optional)
   // "media": {
   //   "uploadsDir": "/tmp/acp-connector-uploads"  // where received files are saved (default shown)
+  // },
+
+  // A2A agent network (optional, default off)
+  // Lets this bridge interoperate with other acp-connector agents via the
+  // A2A protocol: serves an Agent Card at /.well-known/agent-card.json and
+  // accepts tasks from approved peers only (double opt-in via /a2a commands).
+  // "a2a": {
+  //   "enabled": true,
+  //   "id": "donna",                 // stable peer id (default: card name lowercased)
+  //   "host": "127.0.0.1",           // use "0.0.0.0" for LAN/container exposure
+  //   "port": 7741,
+  //   "card": {                      // served at /.well-known/agent-card.json
+  //     "name": "Donna",
+  //     "description": "Personal assistant for German",
+  //     "skills": [
+  //       { "id": "wa.send", "name": "Send WhatsApp",
+  //         "description": "Send a WhatsApp message on behalf of the owner" }
+  //     ],
+  //     "policies": { "requiresApproval": ["wa.send"] }
+  //   },
+  //   "registry": "http://host:7741",   // optional: curated registry URL
+  //   "trustedPeers": ["lean"],          // optional: statically approved peer ids
+  //   "registryMode": false              // act as a discovery-only registry
   // }
 }

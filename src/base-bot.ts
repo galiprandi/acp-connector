@@ -479,7 +479,7 @@ export abstract class BaseBot implements PlatformBot {
     chatId?: number | string,
     blocks?: ContentBlock[],
     onComplete?: (response: string, error?: string) => void,
-    source?: 'cron' | 'http' | 'routine'
+    source?: 'cron' | 'http' | 'routine' | 'a2a'
   ): Promise<void> {
     if (!chatId) return;
     if (await this._handleBuiltinCommand(text, chatId)) return;

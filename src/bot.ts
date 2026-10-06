@@ -16,7 +16,7 @@ export interface PlatformBot {
     chatId?: number | string,
     blocks?: ContentBlock[],
     onComplete?: (response: string, error?: string) => void,
-    source?: 'cron' | 'http' | 'routine'
+    source?: 'cron' | 'http' | 'routine' | 'a2a'
   ): Promise<void>;
   sendMessage(chatId: number | string, text: string): Promise<void>;
   notifyAgentExit(code: number | null): Promise<void>;

@@ -1,12 +1,19 @@
+import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { A2aServer } from './a2a.js';
+import { A2aManager } from './a2a-manager.js';
 import { AcpClient } from './acp-client.js';
+import { buildAgentCard } from './agent-card.js';
 import type { PlatformBot } from './bot.js';
 import { BridgeBot } from './bot.js';
 import { type BridgeConfig, loadConfig } from './config.js';
 import { CronManager } from './cron.js';
 import { DiscordBot } from './discord.js';
+import { DiscoveryService } from './discovery.js';
 import { HttpServer } from './http.js';
 import { log, setLogLevel } from './logger.js';
 import { MediaHandler } from './media.js';
+import { NetworkStore } from './network.js';
 import { RoutineManager } from './routines.js';
 
 function printBanner(): void {
@@ -37,12 +44,33 @@ export async function run(): Promise<void> {
 
   printBanner();
 
+  // A2A network MCP server: gives the agent list_remote_agents /
+  // send_message tools (the reference A2A host-agent pattern). Agents
+  // without MCP support simply never see these tools.
+  const a2aMcpServers: unknown[] = [];
+  if (config.a2a?.enabled) {
+    const isTs = import.meta.url.endsWith('.ts');
+    const mcpScript = fileURLToPath(new URL(`./a2a-mcp.${isTs ? 'ts' : 'js'}`, import.meta.url));
+    a2aMcpServers.push({
+      name: 'a2a-network',
+      command: isTs ? 'npx' : process.execPath,
+      args: isTs ? ['tsx', mcpScript] : [mcpScript],
+      env: [
+        {
+          name: 'A2A_BASE_URL',
+          value: `http://127.0.0.1:${config.a2a.port ?? 7741}`,
+        },
+      ],
+    });
+  }
+
   const acp = new AcpClient({
     agentCmd: config.agentCmd,
     agentCwd: config.agentCwd,
     sessionConfigPath: config.sessionConfigPath,
     sessionId: config.sessionId,
     sessionMode: config.sessionMode,
+    mcpServers: a2aMcpServers,
   });
 
   const tg = config.platforms?.telegram;
@@ -120,9 +148,54 @@ export async function run(): Promise<void> {
     },
   });
 
-  // Wire bridge commands to all bots
+  // A2A manager: pairing + /a2a commands (created early for command wiring)
+  let a2aManager: A2aManager | null = null;
+  let a2aNetwork: NetworkStore | null = null;
+  if (config.a2a?.enabled) {
+    a2aNetwork = new NetworkStore(
+      resolve(config.agentCwd ?? process.cwd(), '.acp-connector', 'network.json')
+    );
+    const ownerChatIds: Array<number | string> = [
+      ...(tg?.allowedChatIds ?? []),
+      ...(dc?.allowedChannelIds ?? []),
+    ];
+    const a2aHost = config.a2a.host ?? '127.0.0.1';
+    const a2aPort = config.a2a.port ?? 7741;
+    const selfCardUrl = `http://${a2aHost}:${a2aPort}/.well-known/agent-card.json`;
+    let selfCard: Record<string, unknown> | undefined;
+    try {
+      selfCard = buildAgentCard(config.a2a, `http://${a2aHost}:${a2aPort}`);
+    } catch (err) {
+      log.warn(`A2A card not configured: ${(err as Error).message}`);
+    }
+    a2aManager = new A2aManager({
+      network: a2aNetwork,
+      selfId: config.a2a.id ?? config.a2a.card?.name?.toLowerCase() ?? 'agent',
+      selfCardUrl,
+      selfCard,
+      notify: async (text) => {
+        for (const bot of bots) {
+          for (const chatId of ownerChatIds) {
+            await bot.sendMessage(chatId, text);
+          }
+        }
+      },
+    });
+    a2aManager.reply = async (chatId, text) => {
+      for (const bot of bots) {
+        await bot.sendMessage(chatId, text).catch(() => {});
+      }
+    };
+  }
+
+  // Wire bridge commands to all bots (routines first, then /a2a)
   for (const bot of bots) {
-    bot.setCommandHandler((text, chatId) => routineManager.handleCommand(text, chatId as number));
+    bot.setCommandHandler((text, chatId) =>
+      routineManager.handleCommand(text, chatId as number).then(async (handled) => {
+        if (handled) return true;
+        return a2aManager ? a2aManager.handleCommand(text, chatId) : false;
+      })
+    );
   }
 
   const httpServer = new HttpServer({
@@ -196,6 +269,46 @@ export async function run(): Promise<void> {
   cronManager.start();
   await httpServer.start();
 
+  // A2A network layer: agent card + JSON-RPC endpoint for peer agents
+  let a2aServer: A2aServer | null = null;
+  let a2aDiscovery: DiscoveryService | null = null;
+  if (config.a2a?.enabled && a2aNetwork && a2aManager) {
+    const selfId = config.a2a.id ?? config.a2a.card?.name?.toLowerCase() ?? 'agent';
+    for (const peerId of config.a2a.trustedPeers ?? []) {
+      if (!a2aNetwork.getPeer(peerId)) {
+        a2aNetwork.upsertPeer({ id: peerId, cardUrl: '', status: 'approved', source: 'declared' });
+      }
+    }
+    if (config.a2a.registryMode) a2aNetwork.role = 'registry';
+    a2aNetwork.save();
+
+    a2aServer = new A2aServer({
+      config: config.a2a,
+      network: a2aNetwork,
+      selfId,
+      enqueue: (text, chatId, blocks, onComplete) => {
+        const target = primaryBot ?? bots[0];
+        target?.enqueuePrompt(text, chatId, blocks, onComplete, 'a2a');
+      },
+      onJoin: (req) => a2aManager.handleJoinRequest(req),
+      onConfirm: (peerId) => a2aManager.handleConfirm(peerId),
+    });
+    await a2aServer.start();
+
+    // Peer discovery: shared-file + mDNS + static. New peers are
+    // announced to the owner; membership still requires /a2a join.
+    a2aDiscovery = new DiscoveryService({
+      config: config.a2a,
+      network: a2aNetwork,
+      selfId,
+      selfCardUrl: a2aServer.cardUrl(),
+    });
+    await a2aDiscovery.start();
+    const found = await a2aDiscovery.discover();
+    await a2aManager.notifyDiscovered(found.map((p) => ({ id: p.id, cardUrl: p.cardUrl })));
+    await a2aManager.remindPending();
+  }
+
   const mode = acp.modes?.currentModeId || 'default';
   log.info('');
   log.info(`  🆔  Session:  ${acp.sessionId}${config.sessionId ? ' (restored)' : ''}`);
@@ -222,6 +335,8 @@ export async function run(): Promise<void> {
 
   const shutdown = (sig: string) => {
     log.info(`\n${sig} received, shutting down...`);
+    a2aDiscovery?.stop();
+    a2aServer?.stop();
     httpServer.stop();
     cronManager.stop();
     for (const bot of bots) {

@@ -31,6 +31,42 @@ export interface MediaConfig {
   uploadsDir?: string;
 }
 
+export interface A2aSkill {
+  id: string;
+  name?: string;
+  description: string;
+  tags?: string[];
+  examples?: string[];
+}
+
+export interface A2aCardConfig {
+  name: string;
+  description: string;
+  version?: string;
+  provider?: { organization?: string; url?: string };
+  skills?: A2aSkill[];
+  policies?: { requiresApproval?: string[] };
+  securitySchemes?: Record<string, unknown>;
+}
+
+export interface A2aConfig {
+  enabled?: boolean;
+  /** Port for the A2A JSON-RPC endpoint (default 7741). */
+  port?: number;
+  /** Bind address (default 127.0.0.1). Use 0.0.0.0 for LAN/container exposure. */
+  host?: string;
+  /** Stable agent id used in peer lists and delegation chains (default: card.name lowercased). */
+  id?: string;
+  /** Agent Card fields served at /.well-known/agent-card.json. */
+  card?: A2aCardConfig;
+  /** Explicit registry URL for curated-registry discovery. */
+  registry?: string;
+  /** Declaratively trusted peer ids. */
+  trustedPeers?: string[];
+  /** Act as a network registry (directory only, never sees task content). */
+  registryMode?: boolean;
+}
+
 export interface TelegramPlatformConfig {
   token: string;
   allowedChatIds: number[];
@@ -67,6 +103,7 @@ export interface BridgeConfig {
   routines?: Routine[];
   http?: HttpConfig;
   media?: MediaConfig;
+  a2a?: A2aConfig;
 }
 
 export const defaultConfigPath = resolve(process.cwd(), 'acp-connector.jsonc');

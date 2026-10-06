@@ -473,6 +473,49 @@ The bridge will call `session/load` or `session/resume` (depending on agent capa
 
 ***
 
+## 🤝 A2A agent network (experimental)
+
+Enable `a2a.enabled` to put this bridge on an [A2A](https://a2a-protocol.org/) agent network.
+Everything on the wire is standard A2A — peer discovery and owner approval are local glue
+the spec deliberately leaves open.
+
+**What you get:**
+
+- **Agent Card** served at `/.well-known/agent-card.json` (generated from `a2a.card` in config)
+- **JSON-RPC endpoint** (`message/send`) — inbound tasks become queued prompts on the agent;
+  the reply is returned as the agent message
+- **Peer discovery**: shared instances file (`~/.acp-connector/instances.json`, same host),
+  mDNS broadcast (`_a2a._tcp.local`, LAN), or static `a2a.registry` URL (containers/remote)
+- **Double opt-in trust**: joining requires explicit approval from *both* owners — same owner
+  does not imply auto-approval. Pending requests persist and are re-announced on startup
+- **Mesh, not broker**: agents talk directly; the optional registry role
+  (`a2a.registryMode`) is a discovery-only directory and never sees task content
+- **Agent-facing tools**: when `a2a.enabled`, the bridge registers an MCP server
+  in the ACP session giving the agent `list_remote_agents` and `send_message`
+  tools (the reference A2A host-agent pattern). Agents without MCP support
+  simply don't see them
+- **Safety rails**: task-id dedup, delegation-chain loop prevention, liveness tracking
+
+**Inbound security:** only `approved` peers can send tasks (identified via `X-A2A-Peer-Id`
+for LAN deployments). For exposure beyond a trusted network, declare `securitySchemes` in
+your card and terminate TLS in front — plain HTTP tunnels are not supported.
+
+### `/a2a` commands
+
+| Command | Description |
+|---|---|
+| `/a2a` | Network status: peers by state |
+| `/a2a pending` | Pending join requests |
+| `/a2a peers` | Approved peers |
+| `/a2a join <id>` | Send a join request to a discovered peer |
+| `/a2a approve|reject|ignore|revoke <id>` | Manage membership |
+| `/a2a card` | Show your card endpoint |
+
+Network state lives in `.acp-connector/network.json` (gitignored) — config is intent,
+state is discovered reality.
+
+***
+
 ## 🖥 Self-hosting
 
 ### systemd
