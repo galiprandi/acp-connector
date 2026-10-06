@@ -582,3 +582,9 @@
 - /run with unknown name returns error
 - returns false for non-command text
 - returns false for unknown command
+
+## Module: e2e: two real bridges with fake agents
+- agent-side delegation: fake agent calls /a2a/delegate to a peer
+- delegation to an unapproved peer is refused (403)
+- join → approve → message/send roundtrip
+- unapproved peer is rejected before reaching the agent

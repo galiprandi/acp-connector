@@ -1,5 +1,5 @@
 import { type ChildProcess, spawn } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -25,18 +25,6 @@ interface Spawned {
 const spawned: Spawned[] = [];
 let portCounter = 17800;
 const nextPort = () => ++portCounter;
-
-async function waitForDown(url: string, tries = 40): Promise<boolean> {
-  for (let i = 0; i < tries; i++) {
-    try {
-      await fetch(url);
-    } catch {
-      return true; // connection refused — down
-    }
-    await new Promise((r) => setTimeout(r, 250));
-  }
-  return false;
-}
 
 async function waitFor(url: string, tries = 60): Promise<boolean> {
   for (let i = 0; i < tries; i++) {
