@@ -323,3 +323,78 @@ describe('agent-facing endpoints (loopback)', () => {
     expect(res.status).toBe(403);
   });
 });
+
+describe('edge cases', () => {
+  it('returns parse error for malformed JSON-RPC bodies', async () => {
+    const res = await fetch(`http://127.0.0.1:${port}/`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-A2A-Peer-Id': 'lean' },
+      body: 'not json{',
+    }).then((r) => r.json());
+    expect(res.error.code).toBe(-32700);
+  });
+
+  it('handles messages with no text parts', async () => {
+    network.upsertPeer({
+      id: 'lean',
+      cardUrl: 'http://x',
+      status: 'approved',
+      source: 'discovered',
+    });
+    const enqueue = vi.fn((_t, _c, _b, done) => done?.('ok'));
+    server.enqueue = enqueue;
+    const res = await rpc(
+      'message/send',
+      { message: { role: 'user', messageId: 'm9', parts: [{ kind: 'data', data: { a: 1 } }] } },
+      'lean'
+    );
+    expect(res.result.role).toBe('agent');
+    expect(enqueue).toHaveBeenCalled();
+  });
+
+  it('delegate returns 502 when the peer errors', async () => {
+    const peerDir = mkdtempSync(join(tmpdir(), 'acp-peer-err-'));
+    const peerNetwork = new NetworkStore(join(peerDir, 'network.json'));
+    peerNetwork.upsertPeer({
+      id: 'donna',
+      cardUrl: 'http://x',
+      status: 'pending',
+      source: 'declared',
+    });
+    const peer = new A2aServer({
+      config: { enabled: true, port: 0, card: { name: 'Lean', description: 'x' } },
+      network: peerNetwork,
+      selfId: 'lean',
+      enqueue: (_t, _c, _b, done) => done?.('ok'),
+    });
+    await peer.start();
+    const paddr = peer.address();
+    const pport = typeof paddr === 'object' && paddr ? paddr.port : 0;
+
+    // donna stays pending on the peer side → the peer rejects the task
+    network.upsertPeer({
+      id: 'lean',
+      cardUrl: `http://127.0.0.1:${pport}/card`,
+      status: 'approved',
+      source: 'discovered',
+    });
+    const res = await fetch(`http://127.0.0.1:${port}/a2a/delegate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ to: 'lean', text: 'hi' }),
+    });
+    expect(res.status).toBe(502);
+    await peer.stop();
+    rmSync(peerDir, { recursive: true, force: true });
+  });
+
+  it('delegate rejects peers without cardUrl', async () => {
+    network.upsertPeer({ id: 'lean', cardUrl: '', status: 'approved', source: 'declared' });
+    const res = await fetch(`http://127.0.0.1:${port}/a2a/delegate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ to: 'lean', text: 'hi' }),
+    });
+    expect(res.status).toBe(400);
+  });
+});

@@ -100,3 +100,77 @@ describe('/a2a commands', () => {
     expect(reply.mock.calls[0][1]).toMatch(/unknown|not found/i);
   });
 });
+
+describe('join/confirm handshake', () => {
+  it('handleConfirm approves a pending peer and notifies', async () => {
+    await manager.handleJoinRequest(pendingPeer);
+    await manager.handleConfirm('lean');
+    expect(network.getPeer('lean')?.status).toBe('approved');
+    expect(notify).toHaveBeenCalledTimes(2);
+    expect(notify.mock.calls[1][0]).toContain('approved our join request');
+  });
+
+  it('handleConfirm ignores non-pending peers', async () => {
+    await manager.handleConfirm('ghost');
+    expect(network.getPeer('ghost')).toBeUndefined();
+  });
+
+  it('joinPeer POSTs our card to the peer origin', async () => {
+    const peerDir = mkdtempSync(join(tmpdir(), 'acp-join-'));
+    const fetchSpy = vi.fn(
+      async () => new Response('{"status":"pending-approval"}', { status: 202 })
+    );
+    vi.stubGlobal('fetch', fetchSpy);
+    try {
+      manager = new A2aManager({
+        network,
+        selfId: 'donna',
+        notify,
+        selfCardUrl: 'http://me:1/.well-known/agent-card.json',
+        selfCard: { name: 'Donna' },
+      });
+      network.upsertPeer({
+        id: 'lean',
+        cardUrl: 'http://peer:99/x',
+        status: 'pending',
+        source: 'discovered',
+      });
+      await manager.joinPeer('lean');
+      expect(fetchSpy).toHaveBeenCalledWith(
+        'http://peer:99/a2a/join',
+        expect.objectContaining({ method: 'POST' })
+      );
+      const body = JSON.parse(fetchSpy.mock.calls[0][1]?.body as string);
+      expect(body.id).toBe('donna');
+      expect(body.card.name).toBe('Donna');
+    } finally {
+      vi.unstubAllGlobals();
+      rmSync(peerDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('startup reminders and discovery', () => {
+  it('remindPending notifies about pending requests only when they exist', async () => {
+    await manager.remindPending();
+    expect(notify).not.toHaveBeenCalled();
+    await manager.handleJoinRequest(pendingPeer);
+    notify.mockClear();
+    await manager.remindPending();
+    expect(notify).toHaveBeenCalledOnce();
+    expect(notify.mock.calls[0][0]).toContain('lean');
+  });
+
+  it('notifyDiscovered only announces peers not already known', async () => {
+    network.upsertPeer({ ...pendingPeer, status: 'approved', source: 'discovered' });
+    await manager.notifyDiscovered([
+      { id: 'lean', cardUrl: 'http://x' },
+      { id: 'job', cardUrl: 'http://y' },
+    ]);
+    // lean already known → not re-announced; job is fresh
+    expect(notify.mock.calls[0][0]).toContain('job');
+    expect(notify.mock.calls[0][0]).not.toContain('• lean');
+    expect(network.getPeer('job')?.status).toBe('pending');
+    expect(network.getPeer('lean')?.status).toBe('approved');
+  });
+});

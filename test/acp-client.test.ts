@@ -680,3 +680,32 @@ describe('AcpClient._sessionParams', () => {
     expect(params.mcpServers).toBeUndefined();
   });
 });
+
+describe('_sessionParams with session config file', () => {
+  it('merges extra MCP servers with user-configured ones', async () => {
+    const { writeFileSync, mkdtempSync, rmSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const dir = mkdtempSync(join(tmpdir(), 'acp-cfg-'));
+    const cfgPath = join(dir, 'session.jsonc');
+    writeFileSync(
+      cfgPath,
+      JSON.stringify({
+        cwd: '/work',
+        mcpServers: [{ name: 'user-mcp', command: 'x', args: [], env: [] }],
+      })
+    );
+    try {
+      const client = new AcpClient({
+        agentCmd: 'acp-agent serve',
+        sessionConfigPath: cfgPath,
+        mcpServers: [{ name: 'a2a-network', command: 'node', args: ['m.js'], env: [] }],
+      });
+      const params = client._sessionParams({}) as { mcpServers: { name: string }[]; cwd: string };
+      expect(params.cwd).toBe('/work');
+      expect(params.mcpServers.map((m) => m.name)).toEqual(['user-mcp', 'a2a-network']);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
