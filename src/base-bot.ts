@@ -482,8 +482,12 @@ export abstract class BaseBot implements PlatformBot {
     source?: 'cron' | 'http' | 'routine' | 'a2a'
   ): Promise<void> {
     if (!chatId) return;
-    if (await this._handleBuiltinCommand(text, chatId)) return;
-    if (text.startsWith('/') && this.onCommand) {
+    // Commands are processed for user messages and first-class entry
+    // points (http, cron, routine) — but never for A2A-injected prompts:
+    // remote content is agent input, not bridge administration.
+    const isRemoteContent = source === 'a2a';
+    if (!isRemoteContent && (await this._handleBuiltinCommand(text, chatId))) return;
+    if (!isRemoteContent && text.startsWith('/') && this.onCommand) {
       const handled = await this.onCommand(text, chatId);
       if (handled) return;
     }

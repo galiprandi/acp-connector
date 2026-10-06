@@ -173,11 +173,17 @@ function validateConfig(config: unknown): asserts config is BridgeConfig {
     }
   }
 
-  // Must have either platforms.telegram or legacy telegramToken
+  // Must have either a messaging platform or a headless channel
+  // (HTTP API or A2A network) — otherwise the bridge has no inputs.
   const hasPlatforms = obj.platforms && typeof obj.platforms === 'object';
   const hasLegacy = typeof obj.telegramToken === 'string';
-  if (!hasPlatforms && !hasLegacy) {
-    throw new Error('config must have either platforms.telegram.token or telegramToken');
+  const hasHeadless =
+    (obj.http as Record<string, unknown> | undefined)?.enabled === true ||
+    (obj.a2a as Record<string, unknown> | undefined)?.enabled === true;
+  if (!hasPlatforms && !hasLegacy && !hasHeadless) {
+    throw new Error(
+      'config must have either platforms.telegram.token, telegramToken, http.enabled, or a2a.enabled'
+    );
   }
 }
 

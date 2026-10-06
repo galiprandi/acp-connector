@@ -29,6 +29,11 @@
 - returns 404 for registry endpoints when role is peer
 - updates cardUrl, card and lastSeen on announce from an approved peer
 
+## Module: agent-facing endpoints (loopback)
+- GET /a2a/peers lists approved peers with their skills
+- POST /a2a/delegate forwards a task to an approved peer via message/send
+- POST /a2a/delegate rejects unknown or unapproved peers
+
 ## Module: AcpClient edge cases
 - default permission handling with no options array returns cancelled
 - default permission handling with options but no allow option returns cancelled
@@ -88,6 +93,10 @@
 - sets initial session mode after start when sessionMode provided
 - stores agentCapabilities from init response
 - throws when no load/resume capability and sessionId provided
+
+## Module: AcpClient._sessionParams
+- injects extra MCP servers into session params
+- keeps mcpServers empty when none are provided
 
 ## Module: buildAgentCard
 - includes declared security schemes

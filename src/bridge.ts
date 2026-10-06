@@ -12,6 +12,7 @@ import { DiscordBot } from './discord.js';
 import { DiscoveryService } from './discovery.js';
 import { HttpServer } from './http.js';
 import { log, setLogLevel } from './logger.js';
+import { LoopbackBot } from './loopback.js';
 import { MediaHandler } from './media.js';
 import { NetworkStore } from './network.js';
 import { RoutineManager } from './routines.js';
@@ -76,7 +77,8 @@ export async function run(): Promise<void> {
   const tg = config.platforms?.telegram;
   const dc = config.platforms?.discord;
 
-  if (!tg && !dc) {
+  const headless = !tg && !dc;
+  if (headless && !config.http?.enabled && !config.a2a?.enabled) {
     log.error('No platform configured. Run: npx acp-connector setup');
     process.exit(1);
   }
@@ -115,6 +117,13 @@ export async function run(): Promise<void> {
     });
     bots.push(bot);
     if (!primaryBot) primaryBot = bot;
+  }
+
+  // Headless mode: HTTP /prompt and A2A still need a queue processor.
+  if (bots.length === 0) {
+    const loopback = new LoopbackBot(acp);
+    bots.push(loopback);
+    primaryBot = loopback;
   }
 
   // Use first bot's allowed IDs for cron (legacy: assumes single platform)

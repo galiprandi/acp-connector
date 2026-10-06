@@ -475,44 +475,108 @@ The bridge will call `session/load` or `session/resume` (depending on agent capa
 
 ## 🤝 A2A agent network (experimental)
 
-Enable `a2a.enabled` to put this bridge on an [A2A](https://a2a-protocol.org/) agent network.
-Everything on the wire is standard A2A — peer discovery and owner approval are local glue
-the spec deliberately leaves open.
+Enable `a2a.enabled` to put this bridge on an [A2A](https://a2a-protocol.org/) agent
+network — your agent becomes a first-class peer that can discover other agents and
+delegate tasks to them (and vice versa). Everything on the wire is standard A2A;
+peer discovery and owner approval are local glue the spec deliberately leaves open.
 
-**What you get:**
+### How it works
 
-- **Agent Card** served at `/.well-known/agent-card.json` (generated from `a2a.card` in config)
-- **JSON-RPC endpoint** (`message/send`) — inbound tasks become queued prompts on the agent;
-  the reply is returned as the agent message
-- **Peer discovery**: shared instances file (`~/.acp-connector/instances.json`, same host),
-  mDNS broadcast (`_a2a._tcp.local`, LAN), or static `a2a.registry` URL (containers/remote)
-- **Double opt-in trust**: joining requires explicit approval from *both* owners — same owner
-  does not imply auto-approval. Pending requests persist and are re-announced on startup
-- **Mesh, not broker**: agents talk directly; the optional registry role
-  (`a2a.registryMode`) is a discovery-only directory and never sees task content
-- **Agent-facing tools**: when `a2a.enabled`, the bridge registers an MCP server
-  in the ACP session giving the agent `list_remote_agents` and `send_message`
-  tools (the reference A2A host-agent pattern). Agents without MCP support
-  simply don't see them
-- **Safety rails**: task-id dedup, delegation-chain loop prevention, liveness tracking
+```
+ your agent (any ACP agent)
+   │  tools: list_remote_agents, send_message        ← MCP, injected at session start
+   ▼
+ acp-connector (this bridge)
+   │  /.well-known/agent-card.json                    ← your public card
+   │  JSON-RPC message/send                           ← inbound tasks from peers
+   │  /a2a/join, /a2a/confirm                         ← pairing (deployment glue)
+   ▼
+ remote peers                                        ← direct mesh, no broker
+```
 
-**Inbound security:** only `approved` peers can send tasks (identified via `X-A2A-Peer-Id`
-for LAN deployments). For exposure beyond a trusted network, declare `securitySchemes` in
-your card and terminate TLS in front — plain HTTP tunnels are not supported.
+**Two directions, one config:**
+
+- **Inbound**: approved peers send `message/send` tasks → they enter the agent's
+  prompt queue prefixed with `[A2A from <peer> | task <id>]` → the agent's reply is
+  returned as the A2A response.
+- **Outbound**: the agent sees two MCP tools — `list_remote_agents()` and
+  `send_message(agent_name, message)` — following the reference host-agent pattern
+  from the official A2A samples. Agents without MCP support simply don't see them.
+
+### Peer discovery
+
+Peers are discovered by three strategies, all resolving to an Agent Card URL:
+
+| Strategy | When | How |
+|---|---|---|
+| Shared instances file | Same machine | `~/.acp-connector/instances.json` — auto-registered at boot, deregistered on shutdown |
+| mDNS broadcast | LAN | `_a2a._tcp.local` (requires optional `bonjour-service` dep) |
+| Static config | Containers / remote | `a2a.registry` URL or `a2a.trustedPeers` |
+
+After discovery, the card is always fetched via the standard well-known URI.
+
+### Trust model — double opt-in
+
+Joining the network requires **explicit approval from both owners**:
+
+1. You discover a peer → `/a2a join <id>` → your card is sent to their `/a2a/join`
+2. Their owner gets notified and runs `/a2a approve <you>`
+3. On approval, the peer confirms you back → both sides end up `approved`
+
+Same owner does **not** imply auto-approval. Pending requests persist in
+`.acp-connector/network.json` and are re-announced on startup until resolved
+(approve / reject / ignore / revoke — `ignored` is silent, `rejected` is explicit).
+
+**Inbound security:**
+
+- Only `approved` peers can send tasks — anything else is rejected before any
+  processing (the prompt is never built)
+- Peer identity uses the `X-A2A-Peer-Id` header on trusted LANs; for exposure
+  beyond a LAN declare `securitySchemes` in your card and terminate TLS in
+  front — plain insecure tunnels are not supported
+- **Remote content never triggers bridge commands**: A2A-injected text that
+  starts with `/` is treated as agent input, not as a command. Commands work
+  on every operator entry point (Telegram, Discord, `/prompt`, cron, routines)
+- Task-id dedup prevents retries re-executing side effects; delegation-chain
+  metadata + a depth limit prevent A→B→A loops
+
+### Registry role
+
+`a2a.registryMode: true` turns the instance into a **discovery-only directory**:
+`GET /a2a/registry/agents` lists approved peers' cards (optionally filtered by
+`?skill=<id>`), `POST /a2a/registry/announce` lets peers refresh their card and
+liveness. The registry never sees task content — delegation stays peer-to-peer.
 
 ### `/a2a` commands
 
 | Command | Description |
 |---|---|
-| `/a2a` | Network status: peers by state |
+| `/a2a` | Network status: peers grouped by state |
 | `/a2a pending` | Pending join requests |
 | `/a2a peers` | Approved peers |
 | `/a2a join <id>` | Send a join request to a discovered peer |
-| `/a2a approve|reject|ignore|revoke <id>` | Manage membership |
+| `/a2a approve\|reject\|ignore\|revoke <id>` | Manage membership |
 | `/a2a card` | Show your card endpoint |
 
-Network state lives in `.acp-connector/network.json` (gitignored) — config is intent,
-state is discovered reality.
+### Headless mode
+
+The bridge can run with **no messaging platform at all**: configure only
+`http.enabled` (for `/prompt` input) and/or `a2a.enabled` (for peer tasks).
+A loopback queue processor drives the ACP session and permissions are
+auto-approved (no human in the loop — use only on trusted environments).
+
+```jsonc
+{
+  "agentCmd": "devin acp",
+  "http": { "enabled": true, "port": 7760 },
+  "a2a": { "enabled": true, "id": "my-agent", "card": { "name": "...", "description": "..." } }
+}
+```
+
+### Files
+
+- `.acp-connector/network.json` — runtime network state (gitignored): peers,
+  statuses, last-seen, seen task ids. Config is intent; this file is reality.
 
 ***
 

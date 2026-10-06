@@ -81,6 +81,13 @@ src/
 ├── cron.ts        — scheduled prompt injection
 ├── routines.ts    — named prompts + /cron, /routine, /run commands
 ├── http.ts        — optional HTTP API (/health, /prompt)
+├── a2a.ts         — A2A server: agent card, JSON-RPC message/send, join/confirm, registry
+├── a2a-manager.ts — pairing flow + /a2a commands (bridge-level, never reaches agent)
+├── a2a-mcp.ts     — MCP stdio server: list_remote_agents + send_message tools for the agent
+├── agent-card.ts  — AgentCard builder from a2a.card config
+├── discovery.ts   — peer discovery: shared instances file, mDNS, static registry
+├── network.ts     — .acp-connector/network.json: peers, statuses, task dedup
+├── loopback.ts    — headless PlatformBot (no TG/Discord): drives queue + auto-approves
 ├── config.ts      — JSONC config loader/saver, platforms support
 └── setup.ts       — interactive setup wizard (Telegram + Discord)
 ```
@@ -92,6 +99,15 @@ src/
 3. Agent responses stream back via `session.nextUpdate()`
 4. `bot._handleUpdate()` batches chunks and edits a single Telegram message
 5. Permissions are forwarded as inline buttons (or auto-approved)
+
+### A2A network (optional)
+
+When `a2a.enabled`, the bridge doubles as an A2A peer: serves the agent card,
+accepts `message/send` from approved peers into the prompt queue, and gives the
+agent `list_remote_agents`/`send_message` MCP tools (injected via `session/new`
+`mcpServers` — agents without MCP support don't see them). Invariant: **remote
+A2A content never triggers bridge commands** — only operator entry points
+(Telegram/Discord chats, /prompt, cron, routines) can run `/a2a`.
 
 ### Key principles
 
