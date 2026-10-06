@@ -102,7 +102,10 @@ export class NetworkStore {
   upsertPeer(peer: Peer): void {
     const existing = this.getPeer(peer.id);
     if (existing) {
-      Object.assign(existing, peer, { id: existing.id });
+      // Never downgrade trust via rediscovery: an approved peer stays
+      // approved even if a discovery strategy re-registers it as pending.
+      const status = existing.status === 'approved' ? 'approved' : peer.status;
+      Object.assign(existing, peer, { id: existing.id, status });
     } else {
       this.state.peers.push(peer);
     }

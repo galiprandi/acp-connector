@@ -172,3 +172,21 @@ describe('corrupt state file', () => {
     expect(existsSync(`${path}.corrupt`)).toBe(true);
   });
 });
+
+describe('upsert safety', () => {
+  it('never downgrades an approved peer to pending on rediscovery', () => {
+    store.upsertPeer(makePeer('lean', 'approved'));
+    store.upsertPeer({ ...makePeer('lean'), status: 'pending' });
+    expect(store.getPeer('lean')?.status).toBe('approved');
+  });
+
+  it('preserves joinedAt when an approved peer is rediscovered', () => {
+    store.upsertPeer(makePeer('lean'));
+    store.setStatus('lean', 'approved');
+    const joined = store.getPeer('lean')?.joinedAt;
+    store.upsertPeer({ ...makePeer('lean'), status: 'pending', cardUrl: 'http://new-url' });
+    expect(store.getPeer('lean')?.cardUrl).toBe('http://new-url');
+    expect(store.getPeer('lean')?.status).toBe('approved');
+    expect(store.getPeer('lean')?.joinedAt).toBe(joined);
+  });
+});
