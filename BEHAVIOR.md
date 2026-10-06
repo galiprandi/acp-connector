@@ -27,6 +27,11 @@
 - server disabled: start() is a no-op and nothing listens
 - unknown GET path returns 404
 
+## Module: message/stream (SSE)
+- echoes contextId in the plain message/send response
+- rejects unapproved peers before opening the stream
+- streams task + status events and completes
+
 ## Module: pairing
 - ignores a duplicate join request from an already-approved peer
 - registers a join request as pending and notifies the owner
@@ -587,4 +592,5 @@
 - agent-side delegation: fake agent calls /a2a/delegate to a peer
 - delegation to an unapproved peer is refused (403)
 - join → approve → message/send roundtrip
+- message/stream returns SSE events to an approved peer
 - unapproved peer is rejected before reaching the agent
