@@ -176,3 +176,79 @@ describe('edge: misc', () => {
     expect(off.address()).toBeNull();
   });
 });
+
+describe('message/stream (SSE)', () => {
+  it('streams task + status events and completes', async () => {
+    network.upsertPeer(approved);
+    enqueue = vi.fn((_t, _c, _b, done, onChunk) => {
+      onChunk?.('hello ');
+      onChunk?.('world');
+      done?.('hello world');
+    });
+    server.enqueue = enqueue;
+
+    const res = await post(
+      '/',
+      JSON.stringify({
+        jsonrpc: '2.0',
+        id: 7,
+        method: 'message/stream',
+        params: {
+          message: {
+            role: 'user',
+            messageId: 'st1',
+            contextId: 'conv-9',
+            parts: [{ kind: 'text', text: 'stream me' }],
+            metadata: { 'a2a.taskId': 'st1' },
+          },
+        },
+      }),
+      { 'X-A2A-Peer-Id': 'p' }
+    );
+
+    expect(res.headers.get('content-type')).toBe('text/event-stream');
+    const body = await res.text();
+    const events = body
+      .split('\n\n')
+      .filter((b) => b.trim())
+      .map((block) => {
+        const data = block
+          .split('\n')
+          .find((l) => l.startsWith('data: '))
+          ?.slice(6);
+        return JSON.parse(data ?? '{}');
+      });
+
+    expect(events[0].kind).toBe('task');
+    expect(events[0].status.state).toBe('working');
+    expect(events[0].contextId).toBe('conv-9');
+    const statusEvents = events.filter((e) => e.kind === 'status-update');
+    expect(statusEvents.at(-1)?.status.state).toBe('completed');
+    expect(statusEvents.at(-1)?.final).toBe(true);
+    const text = statusEvents.at(-1)?.status.message.parts[0].text;
+    expect(text).toBe('hello world');
+    expect(enqueue).toHaveBeenCalledOnce();
+  });
+
+  it('rejects unapproved peers before opening the stream', async () => {
+    const res = await post(
+      '/',
+      JSON.stringify({
+        jsonrpc: '2.0',
+        id: 8,
+        method: 'message/stream',
+        params: { message: { role: 'user', messageId: 'x', parts: [{ kind: 'text', text: 'y' }] } },
+      }),
+      { 'X-A2A-Peer-Id': 'stranger' }
+    );
+    expect(res.headers.get('content-type')).toContain('application/json');
+    const body = await res.json();
+    expect(body.error.code).toBe(-32001);
+  });
+
+  it('echoes contextId in the plain message/send response', async () => {
+    network.upsertPeer(approved);
+    const res = await send([{ kind: 'text', text: 'hi' }], undefined, 'p', 'm-ctx');
+    expect(res.result.contextId).toBeDefined();
+  });
+});

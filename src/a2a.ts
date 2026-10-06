@@ -249,7 +249,8 @@ export class A2aServer {
       return;
     }
 
-    if (rpc.method !== 'message/send') {
+    const streaming = rpc.method === 'message/stream';
+    if (rpc.method !== 'message/send' && !streaming) {
       res.writeHead(200);
       res.end(JSON.stringify(rpcError(rpc.id ?? null, -32601, `Method not found: ${rpc.method}`)));
       return;
@@ -292,7 +293,21 @@ export class A2aServer {
       .map((p) => p.text)
       .join('\n');
 
+    // contextId groups related tasks into a conversation (spec); we echo it
+    // back so clients can correlate streams. Semantics stay per-task.
+    const contextId = String(
+      (msg as { contextId?: string } | undefined)?.contextId ??
+        (rpc.params as { contextId?: string } | undefined)?.contextId ??
+        taskId
+    );
     const prefixed = `[A2A from ${peerId}${taskId ? ` | task ${taskId}` : ''}]\n${text}`;
+
+    if (streaming) {
+      await this._handleStream(res, prefixed, taskId || `task-${Date.now()}`, contextId);
+      this.opts.network.save();
+      return;
+    }
+
     const reply = await this._enqueueAndWait(prefixed);
     this.opts.network.save();
 
@@ -304,6 +319,7 @@ export class A2aServer {
         result: {
           role: 'agent',
           messageId: `a2a-${Date.now()}`,
+          contextId,
           parts: [{ kind: 'text', text: reply }],
         },
       })
@@ -366,13 +382,82 @@ export class A2aServer {
     res.end(JSON.stringify({ result: text }));
   }
 
-  private _enqueueAndWait(text: string): Promise<string> {
+  /**
+   * message/stream: SSE stream of A2A events —
+   * Task(working) → TaskStatusUpdateEvent per chunk → completed(final).
+   * Event ids are monotonically increasing within the request so clients
+   * can resume via Last-Event-ID if needed.
+   */
+  private async _handleStream(
+    res: ServerResponse,
+    text: string,
+    taskId: string,
+    contextId: string
+  ): Promise<void> {
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+    });
+    let seq = 0;
+    const send = (event: string, data: unknown) => {
+      res.write(`id: ${++seq}\nevent: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    };
+
+    send('task', {
+      id: taskId,
+      contextId,
+      status: { state: 'working', timestamp: new Date().toISOString() },
+      kind: 'task',
+    });
+
+    const reply = await this._enqueueAndWait(text, (chunk) =>
+      send('status', {
+        taskId,
+        contextId,
+        status: {
+          state: 'working',
+          message: {
+            role: 'agent',
+            messageId: `${taskId}-${seq}`,
+            parts: [{ kind: 'text', text: chunk }],
+          },
+        },
+        final: false,
+        kind: 'status-update',
+      })
+    );
+
+    send('status', {
+      taskId,
+      contextId,
+      status: {
+        state: 'completed',
+        message: {
+          role: 'agent',
+          messageId: `${taskId}-final`,
+          parts: [{ kind: 'text', text: reply }],
+        },
+      },
+      final: true,
+      kind: 'status-update',
+    });
+    res.end();
+  }
+
+  private _enqueueAndWait(text: string, onChunk?: (chunk: string) => void): Promise<string> {
     return new Promise((resolve, reject) => {
       try {
-        this.enqueue(text, undefined, undefined, (response, error) => {
-          if (error) reject(new Error(error));
-          else resolve(response);
-        });
+        this.enqueue(
+          text,
+          undefined,
+          undefined,
+          (response, error) => {
+            if (error) reject(new Error(error));
+            else resolve(response);
+          },
+          onChunk
+        );
       } catch (err) {
         reject(err as Error);
       }

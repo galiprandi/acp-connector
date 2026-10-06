@@ -501,9 +501,11 @@ peer discovery and owner approval are local glue the spec deliberately leaves op
 
 **Two directions, one config:**
 
-- **Inbound**: approved peers send `message/send` tasks → they enter the agent's
-  prompt queue prefixed with `[A2A from <peer> | task <id>]` → the agent's reply is
-  returned as the A2A response.
+- **Inbound**: approved peers send `message/send` (single response) or
+  `message/stream` (SSE: task → status-update events → completed) → tasks enter
+  the agent's prompt queue prefixed with `[A2A from <peer> | task <id>]` → the
+  agent's reply is streamed chunk-by-chunk and completed as the A2A result.
+  `contextId` is echoed back on both paths.
 - **Outbound**: the agent sees two MCP tools — `list_remote_agents()` and
   `send_message(agent_name, message)` — following the reference host-agent pattern
   from the official A2A samples. Agents without MCP support simply don't see them.

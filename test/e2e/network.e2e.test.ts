@@ -187,6 +187,46 @@ describe('e2e: two real bridges with fake agents', () => {
     expect(body.result).toContain('hello beta');
   }, 45000);
 
+  it('message/stream returns SSE events to an approved peer', async () => {
+    const a = await spawnAgent('alpha');
+    const b = await spawnAgent('beta');
+    // approve alpha on beta (one direction is enough for inbound)
+    await fetch(`http://127.0.0.1:${b.a2aPort}/a2a/join`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        id: 'alpha',
+        cardUrl: `http://127.0.0.1:${a.a2aPort}/.well-known/agent-card.json`,
+        card: { name: 'alpha', description: 'alpha agent' },
+      }),
+    });
+    await sendPrompt(b.httpPort, '/a2a approve alpha');
+    await new Promise((r) => setTimeout(r, 800));
+
+    const res = await fetch(`http://127.0.0.1:${b.a2aPort}/`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-A2A-Peer-Id': 'alpha' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'message/stream',
+        params: {
+          message: {
+            role: 'user',
+            messageId: 'stream-e2e',
+            parts: [{ kind: 'text', text: 'stream test' }],
+            metadata: { 'a2a.taskId': 'stream-e2e' },
+          },
+        },
+      }),
+    });
+    expect(res.headers.get('content-type')).toBe('text/event-stream');
+    const body = await res.text();
+    expect(body).toContain('"state":"working"');
+    expect(body).toContain('"state":"completed"');
+    expect(body).toContain('stream test');
+  }, 45000);
+
   it('delegation to an unapproved peer is refused (403)', async () => {
     const a = await spawnAgent('alpha');
     const res = await fetch(`http://127.0.0.1:${a.a2aPort}/a2a/delegate`, {

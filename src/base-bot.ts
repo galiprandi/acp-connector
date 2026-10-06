@@ -29,6 +29,8 @@ export interface QueueItem {
   text: string;
   blocks?: ContentBlock[];
   onComplete?: (response: string, error?: string) => void;
+  /** Optional streaming hook — called per text chunk (used by A2A SSE). */
+  onChunk?: (chunk: string) => void;
   /** Original user message id — used to react/clear a queued indicator. */
   messageId?: string | number;
   /** True if a ⏳ reaction was added to messageId while queued. */
@@ -479,7 +481,8 @@ export abstract class BaseBot implements PlatformBot {
     chatId?: number | string,
     blocks?: ContentBlock[],
     onComplete?: (response: string, error?: string) => void,
-    source?: 'cron' | 'http' | 'routine' | 'a2a'
+    source?: 'cron' | 'http' | 'routine' | 'a2a',
+    onChunk?: (chunk: string) => void
   ): Promise<void> {
     if (!chatId) return;
     // Commands are processed for user messages and first-class entry
@@ -498,7 +501,7 @@ export abstract class BaseBot implements PlatformBot {
       const suffix = text.length > 200 ? '…' : '';
       await this._sendPlain(`${icon} ${label} ${preview}${suffix}`, chatId);
     }
-    this.queue.push({ channelId: chatId, text, blocks, onComplete });
+    this.queue.push({ channelId: chatId, text, blocks, onComplete, onChunk });
     this._processQueue();
   }
 

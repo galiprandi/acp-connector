@@ -8,6 +8,7 @@ interface QueueItem {
   text: string;
   blocks?: ContentBlock[];
   onComplete?: (response: string, error?: string) => void;
+  onChunk?: (chunk: string) => void;
 }
 
 /**
@@ -37,13 +38,14 @@ export class LoopbackBot implements PlatformBot {
     _chatId?: number | string,
     blocks?: ContentBlock[],
     onComplete?: (response: string, error?: string) => void,
-    source?: 'cron' | 'http' | 'routine' | 'a2a'
+    source?: 'cron' | 'http' | 'routine' | 'a2a',
+    onChunk?: (chunk: string) => void
   ): Promise<void> {
     if (source !== 'a2a' && text.startsWith('/') && this.onCommand) {
       const handled = await this.onCommand(text, 'loopback');
       if (handled) return;
     }
-    this.queue.push({ text, blocks, onComplete });
+    this.queue.push({ text, blocks, onComplete, onChunk });
     void this._process();
   }
 
@@ -94,6 +96,7 @@ export class LoopbackBot implements PlatformBot {
         const update = message.update;
         if (update?.sessionUpdate === 'agent_message_chunk' && update.content?.type === 'text') {
           buffer += update.content.text;
+          item.onChunk?.(update.content.text);
         } else if (update?.sessionUpdate === 'agent_message') {
           const content = Array.isArray(update.content) ? update.content : [update.content];
           buffer = content

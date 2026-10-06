@@ -28,7 +28,8 @@ export type EnqueueFn = (
   text: string,
   chatId?: number,
   blocks?: ContentBlock[],
-  onComplete?: OnCompleteFn
+  onComplete?: OnCompleteFn,
+  onChunk?: (chunk: string) => void
 ) => void;
 
 /**
