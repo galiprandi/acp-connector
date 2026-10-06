@@ -5,6 +5,28 @@ All notable changes to acp-connector will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.0] - 2026-10-06
+
+### Added
+- **A2A agent network (ADR-004)**: the bridge can join an A2A mesh — serves `/.well-known/agent-card.json`, accepts `message/send` and `message/stream` (SSE) from approved peers, and injects `list_remote_agents` + `send_message` MCP tools into the agent session so it can discover and delegate to peers
+- Peer discovery: shared instances file (same host), mDNS broadcast (LAN, optional `bonjour-service`), static `a2a.registry`/`a2a.trustedPeers`
+- Double opt-in pairing: join requests require explicit approval from both owners; `/a2a` command family for peer management; notifications via all configured channels (first response wins)
+- Optional discovery-only registry role (`a2a.registryMode`)
+- Headless mode: no messaging platform required — `LoopbackBot` drives the queue and auto-approves permissions for container/test deployments
+- Periodic peer card refresh, registry announce, and append-only `.acp-connector/audit.log`
+- `contextId` support and echo on `message/send`/`message/stream`
+- Protocol support matrix in README; verified compatibility with `devin acp`, `opencode acp`, `pi-acp`, `agy-acp`
+- E2E suite (`test/e2e`) spawning real bridges with deterministic fake ACP agents — runs in CI without real sessions
+- 88 new tests (484 total)
+
+### Security
+- Remote A2A content can never trigger bridge commands (`/a2a`, `/cron`, ...) — only operator entry points run commands
+- Inbound tasks rejected before processing unless the peer is `approved`; dedup by taskId; delegation-chain depth + loop prevention
+
+### Fixed
+- Peer rediscovery no longer downgrades `approved` peers to `pending`
+- Corrupt `network.json` is backed up to `.corrupt` instead of crashing at boot
+
 ## [0.10.0] - 2026-10-04
 
 ### Added
