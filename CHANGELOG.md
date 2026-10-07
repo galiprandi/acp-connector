@@ -5,6 +5,11 @@ All notable changes to acp-connector will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.1] - 2026-10-07
+
+### Fixed
+- `session/load` regression: `mcpServers` was omitted from session params when no A2A MCP servers were configured — `devin acp` validates it as required and rejected the session resume with `Invalid params`
+
 ## [0.11.0] - 2026-10-06
 
 ### Added

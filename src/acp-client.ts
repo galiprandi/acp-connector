@@ -167,10 +167,10 @@ export class AcpClient {
     const params: Record<string, unknown> = config
       ? { ...config, ...fallback }
       : { cwd: this.agentCwd, ...fallback };
-    if (this.extraMcpServers.length > 0) {
-      const existing = Array.isArray(params.mcpServers) ? params.mcpServers : [];
-      params.mcpServers = [...existing, ...this.extraMcpServers];
-    }
+    const existing = Array.isArray(params.mcpServers) ? params.mcpServers : [];
+    // mcpServers is always present: some agents (devin acp) validate it as a
+    // required field on session/load — omitting it breaks session resume.
+    params.mcpServers = [...existing, ...this.extraMcpServers];
     return params;
   }
 

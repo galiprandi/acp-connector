@@ -674,10 +674,10 @@ describe('AcpClient._sessionParams', () => {
     expect(params.sessionId).toBe('s1');
   });
 
-  it('keeps mcpServers empty when none are provided', () => {
+  it('always includes mcpServers — required by session/load on some agents', () => {
     const client = new AcpClient({ agentCmd: 'acp-agent serve' });
     const params = client._sessionParams({}) as { mcpServers?: unknown[] };
-    expect(params.mcpServers).toBeUndefined();
+    expect(params.mcpServers).toEqual([]);
   });
 });
 
@@ -707,5 +707,13 @@ describe('_sessionParams with session config file', () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('_sessionParams without session config', () => {
+  it('always includes mcpServers (some agents require it on session/load)', () => {
+    const client = new AcpClient({ agentCmd: 'acp-agent serve', cwd: '/w' });
+    const params = client._sessionParams({ sessionId: 's1' }) as Record<string, unknown>;
+    expect(params.mcpServers).toEqual([]);
   });
 });
