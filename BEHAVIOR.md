@@ -146,11 +146,14 @@
 - throws when no load/resume capability and sessionId provided
 
 ## Module: AcpClient._sessionParams
+- always includes mcpServers — required by session/load on some agents
 - injects extra MCP servers into session params
-- keeps mcpServers empty when none are provided
 
 ## Module: _sessionParams with session config file
 - merges extra MCP servers with user-configured ones
+
+## Module: _sessionParams without session config
+- always includes mcpServers (some agents require it on session/load)
 
 ## Module: buildAgentCard
 - includes declared security schemes

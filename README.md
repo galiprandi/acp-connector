@@ -1,6 +1,6 @@
 # acp-connector
 
-> 🔌 Thin bridge between Telegram/Discord and any ACP-compatible coding agent.
+> 🔌 Thin bridge between messaging platforms and any ACP agent — and an A2A node: agents that discover each other and delegate work.
 
 <div align="center">
   <p>
@@ -21,16 +21,21 @@
 
 ## 🧠 Overview
 
-**acp-connector** is a lightweight, agent-agnostic bridge that connects [Agent Client Protocol](https://agentclientprotocol.com/) (ACP) compatible coding agents to Telegram and Discord. It forwards your messages to the agent and streams responses back — no terminal required.
+**acp-connector** does two jobs:
 
-The bridge is intentionally thin. It doesn't implement its own agent loop, model provider, or tool ecosystem. It launches your agent, passes prompts through, and relays responses back. That's it.
+1. **Platform bridge**: connects [Agent Client Protocol](https://agentclientprotocol.com/) (ACP) coding agents to Telegram and Discord — forwards your messages to the agent and streams responses back.
+2. **A2A node**: when `a2a.enabled`, the bridge joins an [A2A](https://a2a-protocol.org/) agent network — your agent gets discovered by other agents, and can discover and delegate to them.
+
+The bridge is intentionally thin. It doesn't implement its own agent loop, model provider, or tool ecosystem. It launches your agent, passes prompts through, relays responses back, and exposes a standard A2A surface. That's it.
 
 **Key features:**
-- 🤖 Works with any ACP agent (Devin, Claude Code, Codex, Gemini CLI, OpenCode, etc.)
+- 🤝 **A2A agent network** — peer discovery (LAN broadcast, shared file, registry), double opt-in pairing, `message/send` + `message/stream` (SSE)
+- 🛠 **MCP tools for your agent** — `list_remote_agents` and `send_message` injected into the session so agents can discover and delegate on their own
+- 🤖 Works with any ACP agent (Devin, Claude Code, Codex, OpenCode, pi, Antigravity)
 - 💬 Telegram and Discord as messaging interfaces with streaming responses
-- ⏰ Cron scheduler for recurring prompts
-- 🔁 Routines for reusable named prompts
-- 🌐 Optional HTTP API for programmatic access
+- 🖥 Headless mode — run without any messaging platform (containers, test rigs)
+- ⏰ Cron scheduler and named routines for recurring prompts
+- 🌐 Optional HTTP API — `/prompt` with webhook callbacks, bearer auth
 - 🔐 Bearer token auth, rate limiting, body size limits
 - 🧠 Agent thoughts forwarding (optional)
 - 📋 Permission requests as inline buttons
@@ -80,14 +85,13 @@ Send a message to your bot on Telegram. Your agent will respond. That's it.
 - [Installation](#-installation)
 - [Quick start](#-quick-start)
 - [How it works](#-how-it-works)
-- [Configuration](#-configuration)
-  - [Cron jobs](#cron-jobs)
-  - [Routines](#routines)
-  - [HTTP API](#http-api)
+- [Configuration](#-configuration) — cron, routines, HTTP API
+- [A2A agent network](#-a2a-agent-network-experimental) — peer discovery, pairing, delegation
+- [Chat commands](#-chat-commands)
 - [Supported agents](#-supported-agents)
-- [Telegram commands](#-telegram-commands)
-- [Permissions](#-permissions)
-- [Session persistence](#-session-persistence)
+- [MCP servers](#-mcp-servers)
+- [Protocol support matrix](#-protocol-support-matrix)
+- [Permissions](#-permissions) · [Session persistence](#-session-persistence) · [Status feedback](#-status-feedback)
 - [Self-hosting](#-self-hosting)
 - [Troubleshooting](#-troubleshooting)
 - [Contributing](#-contributing)
@@ -331,192 +335,6 @@ If the prompt fails, `error` contains the error message and `response` is empty.
 
 ***
 
-## 📋 Protocol support matrix
-
-### A2A (agent ↔ agent)
-
-| Feature | Status | Notes |
-|---|---|---|
-| `message/send` | ✅ | Inbound tasks become queued agent prompts |
-| `message/stream` (SSE) | ✅ | Task(working) → status-update events → completed |
-| `contextId` | ✅ | Echoed back; used for correlation, not session state |
-| `taskId` dedup | ✅ | Duplicate deliveries rejected with `-32002` |
-| Delegation-chain / loop prevention | ✅ | Via `a2a.delegationChain` metadata (extension) |
-| `/.well-known/agent-card.json` | ✅ | Generated from `a2a.card` config |
-| `tasks/get`, `tasks/cancel` | ❌ | No long-running task tracking yet |
-| Push notifications (`tasks/pushNotificationConfig`) | ❌ | Long tasks block until done |
-| Agent Card signatures (JWS) | ❌ | Phase 2 (remote/internet trust) |
-| `securitySchemes` enforcement | ⚠️ | Declared in card, but inbound auth is LAN trust (`X-A2A-Peer-Id`) — TLS + real auth is phase 2 |
-| Extended Agent Card | ❌ | |
-| Discovery: well-known URI | ✅ | Standard fetch after URL resolution |
-| Discovery: curated registry | ✅ | `a2a.registryMode` + `a2a.registry` |
-| Discovery: direct config | ✅ | `a2a.trustedPeers` |
-| mDNS broadcast discovery | ✅ | Optional dep `bonjour-service` |
-| Shared-file discovery | ✅ | `~/.acp-connector/instances.json` |
-
-### ACP (bridge ↔ agent)
-
-| Feature | Status | Notes |
-|---|---|---|
-| `initialize` / capability negotiation | ✅ | |
-| `session/new` + `session/load` / `resume` / `list` / `close` / `delete` | ✅ | Session persistence per chat |
-| `session/prompt` with streaming updates | ✅ | `agent_message_chunk` batched to the chat |
-| `session/request_permission` | ✅ | Routed to Telegram buttons / Discord / auto-approved headless |
-| `session/set_mode`, `set_config_option` | ✅ | Per-agent capability detection |
-| `mcpServers` in `session/new` | ✅ | Used to inject the `a2a-network` MCP tools |
-| `available_commands` | ✅ | Mirrored into `/help` |
-| `fs/*`, `terminal/*` client capabilities | ❌ | Not implemented — agents get no fs/terminal via the bridge |
-| `authenticate` | ❌ | Agents are expected pre-authenticated |
-| Image / embedded context | ✅ | `image` + `ResourceLink` media support |
-| Audio | ❌ | |
-
-## 🤖 Supported agents
-
-Any agent that implements the [Agent Client Protocol](https://agentclientprotocol.com/) works. Configure it via `agentCmd`:
-
-| Agent | Example `agentCmd` |
-|---|---|
-| [Devin](https://devin.ai) | `devin acp` |
-| [Claude Code](https://claude.ai/code) | `claude acp` |
-| [Codex](https://openai.com/codex) | `codex acp` |
-| [Gemini CLI](https://github.com/google-gemini/gemini-cli) | `gemini acp` |
-| [OpenCode](https://github.com/sst/opencode) | `opencode acp` |
-| [pi](https://github.com/badlogic/pi) | `npx pi-acp` (via [pi-acp](https://github.com/svkozak/pi-acp) adapter) |
-| [Antigravity](https://antigravity.google) | `npx agy-acp` (via `agy-acp` adapter) |
-| Any ACP agent | `<your-agent> acp` |
-
-Verified end-to-end with A2A delegation: `devin acp` orchestrating `opencode acp`,
-`pi-acp` and `agy-acp` peers.
-
-***
-
-### Media handling
-
-Send photos, documents, stickers, or files to the bot and they'll be forwarded to the agent:
-
-- **Photos** + agent supports `image` capability → sent as base64 `ImageContent` (agent "sees" the image)
-- **Any file** (or agent without `image` capability) → sent as `ResourceLink` with `file://` URI (agent reads the file from disk)
-- Files are saved to `media.uploadsDir` (default: `/tmp/acp-connector-uploads`)
-- Captions are included as text alongside the media
-
-```jsonc
-{
-  "media": {
-    "uploadsDir": "/tmp/acp-connector-uploads"
-  }
-}
-```
-
-## 💬 Chat commands
-
-Both Telegram and Discord support these commands:
-
-The bridge intercepts these commands before forwarding to the agent:
-
-### Task control
-
-| Command | Description |
-|---|---|
-| `/stop` | Cancel the current task (sends `session/cancel` to the agent) |
-| `/queue` | List pending prompts waiting in the queue |
-| `/queue cancel <n>` | Remove the pending prompt at position `n` |
-| `/queue clear` | Remove all pending prompts |
-| `/status` | Show agent state (busy/idle), session ID, mode, queue length and uptime |
-
-### Session management
-
-| Command | Description |
-|---|---|
-| `/new` | Start a fresh session (clears accumulated context) |
-| `/sessions` | List available sessions (requires agent `session/list` capability) |
-| `/session <id>` | Switch to an existing session (uses `session/resume` or `session/load`) |
-| `/delete <id>` | Delete a session (requires agent `session/delete` capability) |
-| `/mode` | List available session modes reported by the agent |
-| `/mode <id>` | Switch session mode (e.g. `/mode bypass` for Devin's auto-approve-all) |
-| `/config` | List session config options reported by the agent (model, thought level, etc.) |
-| `/config <id>` | Show the selectable values for an option |
-| `/config <id> <value>` | Set an option via `session/set_config_option` (value ID, or `true`/`false` for boolean options) |
-| `/model [value]` | Shortcut for `/config model [value]` — e.g. `/model swe-2-high` |
-
-`/new` and `/session` are refused while the agent is busy — use `/stop` first. `/sessions` gracefully degrades with an error message if the agent doesn't support `session/list`. `/delete` cannot delete the active session (use `/new` first). `/mode` reports "No session modes available" if the agent doesn't expose modes. `/config` reports "No config options reported by the agent" if the agent doesn't expose `configOptions`.
-
-`/help` is dynamic: besides the built-in commands it lists the slash commands the agent advertises via `available_commands_update` under an *Agent commands* section (Devin and OpenCode advertise theirs; agents that report none, like pi, simply omit the section). Typing an agent command forwards it to the agent as a prompt.
-
-#### Initial session mode
-
-Set `sessionMode` in the config to apply a mode automatically when a session is created or loaded:
-
-```jsonc
-{
-  "agentCmd": "devin acp",
-  "sessionMode": "bypass"
-}
-```
-
-This calls `session/set_mode` after `session/new`, `session/load`, or `session/resume`. The mode ID is agent-specific — Devin supports `accept-edits`, `smart`, `ask`, `plan`, and `bypass`. Other agents may expose different modes.
-
-### Cron management
-
-| Command | Description |
-|---|---|
-| `/cron list` | List all cron jobs |
-| `/cron add <schedule> <prompt>` | Add a new cron job |
-| `/cron remove <name>` | Remove a cron job |
-| `/cron toggle <name>` | Pause/activate a job |
-| `/cron run <name>` | Run a job immediately |
-
-### Routine management
-
-| Command | Description |
-|---|---|
-| `/routine list` | List all routines |
-| `/routine add <name> <prompt>` | Add a reusable prompt |
-| `/routine remove <name>` | Remove a routine |
-
-### Execution
-
-| Command | Description |
-|---|---|
-| `/run <name>` | Execute a routine by name |
-| `/start` | Show welcome message with command list |
-| `/help` | Show welcome message with command list |
-
-Any other message (including unknown `/commands`) is forwarded directly to the agent.
-
-`/stop` cancels the in-progress prompt turn and clears the pending queue. The agent receives a `session/cancel` notification and should respond with a `cancelled` stop reason.
-
-***
-
-## 🔐 Permissions
-
-ACP agents may request permission before executing certain actions (file writes, shell commands, etc.). The bridge handles this in two ways:
-
-1. **Auto-approve**: If your `agentCmd` includes `dangerous`, `bypass`, or `yolo`, all permissions are auto-approved silently.
-2. **Inline buttons**: Otherwise, the permission request is forwarded to Telegram with "Permitir" / "Denegar" buttons. Tap to approve or deny.
-
-***
-
-## 💾 Session persistence
-
-To resume a session across restarts, set `sessionId` in your config:
-
-```jsonc
-{
-  "sessionId": "your-session-id"
-}
-```
-
-The bridge will call `session/load` or `session/resume` (depending on agent capabilities) on startup. Omit this field to create a new session each time.
-
-***
-
-## ⚡ Status feedback
-
-- **Typing indicator**: while the agent works on a prompt, the bridge sends a `typing` chat action every ~4s (Telegram `sendChatAction`, Discord `sendTyping`) — visible even when `showThoughts`/`showTools` are off.
-- **Agent crash detection**: if the agent process exits unexpectedly, all allowed chats get a notification with a **🔄 Reconnect** inline button. Tapping it re-spawns `agentCmd` and resumes the previous session when possible (via `session/resume`/`session/load`), falling back to a fresh session if resume fails.
-
-***
-
 ## 🤝 A2A agent network (experimental)
 
 Enable `a2a.enabled` to put this bridge on an [A2A](https://a2a-protocol.org/) agent
@@ -631,51 +449,122 @@ auto-approved (no human in the loop — use only on trusted environments).
 
 ***
 
-## 🖥 Self-hosting
+## 💬 Chat commands
 
-### systemd
+Both Telegram and Discord support these commands:
 
-```ini
-[Unit]
-Description=acp-connector
-After=network.target
+The bridge intercepts these commands before forwarding to the agent:
 
-[Service]
-Type=simple
-WorkingDirectory=/path/to/your/project
-ExecStart=/usr/bin/npx acp-connector
-Restart=on-failure
-Environment=NODE_ENV=production
+### Task control
 
-[Install]
-WantedBy=multi-user.target
+| Command | Description |
+|---|---|
+| `/stop` | Cancel the current task (sends `session/cancel` to the agent) |
+| `/queue` | List pending prompts waiting in the queue |
+| `/queue cancel <n>` | Remove the pending prompt at position `n` |
+| `/queue clear` | Remove all pending prompts |
+| `/status` | Show agent state (busy/idle), session ID, mode, queue length and uptime |
+
+### Session management
+
+| Command | Description |
+|---|---|
+| `/new` | Start a fresh session (clears accumulated context) |
+| `/sessions` | List available sessions (requires agent `session/list` capability) |
+| `/session <id>` | Switch to an existing session (uses `session/resume` or `session/load`) |
+| `/delete <id>` | Delete a session (requires agent `session/delete` capability) |
+| `/mode` | List available session modes reported by the agent |
+| `/mode <id>` | Switch session mode (e.g. `/mode bypass` for Devin's auto-approve-all) |
+| `/config` | List session config options reported by the agent (model, thought level, etc.) |
+| `/config <id>` | Show the selectable values for an option |
+| `/config <id> <value>` | Set an option via `session/set_config_option` (value ID, or `true`/`false` for boolean options) |
+| `/model [value]` | Shortcut for `/config model [value]` — e.g. `/model swe-2-high` |
+
+`/new` and `/session` are refused while the agent is busy — use `/stop` first. `/sessions` gracefully degrades with an error message if the agent doesn't support `session/list`. `/delete` cannot delete the active session (use `/new` first). `/mode` reports "No session modes available" if the agent doesn't expose modes. `/config` reports "No config options reported by the agent" if the agent doesn't expose `configOptions`.
+
+`/help` is dynamic: besides the built-in commands it lists the slash commands the agent advertises via `available_commands_update` under an *Agent commands* section (Devin and OpenCode advertise theirs; agents that report none, like pi, simply omit the section). Typing an agent command forwards it to the agent as a prompt.
+
+#### Initial session mode
+
+Set `sessionMode` in the config to apply a mode automatically when a session is created or loaded:
+
+```jsonc
+{
+  "agentCmd": "devin acp",
+  "sessionMode": "bypass"
+}
 ```
 
-### pm2
+This calls `session/set_mode` after `session/new`, `session/load`, or `session/resume`. The mode ID is agent-specific — Devin supports `accept-edits`, `smart`, `ask`, `plan`, and `bypass`. Other agents may expose different modes.
 
-```bash
-pm2 start npx --name acp-connector -- acp-connector
-pm2 save
-pm2 startup
-```
+### Cron management
+
+| Command | Description |
+|---|---|
+| `/cron list` | List all cron jobs |
+| `/cron add <schedule> <prompt>` | Add a new cron job |
+| `/cron remove <name>` | Remove a cron job |
+| `/cron toggle <name>` | Pause/activate a job |
+| `/cron run <name>` | Run a job immediately |
+
+### Routine management
+
+| Command | Description |
+|---|---|
+| `/routine list` | List all routines |
+| `/routine add <name> <prompt>` | Add a reusable prompt |
+| `/routine remove <name>` | Remove a routine |
+
+### Execution
+
+| Command | Description |
+|---|---|
+| `/run <name>` | Execute a routine by name |
+| `/start` | Show welcome message with command list |
+| `/help` | Show welcome message with command list |
+
+Any other message (including unknown `/commands`) is forwarded directly to the agent.
+
+`/stop` cancels the in-progress prompt turn and clears the pending queue. The agent receives a `session/cancel` notification and should respond with a `cancelled` stop reason.
 
 ***
 
-## 🐛 Troubleshooting
+## 🤖 Supported agents
 
-### `Conflict: terminated by other getUpdates request`
+Any agent that implements the [Agent Client Protocol](https://agentclientprotocol.com/) works. Configure it via `agentCmd`:
 
-Another bot instance is running with the same token. Kill it:
+| Agent | Example `agentCmd` |
+|---|---|
+| [Devin](https://devin.ai) | `devin acp` |
+| [Claude Code](https://claude.ai/code) | `claude acp` |
+| [Codex](https://openai.com/codex) | `codex acp` |
+| [Gemini CLI](https://github.com/google-gemini/gemini-cli) | `gemini acp` |
+| [OpenCode](https://github.com/sst/opencode) | `opencode acp` |
+| [pi](https://github.com/badlogic/pi) | `npx pi-acp` (via [pi-acp](https://github.com/svkozak/pi-acp) adapter) |
+| [Antigravity](https://antigravity.google) | `npx agy-acp` (via `agy-acp` adapter) |
+| Any ACP agent | `<your-agent> acp` |
 
-```bash
-pkill -f acp-connector
+Verified end-to-end with A2A delegation: `devin acp` orchestrating `opencode acp`,
+`pi-acp` and `agy-acp` peers.
+
+***
+
+### Media handling
+
+Send photos, documents, stickers, or files to the bot and they'll be forwarded to the agent:
+
+- **Photos** + agent supports `image` capability → sent as base64 `ImageContent` (agent "sees" the image)
+- **Any file** (or agent without `image` capability) → sent as `ResourceLink` with `file://` URI (agent reads the file from disk)
+- Files are saved to `media.uploadsDir` (default: `/tmp/acp-connector-uploads`)
+- Captions are included as text alongside the media
+
+```jsonc
+{
+  "media": {
+    "uploadsDir": "/tmp/acp-connector-uploads"
+  }
+}
 ```
-
-### Agent doesn't respond
-
-1. Check that `agentCmd` launches your agent correctly: run it manually
-2. Check the bridge console for errors
-3. Ensure your chat ID is in `allowedChatIds`
 
 ## 🔌 MCP servers
 
@@ -757,6 +646,121 @@ If you configured `sessionConfigPath`, verify the file exists and is valid JSONC
 The bridge batches stream edits (800ms) to avoid rate limits. If you still hit limits, disable streaming (`"streaming": false`) to send one message per response instead.
 
 ***
+
+## 📋 Protocol support matrix
+
+### A2A (agent ↔ agent)
+
+| Feature | Status | Notes |
+|---|---|---|
+| `message/send` | ✅ | Inbound tasks become queued agent prompts |
+| `message/stream` (SSE) | ✅ | Task(working) → status-update events → completed |
+| `contextId` | ✅ | Echoed back; used for correlation, not session state |
+| `taskId` dedup | ✅ | Duplicate deliveries rejected with `-32002` |
+| Delegation-chain / loop prevention | ✅ | Via `a2a.delegationChain` metadata (extension) |
+| `/.well-known/agent-card.json` | ✅ | Generated from `a2a.card` config |
+| `tasks/get`, `tasks/cancel` | ❌ | No long-running task tracking yet |
+| Push notifications (`tasks/pushNotificationConfig`) | ❌ | Long tasks block until done |
+| Agent Card signatures (JWS) | ❌ | Phase 2 (remote/internet trust) |
+| `securitySchemes` enforcement | ⚠️ | Declared in card, but inbound auth is LAN trust (`X-A2A-Peer-Id`) — TLS + real auth is phase 2 |
+| Extended Agent Card | ❌ | |
+| Discovery: well-known URI | ✅ | Standard fetch after URL resolution |
+| Discovery: curated registry | ✅ | `a2a.registryMode` + `a2a.registry` |
+| Discovery: direct config | ✅ | `a2a.trustedPeers` |
+| mDNS broadcast discovery | ✅ | Optional dep `bonjour-service` |
+| Shared-file discovery | ✅ | `~/.acp-connector/instances.json` |
+
+### ACP (bridge ↔ agent)
+
+| Feature | Status | Notes |
+|---|---|---|
+| `initialize` / capability negotiation | ✅ | |
+| `session/new` + `session/load` / `resume` / `list` / `close` / `delete` | ✅ | Session persistence per chat |
+| `session/prompt` with streaming updates | ✅ | `agent_message_chunk` batched to the chat |
+| `session/request_permission` | ✅ | Routed to Telegram buttons / Discord / auto-approved headless |
+| `session/set_mode`, `set_config_option` | ✅ | Per-agent capability detection |
+| `mcpServers` in `session/new` | ✅ | Used to inject the `a2a-network` MCP tools |
+| `available_commands` | ✅ | Mirrored into `/help` |
+| `fs/*`, `terminal/*` client capabilities | ❌ | Not implemented — agents get no fs/terminal via the bridge |
+| `authenticate` | ❌ | Agents are expected pre-authenticated |
+| Image / embedded context | ✅ | `image` + `ResourceLink` media support |
+| Audio | ❌ | |
+
+## 🔐 Permissions
+
+ACP agents may request permission before executing certain actions (file writes, shell commands, etc.). The bridge handles this in two ways:
+
+1. **Auto-approve**: If your `agentCmd` includes `dangerous`, `bypass`, or `yolo`, all permissions are auto-approved silently.
+2. **Inline buttons**: Otherwise, the permission request is forwarded to Telegram with "Permitir" / "Denegar" buttons. Tap to approve or deny.
+
+***
+
+## 💾 Session persistence
+
+To resume a session across restarts, set `sessionId` in your config:
+
+```jsonc
+{
+  "sessionId": "your-session-id"
+}
+```
+
+The bridge will call `session/load` or `session/resume` (depending on agent capabilities) on startup. Omit this field to create a new session each time.
+
+***
+
+## ⚡ Status feedback
+
+- **Typing indicator**: while the agent works on a prompt, the bridge sends a `typing` chat action every ~4s (Telegram `sendChatAction`, Discord `sendTyping`) — visible even when `showThoughts`/`showTools` are off.
+- **Agent crash detection**: if the agent process exits unexpectedly, all allowed chats get a notification with a **🔄 Reconnect** inline button. Tapping it re-spawns `agentCmd` and resumes the previous session when possible (via `session/resume`/`session/load`), falling back to a fresh session if resume fails.
+
+***
+
+## 🖥 Self-hosting
+
+### systemd
+
+```ini
+[Unit]
+Description=acp-connector
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/path/to/your/project
+ExecStart=/usr/bin/npx acp-connector
+Restart=on-failure
+Environment=NODE_ENV=production
+
+[Install]
+WantedBy=multi-user.target
+```
+
+### pm2
+
+```bash
+pm2 start npx --name acp-connector -- acp-connector
+pm2 save
+pm2 startup
+```
+
+***
+
+## 🐛 Troubleshooting
+
+### `Conflict: terminated by other getUpdates request`
+
+Another bot instance is running with the same token. Kill it:
+
+```bash
+pkill -f acp-connector
+```
+
+### Agent doesn't respond
+
+1. Check that `agentCmd` launches your agent correctly: run it manually
+2. Check the bridge console for errors
+3. Ensure your chat ID is in `allowedChatIds`
 
 ## 🤝 Contributing
 
