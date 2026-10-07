@@ -143,7 +143,7 @@ This ensures features degrade gracefully when an agent doesn't support them. Non
 **Regression policy (critical):** this is a published npm package consumed by real deployments (Telegram/Discord bots). Never ship a regression. Before every release:
 
 1. Full suite green (`pnpm test`) + lint + typecheck — zero tolerance, no skipped tests
-2. Real-agent smoke test: run `AcpClient` (via tsx script) against `devin acp`, `opencode acp`, `pi acp`, and `antigravity` when available — verify session/new, prompt, and any feature touched (e.g. configOptions, restart, exit handling)
+2. Real-agent smoke test: run `AcpClient` (via tsx script) against `devin acp`, `opencode acp`, `pi acp`, and `antigravity` when available — verify session/new, prompt, and any feature touched (e.g. configOptions, restart, exit handling). Mandatory flows: `session/new` (fresh), `session/load`/`session/resume` (existing sessionId — this is where 0.11.0 regressed: missing `mcpServers` rejected by devin acp), `session/prompt`, and any touched feature
 3. Only then bump version, tag, and release
 
 Available local ACP agents for validation: `devin acp`, `opencode acp`,

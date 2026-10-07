@@ -597,3 +597,6 @@
 - join → approve → message/send roundtrip
 - message/stream returns SSE events to an approved peer
 - unapproved peer is rejected before reaching the agent
+
+## Module: e2e: session resume
+- sessionId in config resumes via session/resume with mcpServers (0.11.1 regression)

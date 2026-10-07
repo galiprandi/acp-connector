@@ -1,5 +1,5 @@
 import { type ChildProcess, spawn } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -236,4 +236,32 @@ describe('e2e: two real bridges with fake agents', () => {
     });
     expect(res.status).toBe(403);
   }, 30000);
+});
+
+describe('e2e: session resume', () => {
+  it('sessionId in config resumes via session/resume with mcpServers (0.11.1 regression)', async () => {
+    // Spawn a bridge with a sessionId to resume — the strict fake agent
+    // knows 'resume-me' and validates that mcpServers is present in params.
+    const a = await spawnAgent('resumer');
+    const cfgPath = join(a.dir, 'acp-connector.jsonc');
+    const cfg = JSON.parse(readFileSync(cfgPath, 'utf8'));
+    cfg.sessionId = 'fake-session';
+    writeFileSync(cfgPath, JSON.stringify(cfg));
+
+    a.proc.kill('SIGTERM');
+    await new Promise((r) => setTimeout(r, 300));
+    const proc = spawn(TSX, [BRIDGE], {
+      cwd: a.dir,
+      env: {
+        ...process.env,
+        FAKE_AGENT_BRIDGE: `http://127.0.0.1:${a.a2aPort}`,
+        FAKE_AGENT_KNOWN_SESSIONS: 'fake-session',
+      },
+      stdio: 'ignore',
+    });
+    const s2 = { ...a, proc };
+    spawned.push(s2);
+    const up = await waitFor(`http://127.0.0.1:${a.a2aPort}/.well-known/agent-card.json`, 120);
+    expect(up, 'bridge did not resume session').toBe(true);
+  }, 60000);
 });
