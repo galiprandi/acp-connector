@@ -556,6 +556,35 @@
 ## Module: audit log
 - appends JSONL entries to audit.log next to network.json
 
+## Module: reminders api
+- creates a reminder with "at" and rejects both in+at
+- creates a reminder with "in" and returns id + firesAt
+- lists, updates and cancels reminders
+
+## Module: cron api
+- creates agent-managed jobs from "every" and "expr"
+- lists all jobs flagging operator-owned ones read-only
+- rejects unsupported intervals and missing schedule
+- updates and deletes only agent-managed jobs
+
+## Module: ReminderManager
+- cancels reminders by id and reschedules via update
+- delivers due reminders as [Reminder <id>] <prompt> and deletes them
+- delivers past-due reminders on start (boot flush), oldest first
+- discards entries older than 7 days past firesAt on start
+- keeps undeliverable due reminders and retries on the next flush
+- persists created reminders to the store file
+- rejects reminders in the past and above the cap
+- restarts with persisted reminders and re-schedules them
+
+## Module: parseReminderTime
+- parses chrono relative strings
+- parses duration shorthands relative to now
+- parses explicit-zone ISO datetimes as absolute
+- parses naive wall times in the given timezone
+- rejects unparseable or non-future "in" values
+- resolves "tomorrow" against the operator timezone
+
 ## Module: RoutineManager edge cases
 - /cron add with 4-token schedule fails (needs 5)
 - /cron add with multi-word prompt works
