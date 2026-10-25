@@ -80,6 +80,9 @@ src/
 ├── media.ts       — MediaHandler: download, save, convert to ACP ContentBlocks
 ├── cron.ts        — scheduled prompt injection
 ├── routines.ts    — named prompts + /cron, /routine, /run commands
+├── reminders.ts   — one-shot agent reminders: JSON store, setTimeout scheduler, chrono parsing
+├── reminders-api.ts — loopback HTTP API backing the reminders MCP server
+├── reminders-mcp.ts — MCP stdio server: reminder_*/cron_* tools for the agent
 ├── http.ts        — optional HTTP API (/health, /prompt)
 ├── a2a.ts         — A2A server: agent card, JSON-RPC message/send, join/confirm, registry
 ├── a2a-manager.ts — pairing flow + /a2a commands (bridge-level, never reaches agent)
@@ -108,6 +111,19 @@ agent `list_remote_agents`/`send_message` MCP tools (injected via `session/new`
 `mcpServers` — agents without MCP support don't see them). Invariant: **remote
 A2A content never triggers bridge commands** — only operator entry points
 (Telegram/Discord chats, /prompt, cron, routines) can run `/a2a`.
+
+### Agent reminders (always on)
+
+The bridge always injects an `agent-reminders` MCP server in `session/new`
+`mcpServers` (not gated on a2a.enabled). Its tools hit a loopback HTTP API
+(`src/reminders-api.ts`, 127.0.0.1, ephemeral port passed via
+`REMINDERS_API_URL`). One-shot reminders live in
+`.acp-connector/reminders.json`; delivery goes through the same serialized
+queue with source `'reminder'` and entries are deleted on delivery —
+undeliverable entries (no agent session/chat id) are kept and retried.
+`cron_*` tools can only touch jobs persisted with `managed: "agent"`;
+operator jobs are listed read-only. Agents without MCP capabilities get a
+one-line warning at startup and no tools.
 
 ### Key principles
 

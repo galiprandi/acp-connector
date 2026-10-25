@@ -1,7 +1,20 @@
-import type { Routine } from './config.js';
+import type { CronJob, Routine } from './config.js';
 import { loadConfig, saveConfig } from './config.js';
 import type { CronManager } from './cron.js';
 import { log } from './logger.js';
+
+/**
+ * Persist the current cron jobs (and optionally routines) back to
+ * acp-connector.jsonc. Shared by the chat commands and the
+ * reminders/cron MCP API so agent-managed jobs survive restarts.
+ */
+export function persistCronAndRoutines(cron: CronJob[], routines?: Routine[]): void {
+  const config = loadConfig();
+  if (!config) return;
+  if (routines) config.routines = routines;
+  config.cron = cron;
+  saveConfig(config);
+}
 
 interface RoutineManagerOpts {
   routines: Routine[];
@@ -254,10 +267,6 @@ export class RoutineManager {
   }
 
   private _persist(): void {
-    const config = loadConfig();
-    if (!config) return;
-    config.routines = this.routines;
-    config.cron = this.cronManager.list();
-    saveConfig(config);
+    persistCronAndRoutines(this.cronManager.list(), this.routines);
   }
 }

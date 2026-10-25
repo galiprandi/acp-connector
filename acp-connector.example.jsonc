@@ -59,6 +59,10 @@
   // Log level: "error" | "info" | "debug" (default: "info")
   "logLevel": "info",
 
+  // Timezone for agent reminder `at` times, e.g. "America/Argentina/Tucuman"
+  // (default: system timezone). Used by the reminder_* MCP tools.
+  // "timezone": "America/Argentina/Tucuman",
+
   // Scheduled jobs — can also be managed via /cron commands in Telegram
   "cron": [
     {

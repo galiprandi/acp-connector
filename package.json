@@ -39,7 +39,7 @@
   "bugs": {
     "url": "https://github.com/galiprandi/acp-connector/issues"
   },
-  "author": "Germ\u00e1n Aliprandi",
+  "author": "Germán Aliprandi",
   "engines": {
     "node": ">=20"
   },
@@ -52,6 +52,7 @@
   "dependencies": {
     "@agentclientprotocol/sdk": "^1.4.0",
     "@modelcontextprotocol/sdk": "^1.32.1",
+    "chrono-node": "^2.10.3",
     "discord.js": "^14.27.0",
     "dotenv": "^16.4.0",
     "node-cron": "^4.0.0",

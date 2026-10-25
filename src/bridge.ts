@@ -15,6 +15,8 @@ import { log, setLogLevel } from './logger.js';
 import { LoopbackBot } from './loopback.js';
 import { MediaHandler } from './media.js';
 import { AuditLog, NetworkStore } from './network.js';
+import { ReminderManager, systemTimezone } from './reminders.js';
+import { startRemindersApi } from './reminders-api.js';
 import { RoutineManager } from './routines.js';
 
 function printBanner(): void {
@@ -45,6 +47,51 @@ export async function run(): Promise<void> {
 
   printBanner();
 
+  const tg = config.platforms?.telegram;
+  const dc = config.platforms?.discord;
+
+  // Collect active bots
+  const bots: PlatformBot[] = [];
+  let primaryBot: PlatformBot | null = null;
+
+  // Use first bot's allowed IDs for cron/reminders (legacy: assumes
+  // single platform). Discord channel IDs are strings (Snowflakes
+  // exceed JS safe integer range).
+  const cronAllowedIds: Array<number | string> = tg?.allowedChatIds || dc?.allowedChannelIds || [];
+
+  const cronManager = new CronManager({
+    jobs: config.cron || [],
+    allowedChatIds: cronAllowedIds,
+    enqueue: (text, chatId) => {
+      // Enqueue to all bots — each will process if chatId matches
+      for (const bot of bots) {
+        bot.enqueuePrompt(text, chatId, undefined, undefined, 'cron');
+      }
+    },
+  });
+
+  // Agent self-reminders: persisted next to the jsonc, delivered through
+  // the same serialized queue as cron. Undeliverable entries (no agent
+  // session yet, no chat id) are kept and retried — late beats lost.
+  const stateDir = resolve(config.agentCwd ?? process.cwd(), '.acp-connector');
+  const reminderManager = new ReminderManager({
+    storePath: resolve(stateDir, 'reminders.json'),
+    canDeliver: () => !!acp?.session && cronAllowedIds.length > 0,
+    deliver: (text) => {
+      for (const bot of bots) {
+        bot.enqueuePrompt(text, cronAllowedIds[0], undefined, undefined, 'reminder');
+      }
+    },
+  });
+
+  // Loopback API backing the reminders MCP server (ephemeral port —
+  // the agent learns it via REMINDERS_API_URL in the mcpServers entry).
+  const remindersApi = await startRemindersApi({
+    reminders: reminderManager,
+    cronManager,
+    timezone: config.timezone ?? systemTimezone(),
+  });
+
   // A2A network MCP server: gives the agent list_remote_agents /
   // send_message tools (the reference A2A host-agent pattern). Agents
   // without MCP support simply never see these tools.
@@ -65,6 +112,20 @@ export async function run(): Promise<void> {
     });
   }
 
+  // Reminders/cron MCP server: always injected so the agent can schedule
+  // self-reminders and manage its own recurring jobs. Agents without MCP
+  // support simply never see these tools.
+  const isTs = import.meta.url.endsWith('.ts');
+  const remindersMcpScript = fileURLToPath(
+    new URL(`./reminders-mcp.${isTs ? 'ts' : 'js'}`, import.meta.url)
+  );
+  a2aMcpServers.push({
+    name: 'agent-reminders',
+    command: isTs ? 'npx' : process.execPath,
+    args: isTs ? ['tsx', remindersMcpScript] : [remindersMcpScript],
+    env: [{ name: 'REMINDERS_API_URL', value: `http://127.0.0.1:${remindersApi.port}` }],
+  });
+
   const acp = new AcpClient({
     agentCmd: config.agentCmd,
     agentCwd: config.agentCwd,
@@ -74,18 +135,11 @@ export async function run(): Promise<void> {
     mcpServers: a2aMcpServers,
   });
 
-  const tg = config.platforms?.telegram;
-  const dc = config.platforms?.discord;
-
   const headless = !tg && !dc;
   if (headless && !config.http?.enabled && !config.a2a?.enabled) {
     log.error('No platform configured. Run: npx acp-connector setup');
     process.exit(1);
   }
-
-  // Collect active bots
-  const bots: PlatformBot[] = [];
-  let primaryBot: PlatformBot | null = null;
 
   if (tg) {
     const bot = new BridgeBot({
@@ -126,21 +180,6 @@ export async function run(): Promise<void> {
     primaryBot = loopback;
   }
 
-  // Use first bot's allowed IDs for cron (legacy: assumes single platform)
-  // Discord channel IDs are strings (Snowflakes exceed JS safe integer range)
-  const cronAllowedIds: Array<number | string> = tg?.allowedChatIds || dc?.allowedChannelIds || [];
-
-  const cronManager = new CronManager({
-    jobs: config.cron || [],
-    allowedChatIds: cronAllowedIds,
-    enqueue: (text, chatId) => {
-      // Enqueue to all bots — each will process if chatId matches
-      for (const bot of bots) {
-        bot.enqueuePrompt(text, chatId, undefined, undefined, 'cron');
-      }
-    },
-  });
-
   const routineManager = new RoutineManager({
     routines: config.routines || [],
     cronManager,
@@ -163,7 +202,6 @@ export async function run(): Promise<void> {
   let a2aAudit: AuditLog | null = null;
   let a2aSyncTimer: ReturnType<typeof setInterval> | null = null;
   if (config.a2a?.enabled) {
-    const stateDir = resolve(config.agentCwd ?? process.cwd(), '.acp-connector');
     a2aNetwork = new NetworkStore(resolve(stateDir, 'network.json'));
     a2aAudit = new AuditLog(resolve(stateDir, 'audit.log'));
     const ownerChatIds: Array<number | string> = [
@@ -260,6 +298,16 @@ export async function run(): Promise<void> {
   } catch (err) {
     log.error('Failed to start ACP:', (err as Error).message);
     process.exit(1);
+  }
+
+  // Start scheduling/delivering reminders now that a session exists;
+  // past-due entries flush through flushDue inside start().
+  reminderManager.start();
+
+  // Graceful degradation: an agent without MCP support ignores the
+  // injected servers — warn once so the silence is diagnosable.
+  if (!acp.agentCapabilities?.mcpCapabilities) {
+    log.warn('⚠️ Agent did not report MCP capabilities — reminder/cron tools may be unavailable');
   }
 
   // Create media handler now that we know agent capabilities
@@ -367,6 +415,8 @@ export async function run(): Promise<void> {
     a2aDiscovery?.stop();
     a2aServer?.stop();
     httpServer.stop();
+    remindersApi.server.close();
+    reminderManager.stop();
     cronManager.stop();
     for (const bot of bots) {
       bot.stop();

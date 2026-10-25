@@ -38,7 +38,7 @@ export class LoopbackBot implements PlatformBot {
     _chatId?: number | string,
     blocks?: ContentBlock[],
     onComplete?: (response: string, error?: string) => void,
-    source?: 'cron' | 'http' | 'routine' | 'a2a',
+    source?: 'cron' | 'http' | 'routine' | 'a2a' | 'reminder',
     onChunk?: (chunk: string) => void
   ): Promise<void> {
     if (source !== 'a2a' && text.startsWith('/') && this.onCommand) {

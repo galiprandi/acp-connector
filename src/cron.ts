@@ -10,6 +10,39 @@ export interface CronJob {
   prompt: string;
   chatId?: number | string;
   enabled?: boolean;
+  /** "agent" jobs are MCP-managed; anything else is operator-owned. */
+  managed?: 'agent' | 'operator';
+}
+
+const _EVERY_RE = /^\s*(\d+)\s*(m|min|mins|h|hr|hrs|d|day|days|w|week|weeks)\s*$/i;
+
+/**
+ * Convert a human interval ("30m", "2h", "1d", "1w") into a 5-field cron
+ * expression. Returns null when the interval cannot be represented
+ * (callers should then ask for a raw `expr`).
+ */
+export function everyToCron(every: string): string | null {
+  const m = _EVERY_RE.exec(every);
+  if (!m) return null;
+  const n = Number(m[1]);
+  if (!Number.isInteger(n) || n <= 0) return null;
+  const unit = m[2].toLowerCase();
+  if (unit.startsWith('m')) {
+    if (n >= 60 || 60 % n !== 0) return null;
+    return `*/${n} * * * *`;
+  }
+  if (unit.startsWith('h')) {
+    if (n === 24) return '0 0 * * *';
+    if (n >= 24 || 24 % n !== 0) return null;
+    return `0 */${n} * * *`;
+  }
+  if (unit.startsWith('w')) {
+    if (n !== 1) return null;
+    return '0 0 * * 0';
+  }
+  // days
+  if (n >= 32) return null;
+  return `0 0 */${n} * *`;
 }
 
 /**

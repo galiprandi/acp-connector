@@ -200,6 +200,25 @@ vi.mock('../src/routines.ts', () => ({
     handleCommand = mockRoutineManager.handleCommand;
   },
 }));
+vi.mock('../src/reminders.ts', () => ({
+  ReminderManager: class MockReminderManager {
+    start = vi.fn();
+    stop = vi.fn();
+    list = vi.fn(() => []);
+    create = vi.fn();
+    cancel = vi.fn();
+    update = vi.fn();
+    flushDue = vi.fn();
+    constructor(public opts: unknown) {}
+  },
+  systemTimezone: () => 'UTC',
+}));
+vi.mock('../src/reminders-api.ts', () => ({
+  startRemindersApi: vi.fn(async () => ({
+    server: { close: vi.fn() },
+    port: 7790,
+  })),
+}));
 vi.mock('../src/http.js', () => ({
   HttpServer: class MockHttpServer {
     start = mockHttpServer.start;

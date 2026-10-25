@@ -85,7 +85,7 @@ Send a message to your bot on Telegram. Your agent will respond. That's it.
 - [Installation](#-installation)
 - [Quick start](#-quick-start)
 - [How it works](#-how-it-works)
-- [Configuration](#-configuration) — cron, routines, HTTP API
+- [Configuration](#-configuration) — cron, routines, HTTP API, agent reminders
 - [A2A agent network](#-a2a-agent-network-experimental) — peer discovery, pairing, delegation
 - [Chat commands](#-chat-commands)
 - [Supported agents](#-supported-agents)
@@ -151,8 +151,9 @@ See [`acp-connector.example.jsonc`](acp-connector.example.jsonc) for the full re
 | `showTools` | `boolean` | no | `true` | Show tool calls (e.g. "Read file", "Run tests") in chat. Set to `false` when only the final answer matters |
 | `showPlan` | `boolean` | no | `true` | Show agent plan/checklist in chat |
 | `streaming` | `boolean` | no | `true` | Stream responses with live message edits |
-| `echoInjectedPrompts` | `boolean` | no | `true` | Echo prompts injected via cron, HTTP, or routines into the chat with a source label (`⏰ [cron]`, `🌐 [http]`, `🔁 [routine]`) so you can see what triggered the agent's response |
+| `echoInjectedPrompts` | `boolean` | no | `true` | Echo prompts injected via cron, HTTP, or routines into the chat with a source label (`⏰ [cron]`/`[reminder]`, `🌐 [http]`, `🔁 [routine]`) so you can see what triggered the agent's response |
 | `logLevel` | `string` | no | `"info"` | Bridge log verbosity: `"error"` (errors only) \| `"warn"` \| `"info"` \| `"debug"`. Does not affect the agent subprocess's own stderr output |
+| `timezone` | `string` | no | system TZ | IANA timezone used to parse `at`-style reminder times (e.g. `"America/Argentina/Tucuman"`). `in`-style delays are timezone-agnostic |
 | `cron` | `CronJob[]` | no | `[]` | Scheduled jobs (see below) |
 | `routines` | `Routine[]` | no | `[]` | Named reusable prompts |
 | `http` | `HttpConfig` | no | off | HTTP server config (see below) |
@@ -216,6 +217,24 @@ Run from Telegram:
 |---|---|---|
 | `name` | `string` | Unique routine name |
 | `prompt` | `string` | Prompt text |
+
+### Agent reminders & agent-managed cron (MCP tools)
+
+The bridge always injects an `agent-reminders` MCP server into `session/new`, giving the agent tools to schedule work for itself — no config needed. Agents without MCP support simply never see the tools (a one-line warning is logged at startup).
+
+**Reminders are one-shot.** When a reminder fires, its prompt is injected into the queue as `[Reminder <id>] <prompt>` and the entry is deleted. If the agent isn't connected when it fires, the entry is kept and retried — a late action beats a lost one. Reminders persist across restarts in `.acp-connector/reminders.json` (max 50 active; entries past `firesAt` by more than 7 days are discarded).
+
+| Tool | Purpose |
+|---|---|
+| `reminder_create({ prompt, in?, at? })` | Schedule a one-shot reminder. Exactly one of `in`/`at`. Accepts human strings (`"15m"`, `"2 hours"`, `"tomorrow 10am"`) and ISO datetimes. `at` times without an explicit zone are parsed in `timezone` (default: system TZ) and stored in UTC |
+| `reminder_list()` | List pending reminders with id + firesAt |
+| `reminder_cancel({ id })` | Cancel a pending reminder |
+| `reminder_update({ id, in?, at?, prompt? })` | Snooze/reschedule or reword a reminder |
+| `cron_create({ every \| expr, prompt })` | Create a recurring job owned by the agent. `every` accepts `"30m"`, `"1h"`, `"1d"`, `"1w"` (even divisors); `expr` is a raw 5-field cron expression |
+| `cron_list()` | List all jobs — operator jobs are flagged `readOnly: true` |
+| `cron_update({ id, ... })` / `cron_delete({ id })` | Modify/delete only `managed: "agent"` jobs; operator jobs are read-only |
+
+Agent-created cron jobs are persisted to `acp-connector.jsonc` with `managed: "agent"` — they survive restarts and the agent can update/delete them later. Jobs you write in the config or create via `/cron` chat commands are operator-owned: the agent can list them but cannot modify them.
 
 ### HTTP API
 

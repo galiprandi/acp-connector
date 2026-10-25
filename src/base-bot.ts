@@ -481,7 +481,7 @@ export abstract class BaseBot implements PlatformBot {
     chatId?: number | string,
     blocks?: ContentBlock[],
     onComplete?: (response: string, error?: string) => void,
-    source?: 'cron' | 'http' | 'routine' | 'a2a',
+    source?: 'cron' | 'http' | 'routine' | 'a2a' | 'reminder',
     onChunk?: (chunk: string) => void
   ): Promise<void> {
     if (!chatId) return;
@@ -495,7 +495,8 @@ export abstract class BaseBot implements PlatformBot {
       if (handled) return;
     }
     if (this.echoInjectedPrompts && source) {
-      const icon = source === 'cron' ? '⏰' : source === 'http' ? '🌐' : '🔁';
+      const icon =
+        source === 'cron' || source === 'reminder' ? '⏰' : source === 'http' ? '🌐' : '🔁';
       const label = `[${source}]`;
       const preview = text.slice(0, 200).replace(/\n/g, ' ');
       const suffix = text.length > 200 ? '…' : '';

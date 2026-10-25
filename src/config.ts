@@ -8,6 +8,12 @@ export interface CronJob {
   prompt: string;
   chatId?: number | string;
   enabled?: boolean;
+  /**
+   * Who owns this job: "agent" jobs were created via the cron_* MCP tools
+   * and can be updated/deleted by the agent; operator jobs (config file,
+   * /cron chat commands) are read-only for the agent.
+   */
+  managed?: 'agent' | 'operator';
 }
 
 export interface Routine {
@@ -99,6 +105,11 @@ export interface BridgeConfig {
   streaming?: boolean;
   echoInjectedPrompts?: boolean;
   logLevel?: LogLevel;
+  /**
+   * IANA timezone used to parse `at`-style reminder times (default:
+   * system timezone). E.g. "America/Argentina/Tucuman".
+   */
+  timezone?: string;
   cron?: CronJob[];
   routines?: Routine[];
   http?: HttpConfig;
