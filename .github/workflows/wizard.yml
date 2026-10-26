@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
     paths:
-      - 'src/setup/**'
+      - 'src/**'
       - 'scripts/build-wizard.sh'
       - '.github/workflows/wizard.yml'
   workflow_dispatch:
