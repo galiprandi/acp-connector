@@ -33,7 +33,15 @@ import { stripJsonc } from './config.js';
 import { log } from './logger.js';
 
 const require = createRequire(import.meta.url);
-const pkg = require('../package.json') as { version: string };
+// Standalone bun-compiled binaries have no package.json on disk — fall back to
+// the version embedded at build time (ACP_CONNECTOR_VERSION) or 'unknown'.
+let pkgVersion = 'unknown';
+try {
+  pkgVersion = (require('../package.json') as { version: string }).version;
+} catch {
+  pkgVersion = process.env.ACP_CONNECTOR_VERSION ?? 'unknown';
+}
+const pkg = { version: pkgVersion };
 
 /** Callback invoked when the agent requests permission for a tool call. */
 type PermissionCallback = (

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Compile assistant-setup into single-file binaries via `bun build --compile`.
-# Outputs land in dist/wizard/.
+# Compile assistant-setup + acp-connector into single-file binaries via
+# `bun build --compile`. Outputs land in dist/wizard/.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -8,6 +8,7 @@ BUN="${BUN:-$HOME/.bun/bin/bun}"
 OUT=dist/wizard
 ENTRY=src/setup/wizard.ts
 BRIDGE_ENTRY=src/index.ts
+VERSION="$(node -p "require('./package.json').version")"
 mkdir -p "$OUT"
 
 targets=(
@@ -23,7 +24,9 @@ for t in "${targets[@]}"; do
   echo "Building $wiz ($target)"
   "$BUN" build --compile --target="$target" "$ENTRY" --outfile "$OUT/$wiz"
   echo "Building $bridge ($target)"
-  "$BUN" build --compile --target="$target" "$BRIDGE_ENTRY" --outfile "$OUT/$bridge"
+  "$BUN" build --compile --target="$target" \
+    --define "process.env.ACP_CONNECTOR_VERSION='\"$VERSION\"'" \
+    "$BRIDGE_ENTRY" --outfile "$OUT/$bridge"
 done
 
 echo "Done. Binaries in $OUT/"

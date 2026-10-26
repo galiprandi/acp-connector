@@ -1,0 +1,21 @@
+# One container per agent — each with its own state volume.
+services:
+  donna:
+    build: { context: .., dockerfile: container/Dockerfile }
+    restart: unless-stopped
+    volumes: [ "donna-data:/data" ]
+    environment:
+      TELEGRAM_TOKEN: ${DONNA_TG_TOKEN}
+      AGENT_CMD: opencode acp
+
+  lean:
+    build: { context: .., dockerfile: container/Dockerfile }
+    restart: unless-stopped
+    volumes: [ "lean-data:/data" ]
+    environment:
+      TELEGRAM_TOKEN: ${LEAN_TG_TOKEN}
+      AGENT_CMD: opencode acp
+
+volumes:
+  donna-data:
+  lean-data:

@@ -93,6 +93,27 @@ pnpm build:wizard
 #   dist/wizard/assistant-setup-windows-x64.exe
 ```
 
+On every push to `main` that touches `src/`, the `wizard.yml` workflow
+rebuilds all binaries — wizard *and* bridge — and attaches them to the latest
+release, so downloads always ship the current build.
+
+### Container image (server flavor)
+
+`container/Dockerfile` builds an all-in-one agent image: OpenCode (free
+models), acp-connector, the assistant template, Node 22 and Chromium. One
+container per agent, state in a `/data` volume (identity, `.browser-profile/`,
+`acp-connector.jsonc`):
+
+```bash
+docker build -f container/Dockerfile -t agent .
+docker run -d --name my-agent -v my-agent-data:/data \
+  -e TELEGRAM_TOKEN=<bot-token> agent
+```
+
+`container/docker-compose.example.yml` shows a multi-agent layout (one
+service + volume per agent). Env vars: `TELEGRAM_TOKEN`, `DISCORD_TOKEN`,
+`AGENT_CMD` (default `opencode acp`).
+
 Distribute the binary; end users just run `./assistant-setup`.
 
 ***
