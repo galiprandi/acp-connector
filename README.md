@@ -63,6 +63,38 @@ Then start the bridge:
 acp-connector
 ```
 
+### assistant-setup wizard (experimental)
+
+`assistant-setup` is a single-file binary (compiled with `bun build --compile`)
+that bootstraps a personal AI assistant from the
+[galiprandi/assistant](https://github.com/galiprandi/assistant) template —
+no Node, git, or package manager required on the target machine.
+
+What it does:
+
+1. Detects agent CLIs in `PATH` (devin, claude, opencode, agy, pi) and
+   best-effort flags ones that look logged in.
+2. Asks for an install directory (default `~/my-assistant`).
+3. Downloads the template tarball and extracts it there.
+4. Optionally writes a minimal `acp-connector.jsonc` for a Telegram bot.
+5. Optionally installs autostart on boot — **opt-in only** — via the native
+   mechanism: `systemd --user` (Linux), launchd `LaunchAgent` (macOS), or
+   Task Scheduler (Windows).
+6. Hands off to the detected agent with the template's setup prompt
+   (`claude -p`, `opencode run`; interactive agents launch with the prompt
+   printed to paste).
+
+Build the binaries (requires [Bun](https://bun.sh) on the build machine only):
+
+```bash
+pnpm build:wizard
+# → dist/wizard/assistant-setup-linux-x64
+#   dist/wizard/assistant-setup-macos-arm64
+#   dist/wizard/assistant-setup-windows-x64.exe
+```
+
+Distribute the binary; end users just run `./assistant-setup`.
+
 ***
 
 ## ⚡ Quick start

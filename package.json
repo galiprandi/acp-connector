@@ -8,6 +8,7 @@
   },
   "scripts": {
     "build": "tsc",
+    "build:wizard": "bash scripts/build-wizard.sh",
     "start": "tsx src/index.ts",
     "setup": "tsx src/index.ts setup",
     "dev": "tsx watch src/index.ts",
