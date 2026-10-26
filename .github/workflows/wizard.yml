@@ -1,0 +1,36 @@
+name: Build wizard binaries
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/setup/**'
+      - 'scripts/build-wizard.sh'
+      - '.github/workflows/wizard.yml'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: oven-sh/setup-bun@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'pnpm'
+      - run: pnpm install --frozen-lockfile
+      - run: bash scripts/build-wizard.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wizard-binaries
+          path: dist/wizard/
+          retention-days: 30
+      - name: Attach to latest release
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG=$(gh release view --json tagName -q .tagName)
+          gh release upload "$TAG" dist/wizard/assistant-setup-* --clobber
