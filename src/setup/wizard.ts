@@ -92,6 +92,17 @@ function handoff(agent: DetectedAgent, targetDir: string): void {
   spawn(agent.path, args, { cwd: targetDir, stdio: 'inherit' });
 }
 
+function installOpencode(): boolean {
+  console.log('Installing OpenCode...');
+  const r =
+    platform() === 'win32'
+      ? spawnSync('powershell', ['-c', 'irm opencode.ai/install.ps1 | iex'], { stdio: 'inherit' })
+      : spawnSync('sh', ['-c', 'curl -fsSL https://opencode.ai/install | bash'], {
+          stdio: 'inherit',
+        });
+  return r.status === 0;
+}
+
 function installBunAndShim(): boolean {
   if (platform() === 'win32') return false; // bun.ps1 path; documented instead
   const home = homedir();
@@ -120,12 +131,28 @@ export async function wizard(): Promise<void> {
 
   // Step 1: preflight — detect agent CLIs.
   step(1, 'Detecting agent CLIs');
-  const found = detectAgents(defaultWhich(platform()));
+  let found = detectAgents(defaultWhich(platform()));
   if (found.length === 0) {
-    console.log('No supported agent CLI found in PATH. Install one first:');
-    for (const a of KNOWN_AGENTS) console.log(`  • ${a.name}: ${a.installUrl}`);
-    rl.close();
-    process.exit(0);
+    console.log('No supported agent CLI found in PATH.');
+    console.log('An agent runtime is required — it powers the assistant.');
+    const install = await ask(
+      rl,
+      'Install OpenCode now? It is free/open-source and includes free models (no API key needed) [Y/n] '
+    );
+    if (install.toLowerCase() === 'n') {
+      console.log('Install any of these and re-run the wizard:');
+      for (const a of KNOWN_AGENTS) console.log(`  • ${a.name}: ${a.installUrl}`);
+      rl.close();
+      process.exit(0);
+    }
+    if (installOpencode()) {
+      found = detectAgents(defaultWhich(platform()));
+    }
+    if (found.length === 0) {
+      console.log('! OpenCode install did not complete — install it manually: https://opencode.ai');
+      rl.close();
+      process.exit(1);
+    }
   }
   for (const a of found) {
     const login = a.looksLoggedIn ? ' (looks logged in)' : '';
