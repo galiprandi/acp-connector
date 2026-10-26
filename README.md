@@ -31,6 +31,7 @@ The bridge is intentionally thin. It doesn't implement its own agent loop, model
 **Key features:**
 - 🤝 **A2A agent network** — peer discovery (LAN broadcast, shared file, registry), double opt-in pairing, `message/send` + `message/stream` (SSE)
 - 🛠 **MCP tools for your agent** — `list_remote_agents` and `send_message` injected into the session so agents can discover and delegate on their own
+- ⏰ **Agent reminders** — the agent can schedule one-shot self-reminders (`reminder_*` tools) and manage its own recurring cron jobs (`cron_*` tools) — follow-ups, checks, "ping me if they replied" — persisted, late-delivery safe, human time strings
 - 🤖 Works with any ACP agent (Devin, Claude Code, Codex, OpenCode, pi, Antigravity)
 - 💬 Telegram and Discord as messaging interfaces with streaming responses
 - 🖥 Headless mode — run without any messaging platform (containers, test rigs)
