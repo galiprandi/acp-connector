@@ -396,6 +396,10 @@ export async function run(): Promise<void> {
     log.info(`  💬  DC Channels: ${dc.allowedChannelIds.join(', ') || 'none (setup mode)'}`);
   }
   log.info(`  🖥️  Command:  ${config.agentCmd}`);
+  const mcpNames = (a2aMcpServers as { name?: string }[]).map((s) => s.name).filter(Boolean);
+  log.info(
+    `  🔌  MCP:      ${mcpNames.length} server(s)${mcpNames.length ? ` [${mcpNames.join(', ')}]` : ''}`
+  );
   if (config.sessionConfigPath) {
     log.info(`  📋  Config:   ${config.sessionConfigPath}`);
   }
