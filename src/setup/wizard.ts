@@ -92,6 +92,24 @@ function handoff(agent: DetectedAgent, targetDir: string): void {
   spawn(agent.path, args, { cwd: targetDir, stdio: 'inherit' });
 }
 
+function installBunAndShim(): boolean {
+  if (platform() === 'win32') return false; // bun.ps1 path; documented instead
+  const home = homedir();
+  const r = spawnSync('sh', ['-c', 'curl -fsSL https://bun.sh/install | bash'], {
+    stdio: 'inherit',
+  });
+  if (r.status !== 0) return false;
+  const bunBin = join(home, '.bun', 'bin', 'bun');
+  if (!existsSync(bunBin)) return false;
+  const localBin = join(home, '.local', 'bin');
+  mkdirSync(localBin, { recursive: true });
+  const shim = join(localBin, 'node');
+  writeFileSync(shim, `#!/bin/sh\nexec "${bunBin}" "$@"\n`);
+  spawnSync('chmod', ['+x', shim]);
+  console.log(`  ✓ bun installed; node shim -> ${shim} (add ~/.local/bin to PATH)`);
+  return true;
+}
+
 export async function wizard(): Promise<void> {
   const rl = createInterface({ input: process.stdin, output: process.stdout });
 
@@ -123,6 +141,23 @@ export async function wizard(): Promise<void> {
     if (chosen) selected = chosen;
   }
   console.log(`Using: ${selected.spec.name}`);
+
+  // Chrome check — browser-automation drives a system Chrome via agent-browser.
+  const chromeBin = [
+    'google-chrome',
+    'google-chrome-stable',
+    'chromium',
+    'chromium-browser',
+    'chrome',
+  ]
+    .map((b) => defaultWhich(platform())(b))
+    .find(Boolean);
+  if (chromeBin) {
+    console.log(`  ✓ Chrome         ${chromeBin}`);
+  } else {
+    console.log('  ! Chrome not found — browser automation needs a system Chrome.');
+    console.log('    Install it when the agent asks for web access (google-chrome or chromium).');
+  }
 
   // Step 2: target dir.
   step(2, 'Install location');
@@ -177,8 +212,21 @@ export async function wizard(): Promise<void> {
 
   rl.close();
 
-  // Step 7: handoff to the agent on the template's setup skill.
-  step(7, 'Handoff to your agent');
+  // Node-less machines: the template scripts call `node` — offer a bun shim.
+  if (!defaultWhich(platform())('node')) {
+    step(7, 'Runtime shim');
+    const shim = await ask(
+      rl,
+      'No Node.js found. Assistant scripts need a JS runtime — install bun (single binary) and create a `node` shim? [Y/n] '
+    );
+    if (shim.toLowerCase() !== 'n') {
+      if (!installBunAndShim())
+        console.log('  ! bun install failed — run manually: https://bun.sh');
+    }
+  }
+
+  // Step 8: handoff to the agent on the template's setup skill.
+  step(8, 'Handoff to your agent');
   handoff(selected, targetDir);
 }
 

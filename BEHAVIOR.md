@@ -633,8 +633,8 @@
 - returns empty when nothing is in PATH
 
 ## Module: agent spec non-interactive args
-- agents without a one-shot mode return null
 - claude uses -p with the prompt
+- every known agent exposes a one-shot prompt arg
 - every spec has an install URL and agentCmd
 - opencode uses `run` with the prompt
 
