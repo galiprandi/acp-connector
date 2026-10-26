@@ -5,6 +5,14 @@ All notable changes to acp-connector will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.0] - 2026-10-26
+
+### Added
+- **Agent reminders**: one-shot self-reminders via injected MCP tools (`reminder_create/list/cancel/update`). Persisted to `.acp-connector/reminders.json`, delivered through the prompt queue with `[Reminder <id>]` prefix, deleted on delivery, retried when the agent is offline (late delivery beats lost), boot flush for past-due entries, cap 50, 7-day TTL. Human time strings via chrono-node ("30m", "2 hours", "tomorrow 10am", "mañana 10:00") plus `timezone` config for `at` parsing
+- **Agent-managed cron**: `cron_create/list/update/delete` MCP tools; agent-owned jobs marked `managed: "agent"`, operator crons are read-only
+- `timezone` config option (default: system timezone) used by reminder `at` parsing
+- `every` shorthand for cron schedules ("30m", "2h", "1d", "1w")
+
 ## [0.11.1] - 2026-10-07
 
 ### Fixed
