@@ -620,6 +620,40 @@
 - returns false for non-command text
 - returns false for unknown command
 
+## Module: parseWhichOutput
+- handles multi-line `where` output (Windows)
+- returns null for empty or whitespace-only output
+- returns the first non-empty line
+
+## Module: detectAgents
+- detects every known agent when all are in PATH
+- detects only agents present in PATH
+- does not flag looksLoggedIn without hint files
+- flags looksLoggedIn when a login hint path exists
+- returns empty when nothing is in PATH
+
+## Module: agent spec non-interactive args
+- agents without a one-shot mode return null
+- claude uses -p with the prompt
+- every spec has an install URL and agentCmd
+- opencode uses `run` with the prompt
+
+## Module: buildSystemdUnit
+- generates a valid user unit
+
+## Module: buildLaunchdPlist
+- generates a plist with argv, workdir and keepalive
+
+## Module: buildSchtasksCommand
+- creates an ONLOGON task running the command in targetDir
+
+## Module: installDaemon
+- darwin: writes plist and loads it with launchctl
+- linux: still succeeds if loginctl fails
+- linux: writes unit and runs systemctl --user commands
+- throws on unsupported platforms
+- win32: runs the schtasks command
+
 ## Module: e2e: two real bridges with fake agents
 - agent-side delegation: fake agent calls /a2a/delegate to a peer
 - delegation to an unapproved peer is refused (403)
