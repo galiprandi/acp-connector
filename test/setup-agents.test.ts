@@ -67,9 +67,14 @@ describe('agent spec non-interactive args', () => {
     expect(opencode?.nonInteractiveArgs(prompt)).toEqual(['run', prompt]);
   });
 
-  it('agents without a one-shot mode return null', () => {
+  it('every known agent exposes a one-shot prompt arg', () => {
+    for (const a of KNOWN_AGENTS) {
+      const args = a.nonInteractiveArgs(prompt);
+      expect(args, a.bin).not.toBeNull();
+      expect(args).toContain(prompt);
+    }
     const devin = KNOWN_AGENTS.find((a) => a.bin === 'devin');
-    expect(devin?.nonInteractiveArgs(prompt)).toBeNull();
+    expect(devin?.nonInteractiveArgs(prompt)).toEqual(['--', prompt]);
   });
 
   it('every spec has an install URL and agentCmd', () => {

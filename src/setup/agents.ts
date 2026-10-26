@@ -36,8 +36,9 @@ export const KNOWN_AGENTS: AgentSpec[] = [
     bin: 'devin',
     name: 'Devin',
     installUrl: 'https://docs.devin.ai/cli',
-    // `devin acp` is an interactive ACP session — no single-shot flag.
-    nonInteractiveArgs: () => null,
+    // `devin -- <prompt>` starts an interactive session with the prompt already
+    // loaded — ideal for the setup handoff (agent stays interactive after).
+    nonInteractiveArgs: (prompt) => ['--', prompt],
     loginHints: ['.config/devin', '.devin'],
     agentCmd: 'devin acp',
   },
@@ -61,7 +62,7 @@ export const KNOWN_AGENTS: AgentSpec[] = [
     bin: 'agy',
     name: 'Antigravity',
     installUrl: 'https://antigravity.dev/',
-    nonInteractiveArgs: () => null,
+    nonInteractiveArgs: (prompt) => ['-p', prompt],
     loginHints: ['.config/agy', '.agy'],
     agentCmd: 'agy acp',
   },
@@ -69,7 +70,7 @@ export const KNOWN_AGENTS: AgentSpec[] = [
     bin: 'pi',
     name: 'pi',
     installUrl: 'https://github.com/Badhansen/pi',
-    nonInteractiveArgs: () => null,
+    nonInteractiveArgs: (prompt) => ['-p', prompt],
     loginHints: ['.config/pi'],
     agentCmd: 'pi acp',
   },
