@@ -146,6 +146,10 @@ export async function wizard(): Promise<void> {
       process.exit(0);
     }
     if (installOpencode()) {
+      // The installer updates the shell rc PATH, not ours — add the known
+      // install dirs so re-detection finds the fresh binary.
+      const home = homedir();
+      process.env.PATH = `${join(home, '.opencode', 'bin')}:${process.env.PATH}`;
       found = detectAgents(defaultWhich(platform()));
     }
     if (found.length === 0) {
