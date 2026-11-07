@@ -3,8 +3,8 @@ import TelegramBot from 'node-telegram-bot-api';
 import type { AcpClient } from './acp-client.js';
 import type { PermissionResponse } from './base-bot.js';
 import { BaseBot } from './base-bot.js';
-import { log } from './logger.js';
-import type { MediaHandler } from './media.js';
+import { errorMessage, log } from './logger.js';
+import { fetchBuffer, type MediaHandler } from './media.js';
 
 const TG_MAX_LEN = 4096;
 
@@ -278,10 +278,7 @@ export class BridgeBot extends BaseBot {
 
     try {
       const link = await this.bot.getFileLink(fileId);
-      const downloadFn = async () => {
-        const res = await fetch(link);
-        return Buffer.from(await res.arrayBuffer());
-      };
+      const downloadFn = () => fetchBuffer(link);
       const blocks = await this.mediaHandler.processMedia(
         downloadFn,
         mimeType,
@@ -297,8 +294,8 @@ export class BridgeBot extends BaseBot {
         blocks
       );
     } catch (err) {
-      log.error('Media download failed:', (err as Error).message);
-      await this.bot.sendMessage(chatId, `Error downloading media: ${(err as Error).message}`);
+      log.error('Media download failed:', errorMessage(err));
+      await this.bot.sendMessage(chatId, `Error downloading media: ${errorMessage(err)}`);
     }
   }
 

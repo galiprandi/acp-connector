@@ -13,8 +13,8 @@ import {
 import type { AcpClient } from './acp-client.js';
 import type { PermissionResponse } from './base-bot.js';
 import { BaseBot } from './base-bot.js';
-import { log } from './logger.js';
-import type { MediaHandler } from './media.js';
+import { errorMessage, log } from './logger.js';
+import { fetchBuffer, type MediaHandler } from './media.js';
 
 const DISCORD_MAX_LEN = 2000;
 
@@ -222,10 +222,7 @@ export class DiscordBot extends BaseBot {
       for (const [, attachment] of msg.attachments) {
         const mimeType = attachment.contentType || 'application/octet-stream';
         const ext = attachment.name?.split('.').pop() || 'bin';
-        const downloadFn = async () => {
-          const res = await fetch(attachment.url);
-          return Buffer.from(await res.arrayBuffer());
-        };
+        const downloadFn = () => fetchBuffer(attachment.url);
         const blocks = await this.mediaHandler.processMedia(downloadFn, mimeType, ext);
         allBlocks.push(...blocks);
       }
@@ -237,9 +234,9 @@ export class DiscordBot extends BaseBot {
       const context = await this._replyContext(msg);
       this._enqueueUserMessage(channelId, msg.id, `${context}${caption || '[📄 file]'}`, allBlocks);
     } catch (err) {
-      log.error('Discord media download failed:', (err as Error).message);
+      log.error('Discord media download failed:', errorMessage(err));
       const channel = this.client.channels.cache.get(channelId) as TextChannel;
-      await channel?.send(`Error downloading media: ${(err as Error).message}`);
+      await channel?.send(`Error downloading media: ${errorMessage(err)}`);
     }
   }
 

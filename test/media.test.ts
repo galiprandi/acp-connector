@@ -37,6 +37,9 @@ vi.mock('node-telegram-bot-api', () => ({
 
 // Mock fetch for downloads
 const mockFetch: MockFn = vi.fn(async () => ({
+  ok: true,
+  status: 200,
+  statusText: 'OK',
   arrayBuffer: async () => new TextEncoder().encode('fake-image-data').buffer,
 }));
 vi.stubGlobal('fetch', mockFetch);
@@ -71,7 +74,7 @@ function createMockAcp(): MockAcp {
   };
 }
 
-const { MediaHandler } = await import('../src/media.ts');
+const { MediaHandler, fetchBuffer } = await import('../src/media.ts');
 const { BridgeBot } = await import('../src/bot.js');
 
 const TEST_UPLOADS_DIR: string = '/tmp/test-acp-connector-uploads';
@@ -172,6 +175,71 @@ describe('MediaHandler', () => {
     try {
       rmSync(dir, { recursive: true, force: true });
     } catch {}
+  });
+});
+
+describe('fetchBuffer', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('returns a Buffer on success', async () => {
+    const buf = await fetchBuffer('https://example.com/file.pdf', { retryDelayMs: 0 });
+    expect(Buffer.isBuffer(buf)).toBe(true);
+    expect(buf.toString()).toBe('fake-image-data');
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('retries on network failure and succeeds', async () => {
+    mockFetch
+      .mockRejectedValueOnce(new Error('fetch failed'))
+      .mockRejectedValueOnce(new Error('fetch failed'));
+    const buf = await fetchBuffer('https://example.com/file.pdf', { retryDelayMs: 0 });
+    expect(buf.toString()).toBe('fake-image-data');
+    expect(mockFetch).toHaveBeenCalledTimes(3);
+  });
+
+  it('throws the last error after exhausting retries', async () => {
+    mockFetch
+      .mockRejectedValueOnce(new Error('fetch failed'))
+      .mockRejectedValueOnce(new Error('fetch failed'))
+      .mockRejectedValueOnce(new Error('fetch failed'));
+    await expect(
+      fetchBuffer('https://example.com/file.pdf', { retries: 2, retryDelayMs: 0 })
+    ).rejects.toThrow('fetch failed');
+    expect(mockFetch).toHaveBeenCalledTimes(3);
+  });
+
+  it('fails fast on HTTP 4xx without retrying', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 404,
+      statusText: 'Not Found',
+      arrayBuffer: async () => new ArrayBuffer(0),
+    });
+    await expect(
+      fetchBuffer('https://example.com/missing.pdf', { retryDelayMs: 0 })
+    ).rejects.toThrow('HTTP 404');
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('retries on HTTP 5xx and succeeds', async () => {
+    mockFetch
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 503,
+        statusText: 'Service Unavailable',
+        arrayBuffer: async () => new ArrayBuffer(0),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        arrayBuffer: async () => new TextEncoder().encode('ok-data').buffer,
+      });
+    const buf = await fetchBuffer('https://example.com/file.pdf', { retryDelayMs: 0 });
+    expect(buf.toString()).toBe('ok-data');
+    expect(mockFetch).toHaveBeenCalledTimes(2);
   });
 });
 

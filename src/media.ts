@@ -5,6 +5,42 @@ import { log } from './logger.js';
 
 const DEFAULT_UPLOADS_DIR = '/tmp/acp-connector-uploads';
 
+export interface FetchBufferOpts {
+  retries?: number;
+  retryDelayMs?: number;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Download a URL into a Buffer with retries.
+ *
+ * `fetch` failures on messaging-platform CDNs are usually transient
+ * (DNS/connection resets), so retry a few times with linear backoff.
+ * HTTP 4xx fails fast; 5xx and network errors are retried.
+ */
+export async function fetchBuffer(url: string, opts: FetchBufferOpts = {}): Promise<Buffer> {
+  const retries = opts.retries ?? 3;
+  const retryDelayMs = opts.retryDelayMs ?? 1000;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    let res: Response;
+    try {
+      res = await fetch(url);
+    } catch (err) {
+      if (attempt === retries) throw err;
+      await sleep(retryDelayMs * (attempt + 1));
+      continue;
+    }
+    if (res.ok) return Buffer.from(await res.arrayBuffer());
+    const err = new Error(`HTTP ${res.status} ${res.statusText}`);
+    if (res.status < 500 || attempt === retries) throw err;
+    await sleep(retryDelayMs * (attempt + 1));
+  }
+  throw new Error('unreachable');
+}
+
 export interface MediaHandlerOpts {
   uploadsDir: string;
   supportsImage: boolean;

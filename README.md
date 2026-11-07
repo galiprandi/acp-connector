@@ -630,6 +630,7 @@ Send photos, documents, stickers, or files to the bot and they'll be forwarded t
 - **Any file** (or agent without `image` capability) → sent as `ResourceLink` with `file://` URI (agent reads the file from disk)
 - Files are saved to `media.uploadsDir` (default: `/tmp/acp-connector-uploads`)
 - Captions are included as text alongside the media
+- Downloads retry transient failures (3 attempts, linear backoff); HTTP 4xx fails fast. On final failure the chat shows the underlying cause (e.g. `fetch failed: connect ECONNRESET [ECONNRESET]`)
 
 ```jsonc
 {

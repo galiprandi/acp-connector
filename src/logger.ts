@@ -14,6 +14,22 @@ export function setLogLevel(level: LogLevel | undefined): void {
   currentLevel = ORDER[level ?? 'info'] ?? ORDER.info;
 }
 
+/**
+ * Human-readable error string that includes the underlying `cause`
+ * (e.g. undici's `fetch failed` hides the real reason there).
+ */
+export function errorMessage(err: unknown): string {
+  if (!(err instanceof Error)) return String(err);
+  const cause = (err as { cause?: unknown }).cause;
+  if (cause instanceof Error) {
+    const code = (cause as NodeJS.ErrnoException).code;
+    const suffix = code ? ` [${code}]` : '';
+    return `${err.message}: ${cause.message}${suffix}`;
+  }
+  if (cause) return `${err.message}: ${String(cause)}`;
+  return err.message;
+}
+
 export const log = {
   error: (...args: unknown[]): void => {
     console.error(...args);
