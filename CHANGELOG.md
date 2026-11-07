@@ -5,6 +5,12 @@ All notable changes to acp-connector will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.2] - 2026-11-07
+
+### Fixed
+- Media downloads (Telegram/Discord) no longer fail on transient network errors: `fetchBuffer` retries up to 3 times with linear backoff on network failures and HTTP 5xx, fails fast on 4xx, and validates `res.ok` so HTTP errors are not saved to disk as files
+- Media download errors now show the underlying cause (e.g. `fetch failed: connect ECONNRESET [ECONNRESET]`) instead of undici's generic `fetch failed`
+
 ## [0.12.1] - 2026-10-26
 
 ### Added
