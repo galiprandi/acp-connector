@@ -509,6 +509,13 @@
 - processMedia downloads, saves, and converts
 - saves file to disk
 
+## Module: fetchBuffer
+- fails fast on HTTP 4xx without retrying
+- retries on HTTP 5xx and succeeds
+- retries on network failure and succeeds
+- returns a Buffer on success
+- throws the last error after exhausting retries
+
 ## Module: BridgeBot media handling
 - downloads and processes document messages
 - downloads and processes photo messages
