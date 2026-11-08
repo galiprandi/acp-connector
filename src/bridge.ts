@@ -1,6 +1,6 @@
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { A2aServer } from './a2a.js';
+import { A2aServer, signBody } from './a2a.js';
 import { A2aManager } from './a2a-manager.js';
 import { AcpClient } from './acp-client.js';
 import { buildAgentCard } from './agent-card.js';
@@ -223,6 +223,24 @@ export async function run(): Promise<void> {
       selfCardUrl,
       selfCard,
       audit: a2aAudit ?? undefined,
+      // Sign registry announces when we hold a pairing secret for the
+      // registry peer (id 'registry' per discovery, or a peer whose
+      // cardUrl matches the registry origin); unsigned otherwise.
+      signer: (bodyStr) => {
+        const registryUrl = config.a2a?.registry;
+        if (!registryUrl) return undefined;
+        const origin = new URL(registryUrl, 'http://127.0.0.1').origin;
+        const originMatch = a2aNetwork?.listPeers().find((p) => {
+          try {
+            return p.cardUrl.length > 0 && new URL(p.cardUrl).origin === origin;
+          } catch {
+            return false;
+          }
+        });
+        const match = originMatch ?? a2aNetwork?.getPeer('registry');
+        const secret = match?.auth?.secret;
+        return secret ? signBody(secret, bodyStr) : undefined;
+      },
       notify: async (text) => {
         for (const bot of bots) {
           for (const chatId of ownerChatIds) {

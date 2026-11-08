@@ -1,3 +1,4 @@
+import { createHmac } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { type AgentCard, buildAgentCard } from './agent-card.js';
@@ -8,6 +9,12 @@ import type { AuditLog, NetworkStore } from './network.js';
 
 /** Peer identity header. Phase-1 trust model: the id must be an approved peer. */
 export const PEER_ID_HEADER = 'x-a2a-peer-id';
+/**
+ * HMAC-SHA256 signature over the raw request body, keyed with the
+ * pairing secret the receiver issued at approve time. Pairs with
+ * `PEER_ID_HEADER`: the id says who is calling, the signature proves it.
+ */
+export const PEER_SIGNATURE_HEADER = 'x-a2a-peer-signature';
 
 const ERR_UNAUTHORIZED = -32001;
 const ERR_DUPLICATE_TASK = -32002;
@@ -54,6 +61,8 @@ export class A2aServer {
   enqueue: EnqueueFn;
   private _server: Server | null = null;
   private _card: AgentCard;
+  /** Peers that sent an unsigned request while `secure` is off (warn once per process). */
+  private _legacyPeerWarned = new Set<string>();
 
   constructor(private opts: A2aServerOptions) {
     this.enqueue = opts.enqueue;
@@ -268,6 +277,44 @@ export class A2aServer {
       return;
     }
 
+    // Peer authentication: a present signature must verify against the
+    // raw body with the pairing secret issued at approve time; in
+    // `secure` mode a missing signature rejects too. Unsigned peers are
+    // tolerated (with a once-per-process audit entry) while `secure` is
+    // off — the mixed-version mesh keeps working during the transition.
+    const signature = Array.isArray(req.headers[PEER_SIGNATURE_HEADER])
+      ? String(req.headers[PEER_SIGNATURE_HEADER][0])
+      : String(req.headers[PEER_SIGNATURE_HEADER] ?? '');
+    const secure = this.opts.config.secure ?? false;
+    if (signature) {
+      if (!this.opts.network.verifyPeerSignature(peerId, body, signature)) {
+        this.opts.audit?.write({
+          event: 'task_rejected',
+          peer: peerId,
+          detail: 'bad signature',
+        });
+        res.writeHead(200);
+        res.end(JSON.stringify(rpcError(rpc.id, ERR_UNAUTHORIZED, 'Bad peer signature')));
+        return;
+      }
+    } else if (secure) {
+      this.opts.audit?.write({
+        event: 'task_rejected',
+        peer: peerId,
+        detail: 'signature required',
+      });
+      res.writeHead(200);
+      res.end(JSON.stringify(rpcError(rpc.id, ERR_UNAUTHORIZED, 'Peer signature required')));
+      return;
+    } else if (!this._legacyPeerWarned.has(peerId)) {
+      this._legacyPeerWarned.add(peerId);
+      this.opts.audit?.write({
+        event: 'task_in',
+        peer: peerId,
+        detail: 'legacy-peer',
+      });
+    }
+
     const msg = rpc.params?.message;
     const taskId = String(msg?.metadata?.['a2a.taskId'] ?? msg?.messageId ?? '');
     const chain = (msg?.metadata?.['a2a.delegationChain'] as string[] | undefined) ?? [];
@@ -351,22 +398,33 @@ export class A2aServer {
     const taskId = body.taskId ?? `d-${Date.now()}`;
     this.opts.audit?.write({ event: 'task_out', peer: body.to, taskId });
     const origin = new URL(peer.cardUrl).origin;
+    // Sign the exact bytes we POST when we hold a pairing secret for the
+    // target peer; peers without one (legacy) receive unsigned requests.
+    const payload = JSON.stringify({
+      jsonrpc: '2.0',
+      id: taskId,
+      method: 'message/send',
+      params: {
+        message: {
+          role: 'user',
+          messageId: taskId,
+          parts: [{ kind: 'text', text: body.text }],
+          metadata: { 'a2a.taskId': taskId, 'a2a.delegationChain': [this.opts.selfId] },
+        },
+      },
+    });
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      [PEER_ID_HEADER]: this.opts.selfId,
+    };
+    const peerSecret = this.opts.network.getPeer(body.to)?.auth?.secret;
+    if (peerSecret) {
+      headers[PEER_SIGNATURE_HEADER] = signBody(peerSecret, payload);
+    }
     const rpcRes = await fetch(`${origin}/`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', [PEER_ID_HEADER]: this.opts.selfId },
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        id: taskId,
-        method: 'message/send',
-        params: {
-          message: {
-            role: 'user',
-            messageId: taskId,
-            parts: [{ kind: 'text', text: body.text }],
-            metadata: { 'a2a.taskId': taskId, 'a2a.delegationChain': [this.opts.selfId] },
-          },
-        },
-      }),
+      headers,
+      body: payload,
     });
     const rpcBody = (await rpcRes.json()) as {
       error?: { code: number; message: string };
@@ -467,6 +525,11 @@ export class A2aServer {
 
 function isLoopback(addr: string | undefined): boolean {
   return addr === '127.0.0.1' || addr === '::1' || addr === '::ffff:127.0.0.1';
+}
+
+/** HMAC-SHA256 (hex) of a raw body, keyed with a pairing secret. */
+export function signBody(secret: string, body: string): string {
+  return createHmac('sha256', secret).update(body).digest('hex');
 }
 
 function readBody(req: IncomingMessage): Promise<string> {

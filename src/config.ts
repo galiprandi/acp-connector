@@ -71,6 +71,8 @@ export interface A2aConfig {
   trustedPeers?: string[];
   /** Act as a network registry (directory only, never sees task content). */
   registryMode?: boolean;
+  /** Require HMAC peer signatures on inbound A2A requests (0.14 will default this to true). */
+  secure?: boolean;
 }
 
 export interface TelegramPlatformConfig {

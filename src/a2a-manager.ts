@@ -1,3 +1,4 @@
+import { PEER_SIGNATURE_HEADER } from './a2a.js';
 import { log } from './logger.js';
 import type { AuditLog, NetworkStore, PeerStatus } from './network.js';
 
@@ -23,6 +24,12 @@ export interface A2aManagerOptions {
   audit?: AuditLog;
   /** Called whenever an approval changes (peer approved or us confirmed). */
   onMembershipChanged?: () => Promise<void>;
+  /**
+   * Signs the raw registry announce body when we hold a pairing secret
+   * for the registry; omit the header otherwise (registry-peer semantics
+   * stay unchanged). Wired from the bridge using the registry peer record.
+   */
+  signer?: (body: string) => string | undefined;
 }
 
 const STATUS_ICON: Record<string, string> = {
@@ -48,6 +55,7 @@ export class A2aManager {
   private selfCard?: Record<string, unknown>;
   private audit?: AuditLog;
   onMembershipChanged?: () => Promise<void>;
+  private signer?: (body: string) => string | undefined;
 
   constructor(opts: A2aManagerOptions) {
     this.network = opts.network;
@@ -56,6 +64,7 @@ export class A2aManager {
     this.selfCardUrl = opts.selfCardUrl;
     this.selfCard = opts.selfCard;
     this.audit = opts.audit;
+    this.signer = opts.signer;
     if (opts.onMembershipChanged) this.onMembershipChanged = opts.onMembershipChanged;
   }
 
@@ -191,13 +200,26 @@ export class A2aManager {
 
   /**
    * Announces this agent to a curated registry (discovery-only role).
+   * When a signing callback is wired and it returns a signature, the
+   * signature header accompanies the announce; without a secret the
+   * announce is sent unsigned (registry-peer semantics unchanged).
    */
   async announceToRegistry(registryUrl: string): Promise<void> {
     const base = registryUrl.replace(/\/$/, '');
+    const body = JSON.stringify({
+      id: this.selfId,
+      cardUrl: this.selfCardUrl,
+      card: this.selfCard,
+    });
+    const signature = this.signer?.(body);
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (signature) {
+      headers[PEER_SIGNATURE_HEADER] = signature;
+    }
     await fetch(`${base}/a2a/registry/announce`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: this.selfId, cardUrl: this.selfCardUrl, card: this.selfCard }),
+      headers,
+      body,
     });
   }
 
