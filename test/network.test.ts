@@ -1,3 +1,4 @@
+import { createHmac } from 'node:crypto';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -188,6 +189,59 @@ describe('upsert safety', () => {
     expect(store.getPeer('lean')?.cardUrl).toBe('http://new-url');
     expect(store.getPeer('lean')?.status).toBe('approved');
     expect(store.getPeer('lean')?.joinedAt).toBe(joined);
+  });
+});
+
+describe('peer auth', () => {
+  it('issues a deterministic secret per peer', () => {
+    store.upsertPeer(makePeer('lean', 'approved'));
+    const first = store.issuePeerAuth('lean');
+    const second = store.issuePeerAuth('lean');
+    expect(first).toBe(second);
+    expect(first).toMatch(/^[0-9a-f]{48}$/);
+    store.save();
+    const raw = JSON.parse(readFileSync(path, 'utf8'));
+    expect(raw.peers[0].auth.secret).toMatch(/^[0-9a-f]{48}$/);
+    expect(raw.peers[0].auth.issuedAt).toBeDefined();
+  });
+
+  it('issues independent secrets for different peers', () => {
+    store.upsertPeer(makePeer('lean', 'approved'));
+    store.upsertPeer(makePeer('edu', 'approved'));
+    expect(store.issuePeerAuth('lean')).not.toBe(store.issuePeerAuth('edu'));
+  });
+
+  it('throws when issuing auth for an unknown peer', () => {
+    expect(() => store.issuePeerAuth('ghost')).toThrow(/unknown/i);
+  });
+
+  it('verifies a correct signature', () => {
+    store.upsertPeer(makePeer('lean', 'approved'));
+    const secret = store.issuePeerAuth('lean');
+    const body = '{"jsonrpc":"2.0"}';
+    const sig = createHmac('sha256', secret).update(body).digest('hex');
+    expect(store.verifyPeerSignature('lean', body, sig)).toBe(true);
+  });
+
+  it('verifyPeerSignature rejects tampered bodies and foreign peers', () => {
+    store.upsertPeer(makePeer('lean', 'approved'));
+    const secret = store.issuePeerAuth('lean');
+    const body = '{"jsonrpc":"2.0"}';
+    const sig = createHmac('sha256', secret).update(body).digest('hex');
+    // tampered body
+    expect(store.verifyPeerSignature('lean', `${body} `, sig)).toBe(false);
+    // tampered signature
+    expect(
+      store.verifyPeerSignature(
+        'lean',
+        body,
+        createHmac('sha256', secret).update('other body').digest('hex')
+      )
+    ).toBe(false);
+    // foreign peer (no auth)
+    expect(store.verifyPeerSignature('edu', body, sig)).toBe(false);
+    // unknown peer
+    expect(store.verifyPeerSignature('ghost', body, sig)).toBe(false);
   });
 });
 

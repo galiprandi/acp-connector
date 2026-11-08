@@ -1,3 +1,4 @@
+import { createHmac } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -174,6 +175,91 @@ describe('edge: misc', () => {
     });
     await off.start();
     expect(off.address()).toBeNull();
+  });
+});
+
+describe('edge: peer auth', () => {
+  const bodyOf = (parts: unknown, meta?: Record<string, unknown>, msgId = 'm') =>
+    JSON.stringify({
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'message/send',
+      params: { message: { role: 'user', messageId: msgId, parts, metadata: meta } },
+    });
+
+  const sendRaw = (body: string, headers: Record<string, string> = {}) =>
+    post('/', body, headers).then((r) => r.json());
+
+  const signedHeaders = (peerId: string, body: string) => {
+    const secret = network.getPeer(peerId)?.auth?.secret ?? '';
+    return {
+      'X-A2A-Peer-Id': peerId,
+      'X-A2A-Peer-Signature': createHmac('sha256', secret).update(body).digest('hex'),
+    };
+  };
+
+  it('accepts a signed message/send from a peer with auth', async () => {
+    network.upsertPeer({ ...approved, status: 'approved' });
+    network.issuePeerAuth('p');
+    const body = bodyOf([{ kind: 'text', text: 'signed hello' }]);
+    const res = await sendRaw(body, signedHeaders('p', body));
+    expect(res.result).toBeDefined();
+    expect(enqueue).toHaveBeenCalledOnce();
+  });
+
+  it('accepts an unsigned legacy peer when secure is false', async () => {
+    network.upsertPeer({ ...approved, status: 'approved' });
+    const body = bodyOf([{ kind: 'text', text: 'legacy' }]);
+    const res = await sendRaw(body, { 'X-A2A-Peer-Id': 'p' });
+    expect(res.result).toBeDefined();
+    expect(enqueue).toHaveBeenCalledOnce();
+  });
+
+  it('rejects an unsigned peer when secure is true', async () => {
+    const secureDir = mkdtempSync(join(tmpdir(), 'acp-edge-secure-'));
+    const secureNetwork = new NetworkStore(join(secureDir, 'network.json'));
+    secureNetwork.upsertPeer({ ...approved, status: 'approved' });
+    secureNetwork.issuePeerAuth('p');
+    const secureServer = new A2aServer({
+      config: { enabled: true, port: 0, card: { name: 'S', description: 's' }, secure: true },
+      network: secureNetwork,
+      selfId: 'self',
+      enqueue: vi.fn((_t, _c, _b, done) => done?.('ok')),
+    });
+    await secureServer.start();
+    const secureAddr = secureServer.address();
+    const securePort = typeof secureAddr === 'object' && secureAddr ? secureAddr.port : 0;
+    try {
+      const body = JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'message/send',
+        params: { message: { role: 'user', messageId: 'm', parts: [{ kind: 'text', text: 'x' }] } },
+      });
+      const res = await fetch(`http://127.0.0.1:${securePort}/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-A2A-Peer-Id': 'p' },
+        body,
+      }).then((r) => r.json());
+      expect(res.error.code).toBe(-32001);
+      expect(res.error.message).toMatch(/signature required/i);
+    } finally {
+      await secureServer.stop();
+      rmSync(secureDir, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects a wrong signature when secure is false', async () => {
+    network.upsertPeer({ ...approved, status: 'approved' });
+    network.issuePeerAuth('p');
+    const real = network.getPeer('p')?.auth?.secret ?? '';
+    const body = bodyOf([{ kind: 'text', text: 'forged' }]);
+    const res = await sendRaw(body, {
+      'X-A2A-Peer-Id': 'p',
+      'X-A2A-Peer-Signature': createHmac('sha256', real).update('tampered').digest('hex'),
+    });
+    expect(res.error).toBeDefined();
+    expect(enqueue).not.toHaveBeenCalled();
   });
 });
 

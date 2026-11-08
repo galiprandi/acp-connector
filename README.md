@@ -468,9 +468,11 @@ Same owner does **not** imply auto-approval. Pending requests persist in
 
 - Only `approved` peers can send tasks — anything else is rejected before any
   processing (the prompt is never built)
-- Peer identity uses the `X-A2A-Peer-Id` header on trusted LANs; for exposure
-  beyond a LAN declare `securitySchemes` in your card and terminate TLS in
-  front — plain insecure tunnels are not supported
+- Peer identity uses the `X-A2A-Peer-Id` header; when a pairing secret exists,
+  requests must also carry an `X-A2A-Peer-Signature` HMAC (see *Peer
+  authentication* below). For exposure beyond a trusted LAN set
+  `a2a.secure: true`, declare `securitySchemes` in your card, and terminate TLS
+  in front — plain insecure tunnels are not supported
 - **Remote content never triggers bridge commands**: A2A-injected text that
   starts with `/` is treated as agent input, not as a command. Commands work
   on every operator entry point (Telegram, Discord, `/prompt`, cron, routines)
@@ -481,6 +483,30 @@ Same owner does **not** imply auto-approval. Pending requests persist in
   announces itself on the same interval
 - Every membership and task event is appended to `.acp-connector/audit.log`
   (JSONL) — who delegated what, approvals, rejections, discoveries
+
+### Peer authentication
+
+Peer ids are public (they appear in agent cards, `/a2a/peers`, mDNS and
+`network.json`), so the id header alone is not a secret. When a peer is
+approved (`/a2a approve`), the bridge issues a **random per-pairing secret**,
+stores it in its peer record, and delivers it once inside the approve →
+confirm POST. Both sides then sign A2A traffic with the same key:
+
+- Outbound: `message/send` delegations and registry announces carry
+  `X-A2A-Peer-Signature: hex(HMAC-SHA256(secret, raw-body))` whenever a secret
+  for the target peer exists
+- Inbound: a present signature must verify against the raw body — mismatch is
+  rejected before any processing
+
+`a2a.secure: true` makes signatures mandatory: unsigned peers are rejected
+with a `signature required` error. While it is off (default), peers without a
+secret are still accepted — a legacy transition so mixed-version meshes keep
+working; every unsigned request is audited as `legacy-peer` (once per peer).
+Set `secure: true` once the whole mesh runs 0.13+; 0.14 will default it to
+true. Known tradeoff: the pairing secret itself crosses the wire exactly
+once (in the approve → confirm POST), so a first-message man-in-the-middle
+on a plain-HTTP LAN could capture it — accepted for LAN deployments without
+TLS.
 
 ### Registry role
 

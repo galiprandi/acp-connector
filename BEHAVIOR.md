@@ -27,6 +27,12 @@
 - server disabled: start() is a no-op and nothing listens
 - unknown GET path returns 404
 
+## Module: edge: peer auth
+- accepts a signed message/send from a peer with auth
+- accepts an unsigned legacy peer when secure is false
+- rejects a wrong signature when secure is false
+- rejects an unsigned peer when secure is true
+
 ## Module: message/stream (SSE)
 - echoes contextId in the plain message/send response
 - rejects unapproved peers before opening the stream
@@ -568,6 +574,13 @@
 ## Module: upsert safety
 - never downgrades an approved peer to pending on rediscovery
 - preserves joinedAt when an approved peer is rediscovered
+
+## Module: peer auth
+- issues a deterministic secret per peer
+- issues independent secrets for different peers
+- throws when issuing auth for an unknown peer
+- verifies a correct signature
+- verifyPeerSignature rejects tampered bodies and foreign peers
 
 ## Module: audit log
 - appends JSONL entries to audit.log next to network.json
