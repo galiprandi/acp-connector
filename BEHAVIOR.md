@@ -285,6 +285,8 @@
 - /queue lists pending prompts
 - /queue on empty queue reports empty
 - /status reports agent state, session, queue and uptime
+- reports message handler errors without rejecting
+- sendMessage splits text longer than 4096 chars into chunks
 
 ## Module: command source isolation
 - runs commands for http-injected prompts but never for a2a content
@@ -375,8 +377,10 @@
 - ignores empty text
 - ignores thoughts when showThoughts=false
 - rejects unauthorized channel ID
+- reports message handler errors without rejecting
 - responds with channel ID in setup mode (empty allowlist)
 - sendMessage sends to the channel
+- sendMessage splits text longer than 2000 chars into chunks
 - sends error message on prompt failure
 - sends error message when acp.prompt() rejects asynchronously
 - sends permission buttons when channel is active

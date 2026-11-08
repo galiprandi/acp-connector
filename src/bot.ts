@@ -85,7 +85,16 @@ export class BridgeBot extends BaseBot {
   }
 
   private _setupHandlers(): void {
-    this.bot.on('message', (msg) => this._onMessage(msg));
+    this.bot.on('message', (msg) =>
+      this._onMessage(msg).catch(async (err) => {
+        log.error('Unhandled message error:', errorMessage(err));
+        try {
+          await this.bot.sendMessage(msg.chat.id, `⚠️ ${errorMessage(err).slice(0, 200)}`);
+        } catch {
+          // best effort — never crash on error reporting
+        }
+      })
+    );
     this.bot.on('callback_query', (query) => this._onCallbackQuery(query));
     this.bot.on('polling_error', (err) => log.error('TG polling error:', err.message));
   }
@@ -323,7 +332,7 @@ export class BridgeBot extends BaseBot {
     const agentCommandLines = this._agentCommandsHelpLines();
     const agentSection =
       agentCommandLines.length > 0 ? ['', '*Agent commands:*', ...agentCommandLines] : [];
-    await this.bot.sendMessage(
+    await this.sendMessage(
       cid,
       [
         '👋 *acp-connector*',
@@ -362,8 +371,7 @@ export class BridgeBot extends BaseBot {
         'Any other text is sent to the agent.',
         '',
         '📖 Docs: https://github.com/galiprandi/acp-connector#readme',
-      ].join('\n'),
-      { parse_mode: 'Markdown' }
+      ].join('\n')
     );
     return true;
   }
@@ -417,7 +425,8 @@ export class BridgeBot extends BaseBot {
       if (rejectOpt)
         buttons.push({ text: 'Deny', callback_data: `perm_deny_${rejectOpt.optionId}` });
 
-      await this.bot.sendMessage(chatId, `Permission required:\n\n${desc}`, {
+      const text = `Permission required:\n\n${desc}`.slice(0, TG_MAX_LEN);
+      await this.bot.sendMessage(chatId, text, {
         reply_markup: { inline_keyboard: [buttons] },
       });
 
@@ -520,6 +529,18 @@ export class BridgeBot extends BaseBot {
   }
 
   async sendMessage(chatId: number | string, text: string): Promise<void> {
-    await this.bot.sendMessage(chatId as number, text, { parse_mode: 'Markdown' });
+    for (let i = 0; i < text.length; i += TG_MAX_LEN) {
+      const chunk = text.slice(i, i + TG_MAX_LEN);
+      try {
+        await this.bot.sendMessage(chatId as number, chunk, { parse_mode: 'Markdown' });
+      } catch (err) {
+        const msg = (err as Error).message;
+        if (msg.includes('parse') || msg.includes('entity')) {
+          await this.bot.sendMessage(chatId as number, chunk);
+        } else {
+          throw err;
+        }
+      }
+    }
   }
 }

@@ -442,4 +442,31 @@ describe('DiscordBot', () => {
     await handler(makeMessage('123', '/stop'));
     expect(bot.queue.length).toBe(0);
   });
+
+  it('sendMessage splits text longer than 2000 chars into chunks', async () => {
+    const { bot } = createBot();
+    await bot.start();
+    await bot.sendMessage('123', 'x'.repeat(4500));
+    const sends = mockChannel.send.mock.calls.filter(
+      (c) => typeof c[0] === 'string' && c[0].startsWith('x')
+    );
+    expect(sends.length).toBe(3);
+    expect((sends[0][0] as string).length).toBe(2000);
+    expect((sends[1][0] as string).length).toBe(2000);
+    expect((sends[2][0] as string).length).toBe(500);
+  });
+
+  it('reports message handler errors without rejecting', async () => {
+    const { bot } = createBot();
+    await bot.start();
+    mockChannel.send.mockRejectedValueOnce(new Error('boom'));
+    const handler = mockClient.on.mock.calls.find((c) => c[0] === 'messageCreate')[1] as (
+      msg: MockMessage
+    ) => Promise<void>;
+    await handler(makeMessage('123', '/model'));
+    const report = mockChannel.send.mock.calls.find(
+      (c) => typeof c[0] === 'string' && c[0].includes('⚠️')
+    );
+    expect(report).toBeDefined();
+  });
 });

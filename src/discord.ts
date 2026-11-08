@@ -89,7 +89,17 @@ export class DiscordBot extends BaseBot {
   }
 
   private _setupHandlers(): void {
-    this.client.on(Events.MessageCreate, (msg) => this._onMessage(msg));
+    this.client.on(Events.MessageCreate, (msg) =>
+      this._onMessage(msg).catch(async (err) => {
+        log.error('Unhandled message error:', errorMessage(err));
+        try {
+          const channel = msg.channel as TextChannel;
+          await channel?.send(`⚠️ ${errorMessage(err).slice(0, 200)}`);
+        } catch {
+          // best effort — never crash on error reporting
+        }
+      })
+    );
     this.client.on(Events.InteractionCreate, (interaction) =>
       this._onInteraction(interaction as ButtonInteraction)
     );
@@ -268,7 +278,8 @@ export class DiscordBot extends BaseBot {
     const agentCommandLines = this._agentCommandsHelpLines();
     const agentSection =
       agentCommandLines.length > 0 ? ['', '**Agent commands:**', ...agentCommandLines] : [];
-    await (this.client.channels.cache.get(cid) as TextChannel)?.send(
+    await this.sendMessage(
+      cid,
       [
         '👋 **acp-connector**',
         '',
@@ -383,7 +394,8 @@ export class DiscordBot extends BaseBot {
         );
       }
 
-      await channel.send({ content: `Permission required:\n\n${desc}`, components: [row] });
+      const content = `Permission required:\n\n${desc}`.slice(0, DISCORD_MAX_LEN);
+      await channel.send({ content, components: [row] });
 
       return new Promise<PermissionResponse>((resolve) => {
         this.permissionPending = { resolve };
@@ -478,6 +490,8 @@ export class DiscordBot extends BaseBot {
 
   async sendMessage(channelId: number | string, text: string): Promise<void> {
     const channel = this.client.channels.cache.get(String(channelId)) as TextChannel;
-    await channel?.send(text);
+    for (let i = 0; i < text.length; i += DISCORD_MAX_LEN) {
+      await channel?.send(text.slice(i, i + DISCORD_MAX_LEN));
+    }
   }
 }

@@ -1413,6 +1413,29 @@ describe('/queue and /status', () => {
     expect(call[1]).toContain('uptime:');
     expect(call[1]).toContain('`acp-agent serve`');
   });
+
+  it('sendMessage splits text longer than 4096 chars into chunks', async () => {
+    const { bot } = createBot();
+    await bot.start();
+    await bot.sendMessage(123, 'x'.repeat(5000));
+    const calls = mockBot.sendMessage.mock.calls.filter((c) => c[0] === 123);
+    expect(calls.length).toBe(2);
+    expect((calls[0][1] as string).length).toBe(4096);
+    expect((calls[1][1] as string).length).toBe(904);
+  });
+
+  it('reports message handler errors without rejecting', async () => {
+    const { bot } = createBot();
+    await bot.start();
+    mockBot.sendMessage.mockRejectedValueOnce(new Error('boom'));
+    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    await handler({ chat: { id: 123 }, message_id: 1, text: '/model' });
+    const report = mockBot.sendMessage.mock.calls.find(
+      (c) => typeof c[1] === 'string' && c[1].includes('⚠️')
+    );
+    expect(report).toBeDefined();
+    expect(report?.[2]).toBeUndefined();
+  });
 });
 
 describe('command source isolation', () => {
