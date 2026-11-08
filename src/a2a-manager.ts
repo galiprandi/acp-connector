@@ -111,10 +111,19 @@ export class A2aManager {
   /**
    * Inbound confirmation: the peer's owner approved us and it called back.
    * Approves the peer locally — completing the double opt-in.
+   *
+   * `peerSecret` is the pairing token the peer issued for us (used when we
+   * sign requests to them). It crosses the network exactly once, inside
+   * the approve→confirm POST. A first-message MITM on a plain-HTTP LAN
+   * could capture it — accepted tradeoff for LAN deployments without TLS
+   * (Plan 001 / audit SEC-02); transport hardening is out of scope here.
    */
-  async handleConfirm(peerId: string): Promise<void> {
+  async handleConfirm(peerId: string, peerSecret?: string): Promise<void> {
     const peer = this.network.getPeer(peerId);
     if (peer && peer.status === 'pending') {
+      if (peerSecret && !peer.auth) {
+        peer.auth = { secret: peerSecret, issuedAt: new Date().toISOString() };
+      }
       this.network.setStatus(peerId, 'approved');
       this.network.save();
       this.audit?.write({ event: 'peer_confirmed', peer: peerId });
@@ -275,11 +284,18 @@ export class A2aManager {
       if (action === 'approve') {
         const peer = this.network.getPeer(id);
         if (peer?.cardUrl) {
+          // Issue (or reuse) the pairing secret for this peer and send it
+          // in the confirm body. It crosses the wire exactly once, in this
+          // POST: a first-message MITM on a plain-HTTP LAN could capture
+          // it — accepted tradeoff for LAN deployments without TLS
+          // (Plan 001 / audit SEC-02). The secret is never logged and
+          // never appears in card or peers API responses.
+          const secret = this.network.issuePeerAuth(id);
           const base = new URL(peer.cardUrl).origin;
           await fetch(`${base}/a2a/confirm`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ id: this.selfId }),
+            body: JSON.stringify({ id: this.selfId, peerSecret: secret }),
           }).catch(() => {});
         }
         await this.onMembershipChanged?.();

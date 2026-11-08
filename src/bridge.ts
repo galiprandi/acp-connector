@@ -351,7 +351,7 @@ export async function run(): Promise<void> {
         target?.enqueuePrompt(text, chatId, blocks, onComplete, 'a2a');
       },
       onJoin: (req) => a2aManager.handleJoinRequest(req),
-      onConfirm: (peerId) => a2aManager.handleConfirm(peerId),
+      onConfirm: (peerId, peerSecret) => a2aManager.handleConfirm(peerId, peerSecret),
       audit: a2aAudit ?? undefined,
     });
     await a2aServer.start();

@@ -21,7 +21,7 @@ export interface A2aServerOptions {
   /** Called when a peer POSTs /a2a/join — deployment glue, not part of A2A. */
   onJoin?: (req: { id: string; cardUrl: string; card?: Record<string, unknown> }) => Promise<void>;
   /** Called when an approved peer confirms us back (double opt-in completes). */
-  onConfirm?: (peerId: string) => Promise<void>;
+  onConfirm?: (peerId: string, peerSecret?: string) => Promise<void>;
   /** Optional audit trail for inbound/outbound tasks. */
   audit?: AuditLog;
 }
@@ -125,13 +125,13 @@ export class A2aServer {
         }
         if (req.method === 'POST' && url.pathname === '/a2a/confirm') {
           const body = await readBody(req);
-          const confirm = JSON.parse(body) as { id?: string };
+          const confirm = JSON.parse(body) as { id?: string; peerSecret?: string };
           if (!confirm.id) {
             res.writeHead(400);
             res.end(JSON.stringify({ error: 'id is required' }));
             return;
           }
-          await this.opts.onConfirm?.(confirm.id);
+          await this.opts.onConfirm?.(confirm.id, confirm.peerSecret);
           res.writeHead(200);
           res.end(JSON.stringify({ status: 'ok' }));
           return;
