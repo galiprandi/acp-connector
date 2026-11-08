@@ -5,6 +5,18 @@ All notable changes to acp-connector will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.3] - 2026-11-08
+
+### Fixed
+- Long outbound messages (e.g. `/model`, `/help`, large command replies) no longer crash the bridge or get rejected by Telegram/Discord message limits — they are split into platform-sized chunks
+- Unhandled message-handler errors are caught and reported as a short warning instead of crashing the process
+- Permission prompts, `/start`, and `/help` now respect platform message limits (oversized permission descriptions are truncated)
+
+### Added
+- Smart message splitting: chunks break at paragraph → line → word boundaries (hard cut only as last resort) instead of mid-word fixed-length slices
+- Continuation chunks are sent as replies to the first chunk (Telegram `reply_to_message_id`, Discord `messageReference`) so long replies read as a single message
+- Outbound chunking centralized in `BaseBot.sendMessage` via a `_sendPlatformMessage` platform primitive — platform limits live in one place per bot
+
 ## [0.12.2] - 2026-11-07
 
 ### Fixed

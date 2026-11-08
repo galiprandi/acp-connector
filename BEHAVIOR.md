@@ -286,7 +286,11 @@
 - /queue on empty queue reports empty
 - /status reports agent state, session, queue and uptime
 - reports message handler errors without rejecting
+- sendMessage prefers line boundaries when no paragraph break fits
+- sendMessage prefers paragraph boundaries over hard cuts
+- sendMessage prefers space boundaries when no line break fits
 - sendMessage splits text longer than 4096 chars into chunks
+- sendMessage threads continuation chunks as replies to the first
 
 ## Module: command source isolation
 - runs commands for http-injected prompts but never for a2a content
@@ -379,6 +383,7 @@
 - rejects unauthorized channel ID
 - reports message handler errors without rejecting
 - responds with channel ID in setup mode (empty allowlist)
+- sendMessage prefers paragraph boundaries and threads replies
 - sendMessage sends to the channel
 - sendMessage splits text longer than 2000 chars into chunks
 - sends error message on prompt failure
