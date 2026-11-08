@@ -75,8 +75,11 @@ src/
 ├── index.ts       — CLI entrypoint (setup or run)
 ├── bridge.ts      — orchestrates all components
 ├── acp-client.ts  — spawns ACP agent, handles protocol + sessions
-├── bot.ts         — Telegram bot, message queue, stream batching, PlatformBot interface
-├── discord.ts     — Discord bot, implements PlatformBot
+├── base-bot.ts    — BaseBot: shared queue, streaming, commands, sendMessage chunking
+│                    (paragraph/line/word boundaries) + reply threading via
+│                    _sendPlatformMessage primitive implemented per platform
+├── bot.ts         — Telegram bot, PlatformBot interface, _sendPlatformMessage (Markdown + plain fallback)
+├── discord.ts     — Discord bot, implements PlatformBot, _sendPlatformMessage
 ├── media.ts       — MediaHandler: download (fetchBuffer w/ retry), save, convert to ACP ContentBlocks
 ├── cron.ts        — scheduled prompt injection
 ├── routines.ts    — named prompts + /cron, /routine, /run commands

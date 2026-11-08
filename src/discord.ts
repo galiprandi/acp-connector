@@ -488,10 +488,21 @@ export class DiscordBot extends BaseBot {
     }
   }
 
-  async sendMessage(channelId: number | string, text: string): Promise<void> {
+  protected async _sendPlatformMessage(
+    channelId: number | string,
+    text: string,
+    replyToId?: number | string
+  ): Promise<{ messageId?: number | string }> {
     const channel = this.client.channels.cache.get(String(channelId)) as TextChannel;
-    for (let i = 0; i < text.length; i += DISCORD_MAX_LEN) {
-      await channel?.send(text.slice(i, i + DISCORD_MAX_LEN));
-    }
+    const msg = await channel?.send({
+      content: text,
+      ...(replyToId !== undefined
+        ? {
+            reply: { messageReference: String(replyToId), failIfNotExists: false },
+            allowedMentions: { repliedUser: false },
+          }
+        : {}),
+    });
+    return { messageId: msg?.id };
   }
 }

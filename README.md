@@ -786,6 +786,7 @@ The bridge will call `session/load` or `session/resume` (depending on agent capa
 ## ⚡ Status feedback
 
 - **Typing indicator**: while the agent works on a prompt, the bridge sends a `typing` chat action every ~4s (Telegram `sendChatAction`, Discord `sendTyping`) — visible even when `showThoughts`/`showTools` are off.
+- **Long messages**: replies that exceed the platform limit (4096 chars on Telegram, 2000 on Discord) are split into multiple messages at paragraph → line → word boundaries (hard cuts only when no boundary fits). Continuation parts are sent as replies to the first part so they read as a single message.
 - **Agent crash detection**: if the agent process exits unexpectedly, all allowed chats get a notification with a **🔄 Reconnect** inline button. Tapping it re-spawns `agentCmd` and resumes the previous session when possible (via `session/resume`/`session/load`), falling back to a fresh session if resume fails.
 
 ***

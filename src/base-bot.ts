@@ -112,8 +112,55 @@ export abstract class BaseBot implements PlatformBot {
 
   abstract start(): Promise<void>;
   abstract stop(): void;
-  abstract sendMessage(chatId: number | string, text: string): Promise<void>;
   abstract notifyAgentExit(code: number | null): Promise<void>;
+
+  /**
+   * Send a message to a chat, splitting text longer than the platform limit
+   * (`maxLen`) into continuation chunks. Chunks prefer paragraph (`\n\n`),
+   * then line (`\n`), then word (space) boundaries over hard cuts, and
+   * continuations are threaded as replies to the first chunk when the
+   * platform supports it.
+   */
+  async sendMessage(chatId: number | string, text: string): Promise<void> {
+    const chunks = this._chunkText(text);
+    let replyToId: number | string | undefined;
+    for (const chunk of chunks) {
+      const sent = await this._sendPlatformMessage(chatId, chunk, replyToId);
+      replyToId = sent?.messageId ?? replyToId;
+    }
+  }
+
+  /**
+   * Split text into chunks of at most `maxLen` chars, preferring
+   * paragraph/line/word boundaries over mid-word hard cuts.
+   */
+  protected _chunkText(text: string): string[] {
+    const chunks: string[] = [];
+    let rest = text;
+    while (rest.length > this.maxLen) {
+      const window = rest.slice(0, this.maxLen);
+      let idx = window.lastIndexOf('\n\n');
+      if (idx <= 0) idx = window.lastIndexOf('\n');
+      if (idx <= 0) idx = window.lastIndexOf(' ');
+      if (idx <= 0) idx = this.maxLen;
+      chunks.push(rest.slice(0, idx));
+      rest = rest.slice(idx);
+    }
+    if (rest.length > 0) chunks.push(rest);
+    return chunks;
+  }
+
+  /**
+   * Platform primitive: send ONE message (already within `maxLen`).
+   * `replyToId` is set for continuation chunks — platforms that support
+   * replies should thread them to the first chunk's message id.
+   * Returns the sent message id when available.
+   */
+  protected abstract _sendPlatformMessage(
+    chatId: number | string,
+    text: string,
+    replyToId?: number | string
+  ): Promise<{ messageId?: number | string } | undefined>;
 
   protected abstract _sendNewMessage(text: string): Promise<{ messageId: number | string }>;
   protected abstract _editMessage(messageId: number | string, text: string): Promise<void>;

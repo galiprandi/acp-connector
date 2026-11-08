@@ -1424,6 +1424,53 @@ describe('/queue and /status', () => {
     expect((calls[1][1] as string).length).toBe(904);
   });
 
+  it('sendMessage prefers paragraph boundaries over hard cuts', async () => {
+    const { bot } = createBot();
+    await bot.start();
+    const text = `${'a'.repeat(4000)}\n\n${'b'.repeat(4000)}`;
+    await bot.sendMessage(123, text);
+    const calls = mockBot.sendMessage.mock.calls.filter((c) => c[0] === 123);
+    expect(calls.length).toBe(2);
+    expect((calls[0][1] as string).length).toBe(4000);
+    expect((calls[1][1] as string).startsWith('\n\n')).toBe(true);
+  });
+
+  it('sendMessage prefers line boundaries when no paragraph break fits', async () => {
+    const { bot } = createBot();
+    await bot.start();
+    const text = `${'a'.repeat(3000)}\n${'b'.repeat(3000)}`;
+    await bot.sendMessage(123, text);
+    const calls = mockBot.sendMessage.mock.calls.filter((c) => c[0] === 123);
+    expect(calls.length).toBe(2);
+    expect((calls[0][1] as string).length).toBe(3000);
+  });
+
+  it('sendMessage prefers space boundaries when no line break fits', async () => {
+    const { bot } = createBot();
+    await bot.start();
+    const text = `${'a'.repeat(3000)} ${'b'.repeat(3000)}`;
+    await bot.sendMessage(123, text);
+    const calls = mockBot.sendMessage.mock.calls.filter((c) => c[0] === 123);
+    expect(calls.length).toBe(2);
+    expect((calls[0][1] as string).length).toBe(3000);
+  });
+
+  it('sendMessage threads continuation chunks as replies to the first', async () => {
+    const { bot } = createBot();
+    await bot.start();
+    mockBot.sendMessage
+      .mockResolvedValueOnce({ message_id: 101 })
+      .mockResolvedValueOnce({ message_id: 102 });
+    await bot.sendMessage(123, 'x'.repeat(5000));
+    const calls = mockBot.sendMessage.mock.calls.filter((c) => c[0] === 123);
+    expect(calls.length).toBe(2);
+    const firstOpts = calls[0][2] as Record<string, unknown>;
+    const secondOpts = calls[1][2] as Record<string, unknown>;
+    expect(firstOpts.reply_to_message_id).toBeUndefined();
+    expect(secondOpts.reply_to_message_id).toBe(101);
+    expect(secondOpts.allow_sending_without_reply).toBe(true);
+  });
+
   it('reports message handler errors without rejecting', async () => {
     const { bot } = createBot();
     await bot.start();

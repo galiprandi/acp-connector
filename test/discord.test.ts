@@ -162,7 +162,9 @@ describe('DiscordBot', () => {
     ) => Promise<void>;
     await handler(makeMessage('123', '/help'));
     expect(acp.prompt).not.toHaveBeenCalled();
-    expect(mockChannel.send).toHaveBeenCalledWith(expect.stringContaining('acp-connector'));
+    expect(mockChannel.send).toHaveBeenCalledWith(
+      expect.objectContaining({ content: expect.stringContaining('acp-connector') })
+    );
   });
 
   it('ignores empty text', async () => {
@@ -387,7 +389,7 @@ describe('DiscordBot', () => {
   it('sendMessage sends to the channel', async () => {
     const { bot } = createBot();
     await bot.sendMessage('123', 'hello from cron');
-    expect(mockChannel.send).toHaveBeenCalledWith('hello from cron');
+    expect(mockChannel.send).toHaveBeenCalledWith({ content: 'hello from cron' });
   });
 
   it('handles onCommand callback', async () => {
@@ -447,13 +449,43 @@ describe('DiscordBot', () => {
     const { bot } = createBot();
     await bot.start();
     await bot.sendMessage('123', 'x'.repeat(4500));
-    const sends = mockChannel.send.mock.calls.filter(
-      (c) => typeof c[0] === 'string' && c[0].startsWith('x')
-    );
+    const sends = mockChannel.send.mock.calls
+      .map((c) => c[0])
+      .filter(
+        (a): a is { content: string } => typeof a === 'object' && a !== null && 'content' in a
+      );
     expect(sends.length).toBe(3);
-    expect((sends[0][0] as string).length).toBe(2000);
-    expect((sends[1][0] as string).length).toBe(2000);
-    expect((sends[2][0] as string).length).toBe(500);
+    expect(sends[0].content.length).toBe(2000);
+    expect(sends[1].content.length).toBe(2000);
+    expect(sends[2].content.length).toBe(500);
+  });
+
+  it('sendMessage prefers paragraph boundaries and threads replies', async () => {
+    const { bot } = createBot();
+    await bot.start();
+    let id = 100;
+    mockChannel.send.mockImplementation(async (content: unknown) => ({
+      id: String(++id),
+      edit: vi.fn(async () => ({})),
+      content,
+    }));
+    const text = `${'a'.repeat(1500)}\n\n${'b'.repeat(1500)}`;
+    await bot.sendMessage('123', text);
+    const sends = mockChannel.send.mock.calls.filter(
+      (c) => typeof c[0] === 'object' && c[0] !== null && 'content' in (c[0] as object)
+    );
+    expect(sends.length).toBe(2);
+    const first = sends[0][0] as { content: string; reply?: unknown };
+    const second = sends[1][0] as {
+      content: string;
+      reply?: { messageReference?: string };
+      allowedMentions?: { repliedUser?: boolean };
+    };
+    expect(first.content.length).toBe(1500);
+    expect(first.reply).toBeUndefined();
+    expect(second.content.startsWith('\n\n')).toBe(true);
+    expect(second.reply?.messageReference).toBe('101');
+    expect(second.allowedMentions?.repliedUser).toBe(false);
   });
 
   it('reports message handler errors without rejecting', async () => {

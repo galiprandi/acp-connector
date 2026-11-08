@@ -528,19 +528,28 @@ export class BridgeBot extends BaseBot {
     }
   }
 
-  async sendMessage(chatId: number | string, text: string): Promise<void> {
-    for (let i = 0; i < text.length; i += TG_MAX_LEN) {
-      const chunk = text.slice(i, i + TG_MAX_LEN);
-      try {
-        await this.bot.sendMessage(chatId as number, chunk, { parse_mode: 'Markdown' });
-      } catch (err) {
-        const msg = (err as Error).message;
-        if (msg.includes('parse') || msg.includes('entity')) {
-          await this.bot.sendMessage(chatId as number, chunk);
-        } else {
-          throw err;
-        }
+  protected async _sendPlatformMessage(
+    chatId: number | string,
+    text: string,
+    replyToId?: number | string
+  ): Promise<{ messageId?: number | string }> {
+    const replyOpts =
+      replyToId !== undefined
+        ? { reply_to_message_id: Number(replyToId), allow_sending_without_reply: true }
+        : {};
+    try {
+      const sent = await this.bot.sendMessage(chatId as number, text, {
+        parse_mode: 'Markdown',
+        ...replyOpts,
+      });
+      return { messageId: sent.message_id };
+    } catch (err) {
+      const msg = (err as Error).message;
+      if (msg.includes('parse') || msg.includes('entity')) {
+        const sent = await this.bot.sendMessage(chatId as number, text, replyOpts);
+        return { messageId: sent.message_id };
       }
+      throw err;
     }
   }
 }
