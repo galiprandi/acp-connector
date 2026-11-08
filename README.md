@@ -624,7 +624,7 @@ Verified end-to-end with A2A delegation: `devin acp` orchestrating `opencode acp
 
 ### Media handling
 
-Send photos, documents, stickers, or files to the bot and they'll be forwarded to the agent:
+Send photos, documents, stickers, voice messages, videos, or files to the bot and they'll be forwarded to the agent:
 
 - **Photos** + agent supports `image` capability → sent as base64 `ImageContent` (agent "sees" the image)
 - **Any file** (or agent without `image` capability) → sent as `ResourceLink` with `file://` URI (agent reads the file from disk)
@@ -758,14 +758,14 @@ The bridge batches stream edits (800ms) to avoid rate limits. If you still hit l
 | `fs/*`, `terminal/*` client capabilities | ❌ | Not implemented — agents get no fs/terminal via the bridge |
 | `authenticate` | ❌ | Agents are expected pre-authenticated |
 | Image / embedded context | ✅ | `image` + `ResourceLink` media support |
-| Audio | ❌ | |
+| Audio | ⚠️ | Voice/audio/video files are downloaded and sent as `ResourceLink` (agent reads them from disk) — no transcription, no ACP audio content block |
 
 ## 🔐 Permissions
 
 ACP agents may request permission before executing certain actions (file writes, shell commands, etc.). The bridge handles this in two ways:
 
 1. **Auto-approve**: If your `agentCmd` includes `dangerous`, `bypass`, or `yolo`, all permissions are auto-approved silently.
-2. **Inline buttons**: Otherwise, the permission request is forwarded to Telegram with "Permitir" / "Denegar" buttons. Tap to approve or deny.
+2. **Inline buttons**: Otherwise, the permission request is forwarded to Telegram/Discord with "Allow" / "Deny" buttons. Tap to approve or deny.
 
 ***
 
@@ -842,7 +842,7 @@ See [AGENTS.md](AGENTS.md) for development setup, commit conventions, and releas
 
 - **Commits**: [Conventional Commits](https://www.conventionalcommits.org/) enforced by commitlint
 - **Linting**: [Biome](https://biomejs.dev/)
-- **Tests**: [Vitest](https://vitest.dev/) — `pnpm test` (325 tests)
+- **Tests**: [Vitest](https://vitest.dev/) — `pnpm test` (536 tests)
 - **PRs**: CI runs lint + tests + commitlint on every PR
 
 ***

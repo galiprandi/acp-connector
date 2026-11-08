@@ -56,7 +56,7 @@
   // so you can see what triggered the agent's response
   "echoInjectedPrompts": true,
 
-  // Log level: "error" | "info" | "debug" (default: "info")
+  // Log level: "error" | "warn" | "info" | "debug" (default: "info")
   "logLevel": "info",
 
   // Timezone for agent reminder `at` times, e.g. "America/Argentina/Tucuman"
