@@ -1,3 +1,4 @@
+import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import {
   appendFileSync,
   existsSync,
@@ -23,6 +24,8 @@ export interface Peer {
   card?: Record<string, unknown>;
   joinedAt?: string;
   lastSeen?: string;
+  /** Secret this bridge expects FROM this peer when it signs requests to us. */
+  auth?: { secret: string; issuedAt: string };
 }
 
 export interface NetworkState {
@@ -132,6 +135,36 @@ export class NetworkStore {
 
   isApproved(id: string): boolean {
     return this.getPeer(id)?.status === 'approved';
+  }
+
+  /**
+   * Issues (or returns the already-issued) pairing secret for a peer.
+   * Idempotent by design: secrets are never rotated silently — rotation
+   * requires explicit operator action (future secret-rotation flow).
+   */
+  issuePeerAuth(id: string): string {
+    const peer = this.getPeer(id);
+    if (!peer) throw new Error(`Unknown peer: ${id}`);
+    if (peer.auth?.secret) return peer.auth.secret;
+    const secret = randomBytes(24).toString('hex');
+    peer.auth = { secret, issuedAt: new Date().toISOString() };
+    this.save();
+    return secret;
+  }
+
+  /**
+   * Timing-safe verification of a peer's HMAC-SHA256 signature over the
+   * raw request body. Returns false when the peer has no secret yet
+   * (legacy pairing) or inputs are missing / length-mismatched.
+   */
+  verifyPeerSignature(id: string, body: string, signatureHex: string): boolean {
+    const secret = this.getPeer(id)?.auth?.secret;
+    if (!secret || !signatureHex || !body) return false;
+    const expected = createHmac('sha256', secret).update(body).digest('hex');
+    const a = Buffer.from(expected, 'hex');
+    const b = Buffer.from(signatureHex, 'hex');
+    if (a.length !== b.length) return false;
+    return timingSafeEqual(a, b);
   }
 
   hasSeenTask(taskId: string): boolean {
