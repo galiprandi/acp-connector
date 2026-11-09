@@ -5,6 +5,30 @@ All notable changes to acp-connector will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.0] - 2026-11-09
+
+Security release. **Breaking changes** — migrate before upgrading:
+
+| Area | Migration |
+|---|---|
+| A2A | Upgrade all bridges in the mesh to ≥0.13.0. No config change; legacy unsigned peers accepted with warnings, `a2a.secure: true` hardens both sides. |
+| HTTP | Non-loopback bind without `http.auth.token` → **bridge does not start** (add a token or bind loopback); commands over `/prompt` now need `http.commands: true`; internal `callbackUrl` hosts need `http.callbackAllow: ["host"]`. |
+| Agent-cron | Agent-created jobs with `/`-prompts no longer run bridge commands (recreate as operator `/cron add` if intended). |
+| `/a2a/confirm` | No longer auto-approves; run `/a2a approve` to complete both sides. |
+| Registry `announce` | Requires a signed peer session or loopback origin to change `cardUrl`/`card`. |
+| Group permissions | In group chats / guild channels, only users in `platforms.telegram.allowedUserIds` / `platforms.discord.allowedUserIds` can approve agent permissions or use the reconnect button — empty list = nobody. Private chats and DMs are unaffected. |
+
+### Security
+- A2A peer transport is now authenticated: each pairing gets a random shared secret and requests are HMAC-signed (`a2a.secure: true`); legacy unsigned peers still accepted during transition
+- `/a2a/confirm` no longer self-approves — operator `/a2a approve` is required on both sides
+- Registry `announce` binds peer identity to the authenticated session (no more `cardUrl`/`card` hijack by unsigned callers)
+- `POST /prompt` fails closed: non-loopback bind requires `http.auth.token`; bridge commands over HTTP require `http.commands: true`; `callbackUrl` restricted by `http.callbackAllow`; `chatId` must be in the platform allowlist
+- Agent-managed cron jobs fire as remote content (`source: 'agent-cron'`): `/`-prompts never run bridge commands, capped at 50 jobs, delivered with an `[Agent cron]` prefix
+- Permission and reconnect buttons now require an operator user identity in groups (`allowedUserIds`)
+
+### Changed
+- Dependencies: `pnpm.overrides` pin patched transitives — resolves 1 critical + 6 high advisories (`form-data` GHSA-fjxv-7rqg-78g4 / GHSA-hmw2-7cc7-3qxx, `body-parser` GHSA-27r3-jxmh-p828, `undici` GHSA-2m5v-pch6-74hx / GHSA-qrxm-fqhp-jwvm / GHSA-xjj6-f33q-929c, `zod` GHSA-mrhx-c7xc-m3w5) plus moderate `qs`, `fast-uri`, `ip-address`. Remaining moderate advisories in the abandoned `@cypress/request` chain (`request` GHSA-p8p7-x288-28g6, `tough-cookie` GHSA-72xf-g2v4-qvf3, `uuid` GHSA-w5hq-g745-h8pq) have no compatible patch.
+
 ## [0.12.3] - 2026-11-08
 
 ### Fixed

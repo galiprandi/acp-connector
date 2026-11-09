@@ -197,7 +197,7 @@ Composes **SEC-11**, **SEC-12**, **SEC-08**, **SEC-13**, **SEC-15**, **SEC-20**.
 | **Severity** | Critical — ~9.8 estimate (`AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H`) |
 | **Phase / WP** | P0 / WP-01 |
 | **Location** | `src/a2a.ts:126-138`, `src/a2a-manager.ts:115-124`, `src/a2a.ts:77-92` |
-| **Status** | `open` |
+| **Status** | `fixed-in-0.13.0 (plans/002)` |
 
 **Evidence**
 
@@ -277,7 +277,7 @@ grep '"event":"peer_confirmed"' .acp-connector/audit.log
 | **Severity** | Critical — ~8.8 estimate (`AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:H`) |
 | **Phase / WP** | P0 (mitigation) / P1 (real fix) — WP-02, WP-08 |
 | **Location** | `src/a2a.ts:10`, `src/a2a.ts:259-269`, `src/bridge.ts:289-293` |
-| **Status** | `open` |
+| **Status** | `fixed-in-0.13.0 (plans/001)` |
 
 **Evidence**
 
@@ -337,7 +337,7 @@ So every id listed there is a **password-less account**: sending `x-a2a-peer-id:
 | **Severity** | Critical when exposed or on a shared host; ~7.8 local estimate (`AV:L/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:H`) |
 | **Phase / WP** | P0 / WP-02 |
 | **Location** | `src/http.ts:119-131`, `src/bridge.ts:213-231`, `src/base-bot.ts:491-496`, `src/loopback.ts:44-47` |
-| **Status** | `open` |
+| **Status** | `fixed-in-0.13.0 (plans/003)` |
 
 **Evidence**
 
@@ -400,7 +400,7 @@ So an unauthenticated caller can run `/a2a approve|reject|revoke`, `/cron add|re
 | **Severity** | Critical–High — ~8.6 estimate for the callback path with agent output, ~7.5 for peer fetches |
 | **Phase / WP** | P0 (callback allowlist) / P1 (URL policy) — WP-03, WP-09 |
 | **Location** | `src/http.ts:266-278`, `src/a2a-manager.ts:103`, `:172`, `:188`, `:279`, `src/a2a.ts:353` |
-| **Status** | `open` |
+| **Status** | `fixed-in-0.13.0 (plans/002+003 — callbackUrl sink via 003, cardUrl sink via 002)` |
 
 **Evidence**
 
@@ -452,7 +452,7 @@ Peer `cardUrl` is attacker-influenced through `/a2a/join` (unauthenticated), `/a
 | **Severity** | Critical — ~8.8 estimate (`AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N`) |
 | **Phase / WP** | P0 / WP-03 |
 | **Location** | `src/a2a.ts:215-235`, `src/network.ts:109-119`, `src/discovery.ts:167-182`, `src/a2a-manager.ts:66-92` |
-| **Status** | `open` |
+| **Status** | `fixed-in-0.13.0 (plans/002)` |
 
 **Evidence**
 

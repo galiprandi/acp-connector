@@ -813,6 +813,18 @@ Find your Telegram user ID via [@userinfobot](https://t.me/userinfobot); Discord
 
 ***
 
+## 🛡 Security configuration (0.13.0)
+
+v0.13.0 is a security release — see the [CHANGELOG migration table](CHANGELOG.md) for the breaking-change summary. The relevant knobs:
+
+- **A2A peer auth** — `a2a.secure: true` makes HMAC peer signatures mandatory (default off during the 0.13 transition; becomes default in 0.14). Details: [Peer authentication](#peer-authentication).
+- **HTTP API** — non-loopback `http.host` requires `http.auth.token` (refuses to start otherwise); `http.commands: true` allows `/` bridge commands via `POST /prompt` (default: agent input only); `http.callbackAllow` whitelists internal `callbackUrl` hosts.
+- **Group permissions** — `platforms.*.allowedUserIds` gates who can approve agent permissions / reconnect inside groups (private chats and DMs always allowed).
+- **Agent cron** — agent-created jobs are remote content: `/`-prompts never run bridge commands.
+- **Audit backlog** — full findings and statuses live in [`docs/security-audit-2026-10-21.md`](docs/security-audit-2026-10-21.md); remediation plans in [`plans/`](plans/README.md).
+
+***
+
 ## 💾 Session persistence
 
 To resume a session across restarts, set `sessionId` in your config:

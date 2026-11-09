@@ -239,10 +239,14 @@
 - /stop on cancel error sends error message
 - /stop when busy cancels the agent
 - /stop when idle responds nothing to stop
+- allows permission callbacks from allowlisted users in groups
+- allows permission callbacks in private chats without allowlist
 - auto-approves permission when agentCmd includes dangerous
 - available_commands_update refreshes acp.availableCommands
 - config_option_update refreshes acp.configOptions
 - delegates bridge commands to onCommand
+- denies group callbacks when allowedUserIds is empty
+- denies permission callbacks from non-operator users in groups
 - enqueuePrompt adds to queue and processes
 - enqueuePrompt with onComplete calls it with error on failure
 - enqueuePrompt with onComplete calls it with response after processing
@@ -396,9 +400,13 @@
 - /stop clears the queue
 - /stop when busy cancels the agent
 - /stop when idle responds nothing to stop
+- allows permission interactions from allowlisted users in guilds
+- allows permission interactions in DMs without allowlist
 - auto-approves permission when agentCmd includes dangerous
 - auto-approves when no current channel
 - cancels permission when no options
+- denies guild interactions when allowedUserIds is empty
+- denies permission interactions from non-operator users in guilds
 - enqueues prompts from external sources
 - forwards allowed messages to ACP
 - forwards thoughts when showThoughts=true
