@@ -85,8 +85,10 @@
   //   "host": "127.0.0.1",       // bind address (default localhost)
   //   "port": 7780,
   //   "auth": {
-  //     "token": "your-secret"    // bearer token (optional)
+  //     "token": "your-secret"    // bearer token — REQUIRED for non-loopback hosts (refuses to start otherwise)
   //   },
+  //   "commands": false,          // allow /commands (e.g. /a2a, /mode) via POST /prompt — default false: HTTP prompt text is agent input, never bridge administration
+  //   "callbackAllow": [],        // hostnames allowed for callbackUrl beyond public ones — loopback/private hosts are rejected by default (SSRF guard)
   //   "forwardHeaders": false,    // forward request headers to agent (Authorization always stripped)
   //   "maxBodySize": 1048576,     // 1MB
   //   "rateLimit": 60             // requests per minute

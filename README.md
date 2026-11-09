@@ -315,7 +315,9 @@ Optional. Enable in config:
 | `enabled` | `boolean` | `false` | Start the HTTP server |
 | `host` | `string` | `"127.0.0.1"` | Bind address (use `"0.0.0.0"` for LAN access) |
 | `port` | `number` | `7780` | Port to listen on |
-| `auth.token` | `string` | `null` | Bearer token for auth (optional) |
+| `auth.token` | `string` | `null` | Bearer token for auth (**required** for non-loopback hosts — the server refuses to start with an external `host` and no token) |
+| `commands` | `boolean` | `false` | Allow `/commands` (e.g. `/a2a`, `/mode`, `/cron`) to be run via `POST /prompt` — default `false`: prompt text sent over HTTP is agent input, never bridge administration |
+| `callbackAllow` | `string[]` | `[]` | Hostnames accepted as `callbackUrl` targets besides public ones (loopback/private hosts are rejected by default) |
 | `forwardHeaders` | `boolean` | `false` | Forward request headers to agent (`Authorization` always stripped) |
 | `maxBodySize` | `number` | `1048576` | Max body size in bytes (1MB) |
 | `rateLimit` | `number` | `60` | Max requests per minute |
@@ -349,6 +351,8 @@ curl -X POST "http://localhost:7780/prompt?origin=outlook&from=boss" \
 ```
 
 The agent receives: `[origin=outlook, from=boss] {"from": "boss@company.com", "subject": "URGENT"}`
+
+> `POST /prompt` sends **agent input**. To run bridge commands (`/a2a`, `/mode`, ...) over HTTP set `http.commands: true` in the config. A `chatId` in the body is only honored when it is in the platform `allowedChatIds`.
 
 With auth:
 
