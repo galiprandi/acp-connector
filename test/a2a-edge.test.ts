@@ -1,9 +1,12 @@
 import { createHmac } from 'node:crypto';
+import { EventEmitter } from 'node:events';
 import { mkdtempSync, rmSync } from 'node:fs';
+import type { IncomingMessage, ServerResponse } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { A2aServer } from '../src/a2a.ts';
+import { A2aManager } from '../src/a2a-manager.ts';
 import { NetworkStore } from '../src/network.ts';
 
 let dir: string;
@@ -336,5 +339,243 @@ describe('message/stream (SSE)', () => {
     network.upsertPeer(approved);
     const res = await send([{ kind: 'text', text: 'hi' }], undefined, 'p', 'm-ctx');
     expect(res.result.contextId).toBeDefined();
+  });
+});
+
+describe('edge: membership hardening (confirm + announce)', () => {
+  type AnnounceResult = { status: number; body: string };
+
+  /**
+   * The local test server only ever receives requests from loopback, so
+   * `_handleRegistry` is invoked directly with a crafted
+   * IncomingMessage/ServerResponse pair to present a chosen
+   * `remoteAddress` (the file has no other non-loopback mechanism).
+   */
+  function announceRequest(
+    body: string,
+    remoteAddress: string,
+    headers: Record<string, string> = {}
+  ): IncomingMessage {
+    const req = Object.assign(new EventEmitter(), {
+      method: 'POST',
+      headers: Object.fromEntries(Object.entries(headers).map(([k, v]) => [k.toLowerCase(), v])),
+      socket: { remoteAddress },
+    });
+    process.nextTick(() => {
+      req.emit('data', body);
+      req.emit('end');
+    });
+    return req as unknown as IncomingMessage;
+  }
+
+  function announceRes(record: AnnounceResult): ServerResponse {
+    const res = {
+      writeHead(code: number) {
+        record.status = code;
+      },
+      end(data?: string) {
+        record.body = data ?? '';
+      },
+    };
+    return res as unknown as ServerResponse;
+  }
+
+  async function announceAs(
+    remoteAddress: string,
+    payload: Record<string, unknown>,
+    headers: Record<string, string> = {}
+  ): Promise<AnnounceResult> {
+    network.role = 'registry';
+    const record: AnnounceResult = { status: 0, body: '' };
+    const raw = JSON.stringify(payload);
+    const handler = server as unknown as {
+      _handleRegistry(req: IncomingMessage, res: ServerResponse, url: URL): Promise<void>;
+    };
+    await handler._handleRegistry(
+      announceRequest(raw, remoteAddress, headers),
+      announceRes(record),
+      new URL('/a2a/registry/announce', 'http://localhost')
+    );
+    return record;
+  }
+
+  describe('announce authorization', () => {
+    beforeEach(() => {
+      network.role = 'registry';
+      network.upsertPeer({
+        id: 'p',
+        cardUrl: 'http://x-old',
+        card: { name: 'Old', skills: [] },
+        status: 'approved',
+        source: 'declared',
+      });
+      const peer = network.getPeer('p');
+      if (!peer) throw new Error('peer p missing');
+      peer.lastSeen = '2020-01-01T00:00:00.000Z';
+    });
+
+    it('unauthenticated announce cannot change cardUrl or card', async () => {
+      const rec = await announceAs('192.168.68.42', {
+        id: 'p',
+        cardUrl: 'http://evil.example',
+        card: { name: 'Evil' },
+      });
+      expect(rec.status).toBe(403);
+      expect(JSON.parse(rec.body).error).toBe('signature or loopback required for card updates');
+      const peer = network.getPeer('p');
+      expect(peer?.cardUrl).toBe('http://x-old');
+      expect(peer?.card?.name).toBe('Old');
+      // only the heartbeat is recorded
+      expect(peer?.lastSeen).not.toBe('2020-01-01T00:00:00.000Z');
+    });
+
+    it('a bogus signature is also treated as unauthenticated', async () => {
+      network.issuePeerAuth('p');
+      const rec = await announceAs(
+        '192.168.68.42',
+        { id: 'p', cardUrl: 'http://evil.example' },
+        { 'x-a2a-peer-signature': createHmac('sha256', 'wrong').update('x').digest('hex') }
+      );
+      expect(rec.status).toBe(403);
+      expect(network.getPeer('p')?.cardUrl).toBe('http://x-old');
+    });
+
+    it('signed announce updates cardUrl, card and lastSeen', async () => {
+      network.issuePeerAuth('p');
+      const secret = network.getPeer('p')?.auth?.secret ?? '';
+      const payload = {
+        id: 'p',
+        cardUrl: 'http://x-new',
+        card: { name: 'New', skills: [{ id: 's' }] },
+      };
+      const rec = await announceAs('192.168.68.42', payload, {
+        'x-a2a-peer-signature': createHmac('sha256', secret)
+          .update(JSON.stringify(payload))
+          .digest('hex'),
+      });
+      expect(rec.status).toBe(200);
+      expect(JSON.parse(rec.body).status).toBe('ok');
+      const peer = network.getPeer('p');
+      expect(peer?.cardUrl).toBe('http://x-new');
+      expect(peer?.card?.name).toBe('New');
+      expect(peer?.lastSeen).not.toBe('2020-01-01T00:00:00.000Z');
+    });
+
+    it('signed announce rejects non-http(s) and unparseable cardUrl', async () => {
+      network.issuePeerAuth('p');
+      const secret = network.getPeer('p')?.auth?.secret ?? '';
+      for (const badUrl of ['ftp://files.example', 'not a url']) {
+        const payload = { id: 'p', cardUrl: badUrl };
+        const rec = await announceAs('192.168.68.42', payload, {
+          'x-a2a-peer-signature': createHmac('sha256', secret)
+            .update(JSON.stringify(payload))
+            .digest('hex'),
+        });
+        expect(rec.status).toBe(400);
+        // no state change on rejection
+        expect(network.getPeer('p')?.cardUrl).toBe('http://x-old');
+        expect(network.getPeer('p')?.card?.name).toBe('Old');
+      }
+    });
+
+    it('loopback announce keeps full update rights', async () => {
+      const rec = await announceAs('127.0.0.1', {
+        id: 'p',
+        cardUrl: 'http://x-loop',
+        card: { name: 'Loop' },
+      });
+      expect(rec.status).toBe(200);
+      expect(network.getPeer('p')?.cardUrl).toBe('http://x-loop');
+      expect(network.getPeer('p')?.card?.name).toBe('Loop');
+    });
+  });
+
+  describe('confirm never escalates membership', () => {
+    it('join creates pending, confirm does not approve (asserted via the store)', async () => {
+      const memberDir = mkdtempSync(join(tmpdir(), 'acp-edge-member-'));
+      const memberNetwork = new NetworkStore(join(memberDir, 'network.json'));
+      const notify = vi.fn(async () => {});
+      const manager = new A2aManager({
+        network: memberNetwork,
+        selfId: 'theirs',
+        notify,
+      });
+      const memberServer = new A2aServer({
+        config: { enabled: true, port: 0, card: { name: 'M', description: 'm' } },
+        network: memberNetwork,
+        selfId: 'theirs',
+        enqueue: vi.fn((_t, _c, _b, done) => done?.('ok')),
+        onJoin: (req) => manager.handleJoinRequest(req),
+        onConfirm: (peerId, peerSecret) => manager.handleConfirm(peerId, peerSecret),
+      });
+      await memberServer.start();
+      const memberAddr = memberServer.address();
+      const memberPort = typeof memberAddr === 'object' && memberAddr ? memberAddr.port : 0;
+      try {
+        const joinRes = await fetch(`http://127.0.0.1:${memberPort}/a2a/join`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: 'me', cardUrl: 'http://me.example/card.json' }),
+        });
+        expect(joinRes.status).toBe(202);
+        expect(memberNetwork.getPeer('me')?.status).toBe('pending');
+
+        const confirmRes = await fetch(`http://127.0.0.1:${memberPort}/a2a/confirm`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: 'me' }),
+        });
+        expect(confirmRes.status).toBe(200);
+        expect(memberNetwork.getPeer('me')?.status).toBe('pending');
+      } finally {
+        await memberServer.stop();
+        rmSync(memberDir, { recursive: true, force: true });
+      }
+    });
+
+    it('only the operator path approves: /a2a approve flips status, confirm alone does not', async () => {
+      const memberDir = mkdtempSync(join(tmpdir(), 'acp-edge-member-'));
+      const memberNetwork = new NetworkStore(join(memberDir, 'network.json'));
+      const notify = vi.fn(async () => {});
+      const manager = new A2aManager({
+        network: memberNetwork,
+        selfId: 'theirs',
+        notify,
+        selfCardUrl: 'http://theirs:9/card.json',
+        selfCard: { name: 'Theirs' },
+      });
+      const spy = vi.fn(async () => new Response('{"status":"ok"}', { status: 200 }));
+      vi.stubGlobal('fetch', spy);
+      try {
+        memberNetwork.upsertPeer({
+          id: 'me',
+          cardUrl: 'http://me.example/card.json',
+          status: 'pending',
+          source: 'discovered',
+        });
+        memberNetwork.upsertPeer({
+          id: 'second',
+          cardUrl: 'http://second.example/card.json',
+          status: 'pending',
+          source: 'discovered',
+        });
+        await manager.handleConfirm('me', 'pairing-secret');
+        expect(memberNetwork.getPeer('me')?.status).toBe('pending');
+
+        await manager.handleCommand('/a2a approve me', 1);
+        expect(memberNetwork.getPeer('me')?.status).toBe('approved');
+        // the pairing secret crossed the wire exactly once in the confirm POST
+        const confirmCall = spy.mock.calls.find(([, init]) =>
+          String(init?.body).includes('pairing-secret')
+        );
+        expect(confirmCall?.[0]).toBe('http://me.example/a2a/confirm');
+
+        await manager.handleConfirm('second');
+        expect(memberNetwork.getPeer('second')?.status).toBe('pending');
+      } finally {
+        vi.unstubAllGlobals();
+        rmSync(memberDir, { recursive: true, force: true });
+      }
+    });
   });
 });

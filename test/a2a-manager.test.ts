@@ -102,16 +102,42 @@ describe('/a2a commands', () => {
 });
 
 describe('join/confirm handshake', () => {
-  it('handleConfirm approves a pending peer and notifies', async () => {
+  it('remote confirm never escalates status (SEC-01): pending stays pending', async () => {
     await manager.handleJoinRequest(pendingPeer);
     await manager.handleConfirm('lean');
-    expect(network.getPeer('lean')?.status).toBe('approved');
+    expect(network.getPeer('lean')?.status).toBe('pending');
     expect(notify).toHaveBeenCalledTimes(2);
-    expect(notify.mock.calls[1][0]).toContain('approved our join request');
+    expect(notify.mock.calls[1][0]).toContain('acknowledged us');
+    expect(notify.mock.calls[1][0]).toContain('/a2a approve lean');
   });
 
-  it('handleConfirm ignores non-pending peers', async () => {
-    await manager.handleConfirm('ghost');
+  it('handleConfirm stores the pairing secret it was given (even while pending)', async () => {
+    await manager.handleJoinRequest(pendingPeer);
+    await manager.handleConfirm('lean', 'pairing-secret');
+    const peer = network.getPeer('lean');
+    expect(peer?.status).toBe('pending');
+    expect(peer?.auth?.secret).toBe('pairing-secret');
+    expect(peer?.auth?.issuedAt).toBeDefined();
+  });
+
+  it('handleConfirm records the confirm-back silently for an approved peer', async () => {
+    network.upsertPeer({ ...pendingPeer, status: 'approved', source: 'declared' });
+    network.issuePeerAuth('lean');
+    const before = network.getPeer('lean')?.auth?.secret;
+    const peer = network.getPeer('lean');
+    if (!peer) throw new Error('peer lean missing');
+    peer.lastSeen = '2020-01-01T00:00:00.000Z';
+    await manager.handleConfirm('lean');
+    expect(network.getPeer('lean')?.status).toBe('approved');
+    expect(network.getPeer('lean')?.lastSeen).not.toBe('2020-01-01T00:00:00.000Z');
+    // issued secret is never overwritten by a later confirm
+    expect(network.getPeer('lean')?.auth?.secret).toBe(before);
+    expect(notify).not.toHaveBeenCalled();
+  });
+
+  it('handleConfirm does nothing trust-changing for unknown peers', async () => {
+    expect(() => network.setStatus('ghost', 'approved')).toThrow();
+    await expect(manager.handleConfirm('ghost')).resolves.toBeUndefined();
     expect(network.getPeer('ghost')).toBeUndefined();
   });
 

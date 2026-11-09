@@ -38,6 +38,15 @@
 - rejects unapproved peers before opening the stream
 - streams task + status events and completes
 
+## Module: edge: membership hardening (confirm + announce)
+- a bogus signature is also treated as unauthenticated
+- join creates pending, confirm does not approve (asserted via the store)
+- loopback announce keeps full update rights
+- only the operator path approves: /a2a approve flips status, confirm alone does not
+- signed announce rejects non-http(s) and unparseable cardUrl
+- signed announce updates cardUrl, card and lastSeen
+- unauthenticated announce cannot change cardUrl or card
+
 ## Module: pairing
 - ignores a duplicate join request from an already-approved peer
 - registers a join request as pending and notifies the owner
@@ -51,9 +60,11 @@
 - returns false for non-/a2a commands
 
 ## Module: join/confirm handshake
-- handleConfirm approves a pending peer and notifies
-- handleConfirm ignores non-pending peers
+- handleConfirm does nothing trust-changing for unknown peers
+- handleConfirm records the confirm-back silently for an approved peer
+- handleConfirm stores the pairing secret it was given (even while pending)
 - joinPeer POSTs our card to the peer origin
+- remote confirm never escalates status (SEC-01): pending stays pending
 
 ## Module: startup reminders and discovery
 - notifyDiscovered only announces peers not already known

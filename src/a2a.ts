@@ -234,6 +234,50 @@ export class A2aServer {
         res.end(JSON.stringify({ error: 'peer not approved' }));
         return;
       }
+      // Identity binding before any card state changes. A valid
+      // `x-a2a-peer-signature` (verified against the raw body, mirroring
+      // `_handleRpc`) proves the caller is the peer it claims to be;
+      // loopback callers are the operator's own agent face. Any other
+      // remote caller may only refresh `lastSeen` — card/cardUrl are
+      // trusted targets for delegation and must never come from an
+      // unproven input.
+      const signature = Array.isArray(req.headers[PEER_SIGNATURE_HEADER])
+        ? String(req.headers[PEER_SIGNATURE_HEADER][0])
+        : String(req.headers[PEER_SIGNATURE_HEADER] ?? '');
+      const verified = Boolean(
+        signature &&
+          announce.id &&
+          this.opts.network.verifyPeerSignature(announce.id, body, signature)
+      );
+      if (!verified && !isLoopback(req.socket.remoteAddress)) {
+        peer.lastSeen = new Date().toISOString();
+        this.opts.network.save();
+        this.opts.audit?.write({
+          event: 'announce_rejected',
+          peer: peer.id,
+          detail: 'unauthenticated',
+        });
+        res.writeHead(403);
+        res.end(JSON.stringify({ error: 'signature or loopback required for card updates' }));
+        return;
+      }
+      if (verified && announce.cardUrl) {
+        // Peer-signed (remote) update: the cardUrl is where future task
+        // text goes, so it must parse and stay on http(s).
+        let nextUrl: URL;
+        try {
+          nextUrl = new URL(announce.cardUrl);
+        } catch {
+          res.writeHead(400);
+          res.end(JSON.stringify({ error: 'cardUrl must be a valid URL' }));
+          return;
+        }
+        if (nextUrl.protocol !== 'http:' && nextUrl.protocol !== 'https:') {
+          res.writeHead(400);
+          res.end(JSON.stringify({ error: 'cardUrl must be http(s)' }));
+          return;
+        }
+      }
       if (announce.cardUrl) peer.cardUrl = announce.cardUrl;
       if (announce.card) peer.card = announce.card;
       peer.lastSeen = new Date().toISOString();

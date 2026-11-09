@@ -22,7 +22,7 @@ export interface A2aManagerOptions {
   selfCard?: Record<string, unknown>;
   /** Optional audit trail for membership events. */
   audit?: AuditLog;
-  /** Called whenever an approval changes (peer approved or us confirmed). */
+  /** Called whenever an operator approval changes membership status. */
   onMembershipChanged?: () => Promise<void>;
   /**
    * Signs the raw registry announce body when we hold a pairing secret
@@ -119,7 +119,10 @@ export class A2aManager {
 
   /**
    * Inbound confirmation: the peer's owner approved us and it called back.
-   * Approves the peer locally — completing the double opt-in.
+   * Informational only — remote confirm input never grants trust (audit
+   * SEC-01 / plan 002): the operator's `/a2a approve` is the only path to
+   * `approved`, and the goal status here is a peer that is already
+   * approved by our operator recording our confirm-back.
    *
    * `peerSecret` is the pairing token the peer issued for us (used when we
    * sign requests to them). It crosses the network exactly once, inside
@@ -129,16 +132,28 @@ export class A2aManager {
    */
   async handleConfirm(peerId: string, peerSecret?: string): Promise<void> {
     const peer = this.network.getPeer(peerId);
-    if (peer && peer.status === 'pending') {
-      if (peerSecret && !peer.auth) {
-        peer.auth = { secret: peerSecret, issuedAt: new Date().toISOString() };
-      }
-      this.network.setStatus(peerId, 'approved');
-      this.network.save();
-      this.audit?.write({ event: 'peer_confirmed', peer: peerId });
-      await this.notify(`✅ ${peerId} approved our join request — peer is now trusted.`);
-      await this.onMembershipChanged?.();
+    // Store peerSecret for the mirrored side only if we hold none
+    // (pre-001 behavior kept): the far side may confirm after our own
+    // operator approval carried it, so this is kept for approved peers too.
+    let dirty = false;
+    if (peer && peerSecret && !peer.auth) {
+      peer.auth = { secret: peerSecret, issuedAt: new Date().toISOString() };
+      dirty = true;
     }
+    this.audit?.write({ event: 'peer_confirmed_by_peer', peer: peerId });
+    if (peer?.status !== 'approved') {
+      // informational only — never mutate trust from remote input
+      if (dirty) this.network.save();
+      await this.notify(
+        `ℹ️ ${peerId} acknowledged us (local status unchanged: ` +
+          `${peer?.status ?? 'unknown'}). Owner action: /a2a approve ${peerId}.`
+      );
+      return;
+    }
+    // approved already (operator did it): record lastSeen and confirm
+    // back done silently
+    peer.lastSeen = new Date().toISOString();
+    this.network.save();
   }
 
   /**
