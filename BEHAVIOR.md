@@ -310,14 +310,22 @@
 - sendMessage threads continuation chunks as replies to the first
 
 ## Module: command source isolation
-- runs commands for http-injected prompts but never for a2a content
+- never runs commands for a2a content, even with httpCommandsAllowed
+- never runs commands for agent-created cron content
+- runs commands for http prompts when httpCommandsAllowed is true
+- treats http prompts as agent input by default: no commands run, prompt reaches the agent
 
 ## Module: bridge
+- drops a /prompt chatId missing from the platform allowlist
 - exits with error when ACP fails to start
 - exits with error when no config found
+- keeps a /prompt chatId present in the platform allowlist
 - preserves Discord Snowflake channel IDs for cron allowedChatIds
+- refuses to start when http is enabled on a non-loopback host without an auth token
 - routes permission to the bot with an active prompt (Discord), not the first bot (TG)
 - starts ACP, bot, cron, and HTTP
+- starts when http runs on a non-loopback host with an auth token
+- warns but starts when http is enabled without a token on a loopback host
 - wires onCommand to routine manager
 - wires onPermission to bot
 
@@ -367,12 +375,15 @@
 ## Module: CronManager
 - add() rejects duplicate name
 - add() starts a new job
+- fires agent-managed jobs with a delivery prefix and managed marker
 - fires job and enqueues prompt
 - list() returns all jobs
+- prefixes agent-managed jobs with a "/" prompt so it is never run as a bridge command
 - remove() returns false for unknown job
 - remove() stops and removes job
 - run() executes job immediately
 - run() returns false for unknown job
+- runs agent-managed jobs manually with the same prefix and marker
 - skips disabled jobs
 - skips invalid schedules
 - skips jobs with no chatId when allowedChatIds is empty
@@ -478,6 +489,8 @@
 - PUT /prompt returns 404
 - accepts token with special characters
 - all responses are JSON
+- allows callbackUrl to public hosts and rejects loopback only when not listed
+- allows callbackUrl when the host is listed in callbackAllow
 - auth + query params + forward headers all work together
 - error responses include error field
 - handles JSON array body as raw prompt
@@ -496,8 +509,11 @@
 - rate limit with auth still counts unauthorized requests
 - raw body + query params + auth all work together
 - rejects Basic auth scheme even with correct token
+- rejects callbackUrl pointing to loopback
+- rejects callbackUrl to localhost and 127.x
 - rejects empty bearer token
 - rejects lowercase bearer scheme
+- rejects malformed and non-http callbackUrl schemes
 - rejects path traversal in URL
 - rejects token with extra spaces
 - rejects very long token (DoS attempt)
@@ -602,6 +618,8 @@
 - lists, updates and cancels reminders
 
 ## Module: cron api
+- POST /cron/create with a "/" prompt is delivered prefixed, never dispatched as a bridge command
+- caps agent-created jobs at AGENT_CRON_CAP
 - creates agent-managed jobs from "every" and "expr"
 - lists all jobs flagging operator-owned ones read-only
 - rejects unsupported intervals and missing schedule
