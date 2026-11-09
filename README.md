@@ -196,8 +196,8 @@ See [`acp-connector.example.jsonc`](acp-connector.example.jsonc) for the full re
 | `agentCmd` | `string` | yes | — | Command to launch the ACP agent (e.g. `"devin acp"`) |
 | `agentCwd` | `string` | no | `cwd` | Working directory for the agent subprocess |
 | `platforms` | `Platforms` | yes | — | Platform configs (Telegram and/or Discord) |
-| `platforms.telegram` | `object` | no | — | `{ token, allowedChatIds }` — Telegram config |
-| `platforms.discord` | `object` | no | — | `{ token, allowedChannelIds }` — Discord config |
+| `platforms.telegram` | `object` | no | — | `{ token, allowedChatIds, allowedUserIds? }` — Telegram config |
+| `platforms.discord` | `object` | no | — | `{ token, allowedChannelIds, allowedUserIds? }` — Discord config |
 | `sessionId` | `string` | no | — | ACP session ID to load/resume (omit to create new) |
 | `sessionMode` | `string` | no | — | Initial session mode (e.g. `"bypass"` for Devin's auto-approve-all) |
 | `sessionConfigPath` | `string` | no | — | Path to MCP/session config JSONC |
@@ -798,6 +798,18 @@ ACP agents may request permission before executing certain actions (file writes,
 
 1. **Auto-approve**: If your `agentCmd` includes `dangerous`, `bypass`, or `yolo`, all permissions are auto-approved silently.
 2. **Inline buttons**: Otherwise, the permission request is forwarded to Telegram/Discord with "Allow" / "Deny" buttons. Tap to approve or deny.
+
+**Who can tap the buttons:** private chats and DMs always work — they have a single human member. Inside group chats / guild channels, only users listed in `platforms.telegram.allowedUserIds` / `platforms.discord.allowedUserIds` can approve permissions or use the reconnect button; everyone else gets a "Not authorized" notice. If the list is empty, **nobody** in a group can approve permissions — configure it if you use groups:
+
+```jsonc
+{
+  "platforms": {
+    "telegram": { "token": "...", "allowedChatIds": [123], "allowedUserIds": [456] }
+  }
+}
+```
+
+Find your Telegram user ID via [@userinfobot](https://t.me/userinfobot); Discord user IDs are under *User Settings → Advanced → Developer Mode* (right-click a user → Copy User ID).
 
 ***
 

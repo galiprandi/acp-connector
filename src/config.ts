@@ -89,11 +89,24 @@ export interface A2aConfig {
 export interface TelegramPlatformConfig {
   token: string;
   allowedChatIds: number[];
+  /**
+   * Telegram user IDs allowed to approve agent permissions and use the
+   * reconnect button inside group chats. Private chats are always allowed
+   * (the chat has a single human member). Empty/omitted = no group member
+   * can approve permissions.
+   */
+  allowedUserIds?: number[];
 }
 
 export interface DiscordPlatformConfig {
   token: string;
   allowedChannelIds: string[];
+  /**
+   * Discord user IDs (snowflakes) allowed to approve agent permissions and
+   * use the reconnect button inside guild channels. DMs are always allowed.
+   * Empty/omitted = no guild member can approve permissions.
+   */
+  allowedUserIds?: string[];
 }
 
 export interface PlatformsConfig {

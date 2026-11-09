@@ -29,6 +29,7 @@ interface BridgeBotOpts {
   acp: AcpClient;
   telegramToken: string;
   allowedChatIds: number[];
+  allowedUserIds?: number[];
   agentCmd: string;
   showThoughts?: boolean;
   showTools?: boolean;
@@ -42,6 +43,7 @@ interface BridgeBotOpts {
 
 export class BridgeBot extends BaseBot {
   private allowedChatIds: Set<number>;
+  private allowedUserIds: Set<number>;
   private bot: TelegramBot;
 
   protected readonly maxLen = TG_MAX_LEN;
@@ -50,6 +52,7 @@ export class BridgeBot extends BaseBot {
     acp,
     telegramToken,
     allowedChatIds,
+    allowedUserIds = [],
     agentCmd,
     showThoughts = false,
     showTools = true,
@@ -73,6 +76,7 @@ export class BridgeBot extends BaseBot {
       onPrompt,
     });
     this.allowedChatIds = new Set(allowedChatIds);
+    this.allowedUserIds = new Set(allowedUserIds);
     this.bot = new TelegramBot(telegramToken, { polling: true });
   }
 
@@ -445,11 +449,33 @@ export class BridgeBot extends BaseBot {
     }
   }
 
+  /**
+   * Sensitive callbacks (permission decisions, reconnect) require an operator:
+   * private chats are always allowed (single human member); group chats require
+   * `from.id` in `allowedUserIds`.
+   */
+  private _isOperatorCallback(query: TelegramBot.CallbackQuery): boolean {
+    if (query.message?.chat?.type === 'private') return true;
+    const fromId = query.from?.id;
+    return fromId !== undefined && this.allowedUserIds.has(fromId);
+  }
+
   private async _onCallbackQuery(query: TelegramBot.CallbackQuery): Promise<void> {
     const chatId = query.message?.chat?.id;
     if (!chatId || !this._isAllowed(chatId)) return;
 
     const data = query.data || '';
+    const sensitive = data === 'reconnect' || data.startsWith('perm_');
+    if (sensitive && !this._isOperatorCallback(query)) {
+      this.bot.answerCallbackQuery(query.id, {
+        text: '⛔ Not authorized',
+        show_alert: true,
+      });
+      log.warn(
+        `Rejected ${data.split('_')[0]} callback from user ${query.from?.id} in chat ${chatId}`
+      );
+      return;
+    }
     if (data === 'reconnect') {
       this.bot.answerCallbackQuery(query.id);
       try {

@@ -869,13 +869,84 @@ describe('BridgeBot', () => {
     await cbHandler({
       id: 'q1',
       data: 'reconnect',
-      message: { chat: { id: 123 }, message_id: 42 },
+      from: { id: 555 },
+      message: { chat: { id: 123, type: 'private' }, message_id: 42 },
     });
     expect(acp.restart).toHaveBeenCalled();
     expect(mockBot.editMessageText).toHaveBeenCalledWith(
       expect.stringContaining('Agent reconnected'),
       expect.objectContaining({ chat_id: 123, message_id: 42 })
     );
+  });
+
+  it('denies permission callbacks from non-operator users in groups', async () => {
+    const { bot } = createBot({ allowedUserIds: [555] });
+    await bot.start();
+    const resolve = vi.fn();
+    // biome-ignore lint/suspicious/noExplicitAny: protected member under test
+    (bot as any).permissionPending = { resolve };
+    const cbHandler = mockBot.on.mock.calls.find((c) => c[0] === 'callback_query')[1];
+    await cbHandler({
+      id: 'q1',
+      data: 'perm_allow_opt1',
+      from: { id: 999 },
+      message: { chat: { id: 123, type: 'group' }, message_id: 42 },
+    });
+    expect(resolve).not.toHaveBeenCalled();
+    expect(mockBot.answerCallbackQuery).toHaveBeenCalledWith(
+      'q1',
+      expect.objectContaining({ show_alert: true })
+    );
+  });
+
+  it('denies group callbacks when allowedUserIds is empty', async () => {
+    const { bot } = createBot();
+    await bot.start();
+    const resolve = vi.fn();
+    // biome-ignore lint/suspicious/noExplicitAny: protected member under test
+    (bot as any).permissionPending = { resolve };
+    const cbHandler = mockBot.on.mock.calls.find((c) => c[0] === 'callback_query')[1];
+    await cbHandler({
+      id: 'q1',
+      data: 'perm_deny_opt1',
+      from: { id: 555 },
+      message: { chat: { id: 123, type: 'supergroup' }, message_id: 42 },
+    });
+    expect(resolve).not.toHaveBeenCalled();
+  });
+
+  it('allows permission callbacks from allowlisted users in groups', async () => {
+    const { bot } = createBot({ allowedUserIds: [555] });
+    await bot.start();
+    const resolve = vi.fn();
+    // biome-ignore lint/suspicious/noExplicitAny: protected member under test
+    (bot as any).permissionPending = { resolve };
+    const cbHandler = mockBot.on.mock.calls.find((c) => c[0] === 'callback_query')[1];
+    await cbHandler({
+      id: 'q1',
+      data: 'perm_allow_opt1',
+      from: { id: 555 },
+      message: { chat: { id: 123, type: 'group' }, message_id: 42 },
+    });
+    expect(resolve).toHaveBeenCalledWith({
+      outcome: { outcome: 'selected', optionId: 'opt1' },
+    });
+  });
+
+  it('allows permission callbacks in private chats without allowlist', async () => {
+    const { bot } = createBot();
+    await bot.start();
+    const resolve = vi.fn();
+    // biome-ignore lint/suspicious/noExplicitAny: protected member under test
+    (bot as any).permissionPending = { resolve };
+    const cbHandler = mockBot.on.mock.calls.find((c) => c[0] === 'callback_query')[1];
+    await cbHandler({
+      id: 'q1',
+      data: 'perm_allow_opt1',
+      from: { id: 555 },
+      message: { chat: { id: 123, type: 'private' }, message_id: 42 },
+    });
+    expect(resolve).toHaveBeenCalled();
   });
 
   it('reconnect failure edits the message with the error', async () => {
@@ -886,7 +957,8 @@ describe('BridgeBot', () => {
     await cbHandler({
       id: 'q1',
       data: 'reconnect',
-      message: { chat: { id: 123 }, message_id: 42 },
+      from: { id: 555 },
+      message: { chat: { id: 123, type: 'private' }, message_id: 42 },
     });
     expect(mockBot.editMessageText).toHaveBeenCalledWith(
       expect.stringContaining('Reconnect failed: spawn failed'),

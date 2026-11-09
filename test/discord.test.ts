@@ -49,6 +49,7 @@ vi.mock('discord.js', () => ({
     setStyle = vi.fn(() => this);
   },
   ButtonStyle: { Success: 3, Danger: 4 },
+  ChannelType: { GuildText: 0, DM: 1, GroupDM: 3 },
 }));
 
 // Mock ACP client
@@ -91,6 +92,29 @@ function makeMessage(channelId: string | number, content: string, authorBot = fa
     author: { bot: authorBot },
     channel: { id: String(channelId), send: mockChannel.send },
     content,
+  };
+}
+
+interface MockInteraction {
+  isButton: () => boolean;
+  channel: { id: string; type: number };
+  customId: string;
+  user: { id: string };
+  reply: ReturnType<typeof vi.fn>;
+  update: ReturnType<typeof vi.fn>;
+  editReply: ReturnType<typeof vi.fn>;
+}
+
+function makeInteraction(overrides: Partial<MockInteraction> = {}): MockInteraction {
+  return {
+    isButton: () => true,
+    channel: { id: '123', type: 1 },
+    customId: 'perm_allow_opt1',
+    user: { id: 'u1' },
+    reply: vi.fn(async () => ({})),
+    update: vi.fn(async () => ({})),
+    editReply: vi.fn(async () => ({})),
+    ...overrides,
   };
 }
 
@@ -486,6 +510,70 @@ describe('DiscordBot', () => {
     expect(second.content.startsWith('\n\n')).toBe(true);
     expect(second.reply?.messageReference).toBe('101');
     expect(second.allowedMentions?.repliedUser).toBe(false);
+  });
+
+  it('denies permission interactions from non-operator users in guilds', async () => {
+    const { bot } = createBot({ allowedUserIds: ['u1'] });
+    await bot.start();
+    const resolve = vi.fn();
+    // biome-ignore lint/suspicious/noExplicitAny: protected member under test
+    (bot as any).permissionPending = { resolve };
+    const handler = mockClient.on.mock.calls.find((c) => c[0] === 'interactionCreate')[1] as (
+      i: MockInteraction
+    ) => Promise<void>;
+    const interaction = makeInteraction({
+      channel: { id: '123', type: 0 },
+      user: { id: 'u2' },
+    });
+    await handler(interaction);
+    expect(resolve).not.toHaveBeenCalled();
+    expect(interaction.reply).toHaveBeenCalledWith(expect.objectContaining({ ephemeral: true }));
+  });
+
+  it('denies guild interactions when allowedUserIds is empty', async () => {
+    const { bot } = createBot();
+    await bot.start();
+    const resolve = vi.fn();
+    // biome-ignore lint/suspicious/noExplicitAny: protected member under test
+    (bot as any).permissionPending = { resolve };
+    const handler = mockClient.on.mock.calls.find((c) => c[0] === 'interactionCreate')[1] as (
+      i: MockInteraction
+    ) => Promise<void>;
+    const interaction = makeInteraction({ channel: { id: '123', type: 0 } });
+    await handler(interaction);
+    expect(resolve).not.toHaveBeenCalled();
+  });
+
+  it('allows permission interactions from allowlisted users in guilds', async () => {
+    const { bot } = createBot({ allowedUserIds: ['u1'] });
+    await bot.start();
+    const resolve = vi.fn();
+    // biome-ignore lint/suspicious/noExplicitAny: protected member under test
+    (bot as any).permissionPending = { resolve };
+    const handler = mockClient.on.mock.calls.find((c) => c[0] === 'interactionCreate')[1] as (
+      i: MockInteraction
+    ) => Promise<void>;
+    const interaction = makeInteraction({ channel: { id: '123', type: 0 } });
+    await handler(interaction);
+    expect(resolve).toHaveBeenCalledWith({
+      outcome: { outcome: 'selected', optionId: 'opt1' },
+    });
+    expect(interaction.update).toHaveBeenCalledWith(
+      expect.objectContaining({ content: expect.stringContaining('Allowed') })
+    );
+  });
+
+  it('allows permission interactions in DMs without allowlist', async () => {
+    const { bot } = createBot();
+    await bot.start();
+    const resolve = vi.fn();
+    // biome-ignore lint/suspicious/noExplicitAny: protected member under test
+    (bot as any).permissionPending = { resolve };
+    const handler = mockClient.on.mock.calls.find((c) => c[0] === 'interactionCreate')[1] as (
+      i: MockInteraction
+    ) => Promise<void>;
+    await handler(makeInteraction());
+    expect(resolve).toHaveBeenCalled();
   });
 
   it('reports message handler errors without rejecting', async () => {

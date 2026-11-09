@@ -9,12 +9,18 @@
   "platforms": {
     "telegram": {
       "token": "YOUR_BOT_TOKEN",
-      "allowedChatIds": [123456789]
+      "allowedChatIds": [123456789],
+      // User IDs allowed to approve agent permissions / reconnect inside
+      // GROUP chats (private chats always allowed). Empty = nobody in a
+      // group can approve permissions. Get your ID via @userinfobot.
+      // "allowedUserIds": [123456789]
     }
     // Discord (optional, v0.2.0+)
     // "discord": {
     //   "token": "YOUR_DISCORD_BOT_TOKEN",
-    //   "allowedChannelIds": [123456789]
+    //   "allowedChannelIds": [123456789],
+    //   // Same as above but for guild channels (DMs always allowed).
+    //   // "allowedUserIds": ["123456789012345678"]
     // }
   },
 

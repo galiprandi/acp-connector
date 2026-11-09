@@ -4,6 +4,7 @@ import {
   ButtonBuilder,
   type ButtonInteraction,
   ButtonStyle,
+  ChannelType,
   Client,
   Events,
   GatewayIntentBits,
@@ -22,6 +23,7 @@ interface DiscordBotOpts {
   acp: AcpClient;
   token: string;
   allowedChannelIds: string[];
+  allowedUserIds?: string[];
   agentCmd: string;
   showThoughts?: boolean;
   showTools?: boolean;
@@ -36,6 +38,7 @@ interface DiscordBotOpts {
 export class DiscordBot extends BaseBot {
   private token: string;
   private allowedChannelIds: Set<string>;
+  private allowedUserIds: Set<string>;
   private client: Client;
   private currentMessage: Message | null;
 
@@ -45,6 +48,7 @@ export class DiscordBot extends BaseBot {
     acp,
     token,
     allowedChannelIds,
+    allowedUserIds = [],
     agentCmd,
     showThoughts = false,
     showTools = true,
@@ -69,6 +73,7 @@ export class DiscordBot extends BaseBot {
     });
     this.token = token;
     this.allowedChannelIds = new Set(allowedChannelIds.map(String));
+    this.allowedUserIds = new Set(allowedUserIds.map(String));
     this.client = new Client({
       intents: [
         GatewayIntentBits.Guilds,
@@ -413,12 +418,32 @@ export class DiscordBot extends BaseBot {
     }
   }
 
+  /**
+   * Sensitive interactions (permission decisions, reconnect) require an
+   * operator: DMs are always allowed; guild channels require `user.id` in
+   * `allowedUserIds`.
+   */
+  private _isOperatorInteraction(interaction: ButtonInteraction): boolean {
+    const type = interaction.channel?.type;
+    if (type === ChannelType.DM || type === ChannelType.GroupDM) return true;
+    const userId = interaction.user?.id;
+    return userId !== undefined && this.allowedUserIds.has(String(userId));
+  }
+
   private async _onInteraction(interaction: ButtonInteraction): Promise<void> {
     if (!interaction.isButton()) return;
     const channelId = interaction.channel?.id;
     if (!channelId || !this._isAllowed(channelId)) return;
 
     const data = interaction.customId || '';
+    const sensitive = data === 'reconnect' || data.startsWith('perm_');
+    if (sensitive && !this._isOperatorInteraction(interaction)) {
+      await interaction.reply({ content: '⛔ Not authorized', ephemeral: true }).catch(() => {});
+      log.warn(
+        `Rejected ${data.split('_')[0]} interaction from user ${interaction.user?.id} in channel ${channelId}`
+      );
+      return;
+    }
     if (data === 'reconnect') {
       try {
         await interaction.update({ content: '🔄 Reconnecting agent…', components: [] });
