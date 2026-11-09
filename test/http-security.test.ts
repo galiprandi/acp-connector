@@ -483,4 +483,76 @@ describe('HttpServer security tests', () => {
     expect(res.status).toBe(404);
     expect(res.body.error).toBeDefined();
   });
+
+  // callbackUrl validation (SSRF guard)
+
+  it('rejects callbackUrl pointing to loopback', async () => {
+    const { server, enqueue } = createServer();
+    await server.start();
+    cleanup.push(() => server.stop());
+    const res = await fetchServer(server, 'POST', '/prompt', {
+      text: 'hi',
+      callbackUrl: 'http://127.0.0.1:9999/hook',
+    });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('callbackUrl rejected');
+    expect(enqueue).not.toHaveBeenCalled();
+  });
+
+  it('rejects callbackUrl to localhost and 127.x', async () => {
+    const { server, enqueue } = createServer();
+    await server.start();
+    cleanup.push(() => server.stop());
+    for (const host of ['localhost', '127.0.0.1', '127.5.5.5', '[::1]']) {
+      const res = await fetchServer(server, 'POST', '/prompt', {
+        text: 'hi',
+        callbackUrl: `http://${host}:9999/hook`,
+      });
+      expect(res.status, host).toBe(400);
+    }
+    expect(enqueue).not.toHaveBeenCalled();
+  });
+
+  it('rejects malformed and non-http callbackUrl schemes', async () => {
+    const { server, enqueue } = createServer();
+    await server.start();
+    cleanup.push(() => server.stop());
+    const res1 = await fetchServer(server, 'POST', '/prompt', {
+      text: 'hi',
+      callbackUrl: 'not a url',
+    });
+    expect(res1.status).toBe(400);
+    const res2 = await fetchServer(server, 'POST', '/prompt', {
+      text: 'hi',
+      callbackUrl: 'ftp://example.com/hook',
+    });
+    expect(res2.status).toBe(400);
+    expect(enqueue).not.toHaveBeenCalled();
+  });
+
+  it('allows callbackUrl to public hosts and rejects loopback only when not listed', async () => {
+    const { server, enqueue } = createServer();
+    await server.start();
+    cleanup.push(() => server.stop());
+    const res = await fetchServer(server, 'POST', '/prompt', {
+      text: 'hi',
+      callbackUrl: 'https://example.com/hook',
+    });
+    expect(res.status).toBe(200);
+    expect(enqueue).toHaveBeenCalledOnce();
+  });
+
+  it('allows callbackUrl when the host is listed in callbackAllow', async () => {
+    const { server, enqueue } = createServer({
+      callbackAllow: ['127.0.0.1'],
+    });
+    await server.start();
+    cleanup.push(() => server.stop());
+    const res = await fetchServer(server, 'POST', '/prompt', {
+      text: 'hi',
+      callbackUrl: 'http://127.0.0.1:9999/hook',
+    });
+    expect(res.status).toBe(200);
+    expect(enqueue).toHaveBeenCalledOnce();
+  });
 });

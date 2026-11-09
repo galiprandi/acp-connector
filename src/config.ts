@@ -28,6 +28,17 @@ export interface HttpConfig {
   auth?: {
     token?: string;
   };
+  /**
+   * Allow `/commands` (e.g. /a2a, /mode, /cron) to be run via POST /prompt.
+   * Default false: prompt text sent over HTTP is agent input, never bridge
+   * administration.
+   */
+  commands?: boolean;
+  /**
+   * Hostnames accepted as `callbackUrl` targets beyond public ones —
+   * loopback/private hosts are rejected by default (SSRF guard).
+   */
+  callbackAllow?: string[];
   forwardHeaders?: boolean;
   maxBodySize?: number;
   rateLimit?: number;

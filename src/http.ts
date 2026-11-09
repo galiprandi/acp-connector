@@ -1,7 +1,20 @@
+import { timingSafeEqual } from 'node:crypto';
 import type { IncomingMessage, Server, ServerResponse } from 'node:http';
 import { createServer } from 'node:http';
 import type { ContentBlock } from '@agentclientprotocol/sdk';
 import { log } from './logger.js';
+
+/**
+ * True when `host` is a loopback address (IPv4 127.0.0.0/8, IPv6 `::1`,
+ * or the name `localhost`). IPv6 literals may carry brackets.
+ */
+export function isLoopbackHost(host: string): boolean {
+  const bare = host
+    .trim()
+    .toLowerCase()
+    .replace(/^\[|\]$/g, '');
+  return bare === '::1' || bare === 'localhost' || bare.startsWith('127.');
+}
 
 const DEFAULT_MAX_BODY = 1024 * 1024; // 1MB
 const DEFAULT_RATE_LIMIT = 60; // requests per minute
@@ -55,6 +68,11 @@ export interface HttpServerOptions {
   maxBodySize?: number;
   /** Max requests per minute. */
   rateLimit?: number;
+  /**
+   * Hostnames accepted as `callbackUrl` targets beyond public ones —
+   * loopback/private hosts are rejected by default (SSRF guard).
+   */
+  callbackAllow?: string[];
   /** `(text, chatId?) => void` — enqueue a prompt. */
   enqueue: EnqueueFn;
   /** `() => HealthStatus` — provide health info. */
@@ -79,6 +97,7 @@ export class HttpServer {
   forwardHeaders: boolean;
   maxBodySize: number;
   rateLimit: number;
+  callbackAllow: string[];
   enqueue: EnqueueFn;
   getHealth: GetHealthFn;
   private _server: Server | null = null;
@@ -95,6 +114,7 @@ export class HttpServer {
     forwardHeaders = false,
     maxBodySize = DEFAULT_MAX_BODY,
     rateLimit = DEFAULT_RATE_LIMIT,
+    callbackAllow = [],
     enqueue,
     getHealth = null,
   }: HttpServerOptions) {
@@ -105,6 +125,7 @@ export class HttpServer {
     this.forwardHeaders = forwardHeaders;
     this.maxBodySize = maxBodySize;
     this.rateLimit = rateLimit;
+    this.callbackAllow = callbackAllow;
     this.enqueue = enqueue;
     this.getHealth = getHealth || (() => ({ status: 'ok' }));
   }
@@ -123,8 +144,10 @@ export class HttpServer {
           return;
         }
 
-        // Auth check
-        if (this.authToken && !this._checkAuth(req)) {
+        // Auth check — fail closed: with no token configured, the compare
+        // accepts unauthenticated local clients (deprecated loopback setup,
+        // warned about at startup); with a token, every request is verified.
+        if (!this._checkAuth(req)) {
           res.writeHead(401);
           res.end(JSON.stringify({ error: 'unauthorized' }));
           return;
@@ -234,6 +257,14 @@ export class HttpServer {
         // Not JSON — use raw body as prompt
       }
 
+      // SSRF guard: reject callbackUrl targets that are not well-formed
+      // http(s) URLs pointing off the loopback interface.
+      if (callbackUrl && !this._isCallbackAllowed(callbackUrl)) {
+        res.writeHead(400);
+        res.end(JSON.stringify({ error: 'callbackUrl rejected' }));
+        return;
+      }
+
       if (promptText.trim() === '' && (!blocks || blocks.length === 0)) {
         res.writeHead(400);
         res.end(JSON.stringify({ error: 'empty prompt' }));
@@ -287,9 +318,30 @@ export class HttpServer {
   }
 
   _checkAuth(req: IncomingMessage): boolean {
-    const auth = req.headers.authorization;
-    if (!auth) return false;
-    return auth === `Bearer ${this.authToken}`;
+    if (!this.authToken) return true;
+    const auth = req.headers.authorization ?? '';
+    const expected = `Bearer ${this.authToken}`;
+    const a = Buffer.from(auth);
+    const b = Buffer.from(expected);
+    return a.length === b.length && timingSafeEqual(a, b);
+  }
+
+  /**
+   * SSRF guard for `callbackUrl`: the agent's response is POSTed there, so
+   * only well-formed http(s) URLs to non-loopback hosts pass. Hostnames in
+   * `callbackAllow` are permitted even when loopback/private.
+   */
+  _isCallbackAllowed(callbackUrl: string): boolean {
+    let url: URL;
+    try {
+      url = new URL(callbackUrl);
+    } catch {
+      return false;
+    }
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
+    const host = url.hostname.toLowerCase();
+    if (this.callbackAllow.includes(host)) return true;
+    return !isLoopbackHost(host);
   }
 
   _isRateLimited(): boolean {

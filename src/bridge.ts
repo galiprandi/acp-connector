@@ -4,13 +4,14 @@ import { A2aServer, signBody } from './a2a.js';
 import { A2aManager } from './a2a-manager.js';
 import { AcpClient } from './acp-client.js';
 import { buildAgentCard } from './agent-card.js';
+import { BaseBot } from './base-bot.js';
 import type { PlatformBot } from './bot.js';
 import { BridgeBot } from './bot.js';
 import { type BridgeConfig, loadConfig } from './config.js';
 import { CronManager } from './cron.js';
 import { DiscordBot } from './discord.js';
 import { DiscoveryService } from './discovery.js';
-import { HttpServer } from './http.js';
+import { HttpServer, isLoopbackHost } from './http.js';
 import { log, setLogLevel } from './logger.js';
 import { LoopbackBot } from './loopback.js';
 import { MediaHandler } from './media.js';
@@ -257,12 +258,31 @@ export async function run(): Promise<void> {
   }
 
   // Wire bridge commands to all bots (routines first, then /a2a)
+  // Only BaseBot subclasses honor the http command gate; LoopbackBot's
+  // headless command handling is intentionally unchanged (operator-internal).
+  const httpCommandsAllowed = config.http?.commands ?? false;
   for (const bot of bots) {
+    if (bot instanceof BaseBot) bot.httpCommandsAllowed = httpCommandsAllowed;
     bot.setCommandHandler((text, chatId) =>
       routineManager.handleCommand(text, chatId as number).then(async (handled) => {
         if (handled) return true;
         return a2aManager ? a2aManager.handleCommand(text, chatId) : false;
       })
+    );
+  }
+
+  // ✅ HTTP auth gate, fail closed: a non-loopback bind without a token
+  // would let anyone on the network inject prompts into the coding agent.
+  const httpHost = config.http?.host ?? '127.0.0.1';
+  const httpLoopback = isLoopbackHost(httpHost);
+  if (config.http?.enabled && !httpLoopback && !config.http?.auth?.token) {
+    throw new Error(
+      'http.enabled with a non-loopback host requires http.auth.token — refusing to start (set http.auth.token or bind http.host to 127.0.0.1)'
+    );
+  }
+  if (config.http?.enabled && httpLoopback && !config.http?.auth?.token) {
+    log.warn(
+      'HTTP server enabled without an auth token — any local process can inject prompts and run bridge commands'
     );
   }
 
@@ -274,9 +294,19 @@ export async function run(): Promise<void> {
     forwardHeaders: config.http?.forwardHeaders || false,
     maxBodySize: config.http?.maxBodySize || 1024 * 1024,
     rateLimit: config.http?.rateLimit || 60,
+    callbackAllow: config.http?.callbackAllow || [],
+    // chatId from the request body is only honored when present in the
+    // platform allowlist — otherwise replies would go to channels outside
+    // the operator's control.
     enqueue: (text, chatId, blocks, onComplete) => {
+      const allowedChatIds = new Set(tg?.allowedChatIds ?? []);
+      let chatTarget = chatId;
+      if (chatTarget !== undefined && !allowedChatIds.has(chatTarget)) {
+        log.warn(`dropping /prompt chatId ${chatTarget} — not in allowedChatIds`);
+        chatTarget = undefined;
+      }
       for (const bot of bots) {
-        bot.enqueuePrompt(text, chatId, blocks, onComplete, 'http');
+        bot.enqueuePrompt(text, chatTarget, blocks, onComplete, 'http');
       }
     },
     getHealth: () => ({

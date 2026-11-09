@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { BridgeConfig } from '../src/config';
 import type { CronManagerOptions } from '../src/cron';
+import { log } from '../src/logger';
 
 const validConfig: BridgeConfig = {
   agentCmd: 'acp-agent serve',
@@ -112,10 +113,18 @@ interface MockHttpServer {
   stop: vi.Mock;
 }
 
+interface MockHttpOptions {
+  authToken?: string | null;
+  callbackAllow?: string[];
+  enqueue: (text: string, chatId?: number | string, blocks?: unknown, onComplete?: unknown) => void;
+}
+
 const mockHttpServer: MockHttpServer = {
   start: vi.fn(),
   stop: vi.fn(),
 };
+
+let lastHttpServerArgs: MockHttpOptions | null = null;
 
 interface MockAcpInstance {
   onPermission: ((params: unknown) => Promise<unknown>) | null;
@@ -220,9 +229,20 @@ vi.mock('../src/reminders-api.ts', () => ({
   })),
 }));
 vi.mock('../src/http.js', () => ({
+  // Mirror of src/http.ts isLoopbackHost — keeps the mock self-contained.
+  isLoopbackHost: (host: string) => {
+    const bare = host
+      .trim()
+      .toLowerCase()
+      .replace(/^\[|\]$/g, '');
+    return bare === '::1' || bare === 'localhost' || bare.startsWith('127.');
+  },
   HttpServer: class MockHttpServer {
     start = mockHttpServer.start;
     stop = mockHttpServer.stop;
+    constructor(opts: MockHttpOptions) {
+      lastHttpServerArgs = opts;
+    }
   },
 }));
 
@@ -238,6 +258,7 @@ describe('bridge', () => {
     mockAcpClient.start.mockResolvedValue(undefined);
     mockConfig = null;
     lastCronManagerArgs = null;
+    lastHttpServerArgs = null;
     intervalSpy = vi.spyOn(global, 'setInterval').mockImplementation(() => 0);
     onSpy = vi.spyOn(process, 'on').mockImplementation(() => process);
     exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => {
@@ -322,5 +343,71 @@ describe('bridge', () => {
 
     expect(mockDiscordBot._handlePermission).toHaveBeenCalledTimes(1);
     expect(mockBot._handlePermission).not.toHaveBeenCalled();
+  });
+
+  // --- HTTP hardening (plan 003) ---
+
+  it('refuses to start when http is enabled on a non-loopback host without an auth token', async () => {
+    mockConfig = {
+      ...validConfig,
+      http: { enabled: true, host: '0.0.0.0' },
+    };
+    await expect(run()).rejects.toThrow('http.auth.token');
+    expect(mockHttpServer.start).not.toHaveBeenCalled();
+  });
+
+  it('starts when http runs on a non-loopback host with an auth token', async () => {
+    mockConfig = {
+      ...validConfig,
+      http: { enabled: true, host: '0.0.0.0', auth: { token: 'secret' } },
+    };
+    await expect(run()).resolves.toBeUndefined();
+    expect(lastHttpServerArgs?.authToken).toBe('secret');
+  });
+
+  it('warns but starts when http is enabled without a token on a loopback host', async () => {
+    const warnSpy = vi.spyOn(log, 'warn').mockImplementation(() => {});
+    mockConfig = {
+      ...validConfig,
+      http: { enabled: true, host: '127.0.0.1' },
+    };
+    try {
+      await expect(run()).resolves.toBeUndefined();
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('any local process can inject prompts')
+      );
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it('drops a /prompt chatId missing from the platform allowlist', async () => {
+    mockConfig = {
+      ...validConfig,
+      http: { enabled: true, auth: { token: 't' } },
+    };
+    await run();
+    const enqueue = lastHttpServerArgs?.enqueue;
+    expect(typeof enqueue).toBe('function');
+    enqueue?.('hello', 999, undefined, undefined);
+    expect(mockBot.enqueuePrompt).toHaveBeenCalledWith(
+      'hello',
+      undefined,
+      undefined,
+      undefined,
+      'http'
+    );
+  });
+
+  it('keeps a /prompt chatId present in the platform allowlist', async () => {
+    mockConfig = {
+      ...validConfig,
+      http: { enabled: true, auth: { token: 't' } },
+    };
+    // validConfig allows chat 123 for telegram
+    await run();
+    const enqueue = lastHttpServerArgs?.enqueue;
+    enqueue?.('hello', 123, undefined, undefined);
+    expect(mockBot.enqueuePrompt).toHaveBeenCalledWith('hello', 123, undefined, undefined, 'http');
   });
 });

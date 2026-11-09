@@ -22,6 +22,12 @@ export interface BaseBotOpts {
   mediaHandler: MediaHandler | null;
   onCommand: ((text: string, chatId: number | string) => Promise<boolean>) | null;
   onPrompt: ((text: string, chatId: number | string) => void) | null;
+  /**
+   * Allow `/commands` (e.g. /a2a, /mode, /cron) to be run by prompts with
+   * source 'http' (POST /prompt). Default false: prompt text sent over
+   * HTTP is agent input, never bridge administration.
+   */
+  httpCommandsAllowed?: boolean;
 }
 
 export interface QueueItem {
@@ -57,6 +63,8 @@ export abstract class BaseBot implements PlatformBot {
   protected streaming: boolean;
   protected echoInjectedPrompts: boolean;
   protected mediaHandler: MediaHandler | null;
+  /** When true, prompts from POST /prompt (source 'http') may run bridge commands. */
+  httpCommandsAllowed: boolean;
   onCommand: ((text: string, chatId: number | string) => Promise<boolean>) | null;
   protected onPrompt: ((text: string, chatId: number | string) => void) | null;
   protected queue: QueueItem[];
@@ -85,6 +93,7 @@ export abstract class BaseBot implements PlatformBot {
     mediaHandler,
     onCommand,
     onPrompt,
+    httpCommandsAllowed = false,
   }: BaseBotOpts) {
     this.acp = acp;
     this.agentCmd = agentCmd;
@@ -94,6 +103,7 @@ export abstract class BaseBot implements PlatformBot {
     this.streaming = streaming;
     this.echoInjectedPrompts = echoInjectedPrompts;
     this.mediaHandler = mediaHandler;
+    this.httpCommandsAllowed = httpCommandsAllowed;
     this.onCommand = onCommand;
     this.onPrompt = onPrompt;
     this.queue = [];
@@ -532,10 +542,11 @@ export abstract class BaseBot implements PlatformBot {
     onChunk?: (chunk: string) => void
   ): Promise<void> {
     if (!chatId) return;
-    // Commands are processed for user messages and first-class entry
-    // points (http, cron, routine) — but never for A2A-injected prompts:
-    // remote content is agent input, not bridge administration.
-    const isRemoteContent = source === 'a2a';
+    // Commands are processed for user messages and first-class operator
+    // entry points (cron, routine) — and for http only when the operator
+    // opts in via `http.commands`. A2A-injected prompts and default http
+    // prompts are remote content: agent input, not bridge administration.
+    const isRemoteContent = source === 'a2a' || (source === 'http' && !this.httpCommandsAllowed);
     if (!isRemoteContent && (await this._handleBuiltinCommand(text, chatId))) return;
     if (!isRemoteContent && text.startsWith('/') && this.onCommand) {
       const handled = await this.onCommand(text, chatId);
