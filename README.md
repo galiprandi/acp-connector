@@ -288,7 +288,9 @@ The bridge always injects an `agent-reminders` MCP server into `session/new`, gi
 | `cron_list()` | List all jobs — operator jobs are flagged `readOnly: true` |
 | `cron_update({ id, ... })` / `cron_delete({ id })` | Modify/delete only `managed: "agent"` jobs; operator jobs are read-only |
 
-Agent-created cron jobs are persisted to `acp-connector.jsonc` with `managed: "agent"` — they survive restarts and the agent can update/delete them later. Jobs you write in the config or create via `/cron` chat commands are operator-owned: the agent can list them but cannot modify them.
+Agent-created cron jobs are persisted to `acp-connector.jsonc` with `managed: "agent"` — they survive restarts and the agent can update/delete them later (capped at 50 active agent-created jobs). Jobs you write in the config or create via `/cron` chat commands are operator-owned: the agent can list them but cannot modify them.
+
+**Agent-created cron prompts are agent input, not bridge administration.** When an agent-managed job fires, its prompt is injected as `[Agent cron <id>] <prompt>` and cannot run `/` bridge commands (`/a2a`, `/mode`, `/cron`…) even if the prompt starts with one — the same guard reminders apply. Operator jobs fire verbatim, unchanged.
 
 ### HTTP API
 

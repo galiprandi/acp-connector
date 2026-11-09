@@ -125,7 +125,11 @@ The bridge always injects an `agent-reminders` MCP server in `session/new`
 queue with source `'reminder'` and entries are deleted on delivery —
 undeliverable entries (no agent session/chat id) are kept and retried.
 `cron_*` tools can only touch jobs persisted with `managed: "agent"`;
-operator jobs are listed read-only. Agents without MCP capabilities get a
+operator jobs are listed read-only. Agent-created cron jobs are capped
+(50 concurrent) and at fire time their prompt is injected as
+`[Agent cron <name>] <prompt>` with source `'agent-cron'`: agent-scheduled
+prompts are remote content and never run bridge commands, even when they
+start with `/`. Agents without MCP capabilities get a
 one-line warning at startup and no tools.
 
 ### Key principles
