@@ -1,2 +1,10 @@
 allowBuilds:
   esbuild: true
+overrides:
+  "form-data@<2.5.6": "2.5.6"
+  "body-parser": "^2.4.0"
+  "undici": "^6.29.1"
+  "zod": "^4.6.6"
+  "fast-uri": "^3.1.9"
+  "qs": "^6.16.1"
+  "ip-address": "^10.7.4"
