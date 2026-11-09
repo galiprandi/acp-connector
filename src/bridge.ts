@@ -63,10 +63,12 @@ export async function run(): Promise<void> {
   const cronManager = new CronManager({
     jobs: config.cron || [],
     allowedChatIds: cronAllowedIds,
-    enqueue: (text, chatId) => {
-      // Enqueue to all bots — each will process if chatId matches
+    enqueue: (text, chatId, managed) => {
+      // Enqueue to all bots — each will process if chatId matches.
+      // Agent-created jobs (managed) are their own source, treated as
+      // remote content by the command gate.
       for (const bot of bots) {
-        bot.enqueuePrompt(text, chatId, undefined, undefined, 'cron');
+        bot.enqueuePrompt(text, chatId, undefined, undefined, managed ? 'agent-cron' : 'cron');
       }
     },
   });

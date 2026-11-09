@@ -29,13 +29,16 @@ vi.mock('../src/config.ts', async (importOriginal) => {
 
 const { CronManager } = await import('../src/cron.ts');
 const { ReminderManager } = await import('../src/reminders.ts');
-const { startRemindersApi } = await import('../src/reminders-api.ts');
+const { AGENT_CRON_CAP, startRemindersApi } = await import('../src/reminders-api.ts');
+
+type MockFn = ReturnType<typeof vi.fn>;
 
 let dir: string;
 let baseUrl: string;
 let close: () => void;
 let reminders: InstanceType<typeof ReminderManager>;
 let cronManager: InstanceType<typeof CronManager>;
+let cronEnqueue: MockFn = vi.fn();
 
 async function api(path: string, body?: Record<string, unknown>, method?: string) {
   const res = await fetch(`${baseUrl}${path}`, {
@@ -55,13 +58,14 @@ beforeEach(async () => {
     deliver: vi.fn(),
     onLog: () => {},
   });
+  cronEnqueue = vi.fn();
   cronManager = new CronManager({
     jobs: [
       { name: 'op-job', schedule: '0 9 * * *', prompt: 'operator owned' },
       { name: 'agent-old', schedule: '0 8 * * *', prompt: 'agent owned', managed: 'agent' },
     ],
     allowedChatIds: [1],
-    enqueue: vi.fn(),
+    enqueue: cronEnqueue,
     onLog: () => {},
   });
   const { server, port } = await startRemindersApi({
@@ -138,6 +142,48 @@ describe('cron api', () => {
     expect(
       (await api('/cron/create', { every: '1h', expr: '* * * * *', prompt: 'x' })).json.ok
     ).toBe(false);
+  });
+
+  it('caps agent-created jobs at AGENT_CRON_CAP', async () => {
+    // fixture already holds 1 agent job ("agent-old"); fill up to the cap
+    for (let i = 0; i < AGENT_CRON_CAP - 1; i++) {
+      cronManager.add({
+        name: `agent-fill-${i}`,
+        schedule: '0 0 * * *',
+        prompt: 'x',
+        managed: 'agent',
+      });
+    }
+
+    const full = await api('/cron/create', { every: '1h', prompt: 'one too many' });
+    expect(full.status).toBe(400);
+    expect(full.json.error).toBe(`agent cron job cap reached (${AGENT_CRON_CAP})`);
+
+    // freeing a slot lets creation succeed again
+    cronManager.remove('agent-fill-0');
+    const ok = await api('/cron/create', { every: '1h', prompt: 'fits now' });
+    expect(ok.json.ok).toBe(true);
+  });
+
+  it('POST /cron/create with a "/" prompt is delivered prefixed, never dispatched as a bridge command', async () => {
+    const created = await api('/cron/create', { every: '1h', prompt: '/a2a approve x' });
+    expect(created.json.ok).toBe(true);
+
+    // invoke the (mocked) schedule callback for the job just created
+    const callback = mockSchedule.mock.calls.at(-1)?.[1] as () => void;
+    callback();
+
+    expect(cronEnqueue).toHaveBeenCalledTimes(1);
+    const [text, chatId, managed] = cronEnqueue.mock.calls[0] as unknown as [
+      string,
+      number,
+      boolean,
+    ];
+    // a leading "/" is never reachable: the delivery prefix comes first
+    expect(text.startsWith('[Agent cron agent-')).toBe(true);
+    expect(text.endsWith('/a2a approve x')).toBe(true);
+    expect(chatId).toBe(1);
+    expect(managed).toBe(true);
   });
 
   it('lists all jobs flagging operator-owned ones read-only', async () => {

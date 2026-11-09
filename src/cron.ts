@@ -52,8 +52,11 @@ type LogFn = (msg: string) => void;
 
 /**
  * Enqueue callback: enqueues a prompt text for a given chat id.
+ * `managed` is true when the firing job was created by the agent
+ * (managed === "agent") — a fact the gate uses to treat the firing
+ * prompt as remote content, never bridge administration.
  */
-type EnqueueFn = (text: string, chatId: number | string) => void;
+type EnqueueFn = (text: string, chatId: number | string, managed?: boolean) => void;
 
 /**
  * Constructor options for CronManager.
@@ -121,11 +124,25 @@ export class CronManager {
 
     const task = cron.schedule(job.schedule, () => {
       this.onLog(`⏰ cron "${job.name}" fired`);
-      this.enqueue(job.prompt, chatId);
+      this._fire(job, chatId);
     });
 
     this._tasks.set(job.name, { task, job });
     this.onLog(`⏰ cron "${job.name}" scheduled: ${job.schedule}`);
+  }
+
+  /**
+   * Deliver a job prompt to the queue. Agent-managed jobs get a delivery
+   * prefix (same pattern as reminders) so a leading "/" prompt is never
+   * parsed as a bridge command, and are flagged to the enqueue callback
+   * as remote content. Operator jobs enqueue verbatim, unchanged.
+   */
+  private _fire(job: CronJob, chatId: number | string): void {
+    if (job.managed === 'agent') {
+      this.enqueue(`[Agent cron ${job.name}] ${job.prompt}`, chatId, true);
+      return;
+    }
+    this.enqueue(job.prompt, chatId);
   }
 
   /**
@@ -197,7 +214,7 @@ export class CronManager {
     if (!chatId) return false;
 
     this.onLog(`⏰ cron "${job.name}" manual run`);
-    this.enqueue(job.prompt, chatId);
+    this._fire(job, chatId);
     return true;
   }
 

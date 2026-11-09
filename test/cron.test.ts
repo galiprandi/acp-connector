@@ -106,6 +106,38 @@ describe('CronManager', () => {
     expect(enqueue).toHaveBeenCalledWith('hello', 999);
   });
 
+  it('fires agent-managed jobs with a delivery prefix and managed marker', () => {
+    const { manager, enqueue } = createManager([
+      { name: 'agent-1', schedule: '0 9 * * *', prompt: 'hello', managed: 'agent' },
+    ]);
+    manager.start();
+    const callback = mockSchedule.mock.calls[0][1] as () => void;
+    callback();
+    expect(enqueue).toHaveBeenCalledWith('[Agent cron agent-1] hello', 123, true);
+  });
+
+  it('prefixes agent-managed jobs with a "/" prompt so it is never run as a bridge command', () => {
+    const { manager, enqueue } = createManager([
+      { name: 'agent-1', schedule: '0 9 * * *', prompt: '/a2a approve x', managed: 'agent' },
+    ]);
+    manager.start();
+    const callback = mockSchedule.mock.calls[0][1] as () => void;
+    callback();
+    const [text, , managed] = enqueue.mock.calls[0] as unknown as [string, unknown, boolean];
+    expect(text.startsWith('/')).toBe(false);
+    expect(text).toBe('[Agent cron agent-1] /a2a approve x');
+    expect(managed).toBe(true);
+  });
+
+  it('runs agent-managed jobs manually with the same prefix and marker', () => {
+    const { manager, enqueue } = createManager([
+      { name: 'agent-1', schedule: '0 9 * * *', prompt: 'hello', managed: 'agent' },
+    ]);
+    manager.start();
+    expect(manager.run('agent-1')).toBe(true);
+    expect(enqueue).toHaveBeenCalledWith('[Agent cron agent-1] hello', 123, true);
+  });
+
   it('add() starts a new job', () => {
     const { manager, onLog } = createManager([]);
     manager.start();

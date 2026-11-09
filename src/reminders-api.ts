@@ -18,6 +18,13 @@ import { persistCronAndRoutines } from './routines.js';
 
 const MAX_BODY = 64 * 1024;
 
+/**
+ * Maximum number of concurrently persisted agent-created cron jobs.
+ * Mirrors MAX_REMINDERS in reminders.ts — bounds restart-surviving
+ * resource use if an agent misbehaves. Operator jobs are not capped here.
+ */
+export const AGENT_CRON_CAP = 50;
+
 type Json = Record<string, unknown>;
 
 function _send(res: ServerResponse, status: number, body: Json): void {
@@ -175,6 +182,10 @@ export function createRemindersApiHandler({
         if (!prompt) return _err(res, '"prompt" is required');
         const { schedule, error } = cronResolve(body);
         if (!schedule) return _err(res, error ?? 'invalid schedule');
+        const agentJobs = cronManager.list().filter((j) => j.managed === 'agent').length;
+        if (agentJobs >= AGENT_CRON_CAP) {
+          return _err(res, `agent cron job cap reached (${AGENT_CRON_CAP})`);
+        }
         const id = `agent-${Date.now().toString(36)}-${Math.floor(Math.random() * 1e4)}`;
         const job = cronManager.add({ name: id, schedule, prompt, managed: 'agent' });
         if (!job) return _err(res, 'invalid schedule or duplicate job');
