@@ -98,6 +98,7 @@ function makeMessage(channelId: string | number, content: string, authorBot = fa
 interface MockInteraction {
   isButton: () => boolean;
   channel: { id: string; type: number };
+  message: { id: string };
   customId: string;
   user: { id: string };
   reply: ReturnType<typeof vi.fn>;
@@ -109,6 +110,7 @@ function makeInteraction(overrides: Partial<MockInteraction> = {}): MockInteract
   return {
     isButton: () => true,
     channel: { id: '123', type: 1 },
+    message: { id: 'm1' },
     customId: 'perm_allow_opt1',
     user: { id: 'u1' },
     reply: vi.fn(async () => ({})),
@@ -517,7 +519,7 @@ describe('DiscordBot', () => {
     await bot.start();
     const resolve = vi.fn();
     // biome-ignore lint/suspicious/noExplicitAny: protected member under test
-    (bot as any).permissionPending = { resolve };
+    (bot as any).permissionPending = { resolve, messageId: 'm1' };
     const handler = mockClient.on.mock.calls.find((c) => c[0] === 'interactionCreate')[1] as (
       i: MockInteraction
     ) => Promise<void>;
@@ -535,7 +537,7 @@ describe('DiscordBot', () => {
     await bot.start();
     const resolve = vi.fn();
     // biome-ignore lint/suspicious/noExplicitAny: protected member under test
-    (bot as any).permissionPending = { resolve };
+    (bot as any).permissionPending = { resolve, messageId: 'm1' };
     const handler = mockClient.on.mock.calls.find((c) => c[0] === 'interactionCreate')[1] as (
       i: MockInteraction
     ) => Promise<void>;
@@ -549,7 +551,7 @@ describe('DiscordBot', () => {
     await bot.start();
     const resolve = vi.fn();
     // biome-ignore lint/suspicious/noExplicitAny: protected member under test
-    (bot as any).permissionPending = { resolve };
+    (bot as any).permissionPending = { resolve, messageId: 'm1' };
     const handler = mockClient.on.mock.calls.find((c) => c[0] === 'interactionCreate')[1] as (
       i: MockInteraction
     ) => Promise<void>;
@@ -568,12 +570,31 @@ describe('DiscordBot', () => {
     await bot.start();
     const resolve = vi.fn();
     // biome-ignore lint/suspicious/noExplicitAny: protected member under test
-    (bot as any).permissionPending = { resolve };
+    (bot as any).permissionPending = { resolve, messageId: 'm1' };
     const handler = mockClient.on.mock.calls.find((c) => c[0] === 'interactionCreate')[1] as (
       i: MockInteraction
     ) => Promise<void>;
     await handler(makeInteraction());
     expect(resolve).toHaveBeenCalled();
+  });
+
+  it('rejects permission interactions from a stale message', async () => {
+    const { bot } = createBot();
+    await bot.start();
+    const resolve = vi.fn();
+    // biome-ignore lint/suspicious/noExplicitAny: protected member under test
+    (bot as any).permissionPending = { resolve, messageId: 'm1' };
+    const handler = mockClient.on.mock.calls.find((c) => c[0] === 'interactionCreate')[1] as (
+      i: MockInteraction
+    ) => Promise<void>;
+    const interaction = makeInteraction({ message: { id: 'old-msg' } });
+    await handler(interaction);
+    expect(resolve).not.toHaveBeenCalled();
+    expect(interaction.reply).toHaveBeenCalledWith(
+      expect.objectContaining({ content: '⌛ Permission request expired', ephemeral: true })
+    );
+    // biome-ignore lint/suspicious/noExplicitAny: protected member under test
+    expect((bot as any).permissionPending).not.toBeNull();
   });
 
   it('reports message handler errors without rejecting', async () => {

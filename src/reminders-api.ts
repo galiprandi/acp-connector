@@ -43,11 +43,16 @@ function _err(res: ServerResponse, error: string, status = 400): void {
 async function _readBody(req: IncomingMessage): Promise<Json> {
   const chunks: Buffer[] = [];
   let size = 0;
+  let tooLarge = false;
   for await (const chunk of req) {
     size += (chunk as Buffer).length;
-    if (size > MAX_BODY) throw new Error('body too large');
+    if (size > MAX_BODY) {
+      tooLarge = true;
+      continue;
+    }
     chunks.push(chunk as Buffer);
   }
+  if (tooLarge) throw new Error('body too large');
   if (size === 0) return {};
   return JSON.parse(Buffer.concat(chunks).toString('utf8')) as Json;
 }
@@ -233,7 +238,11 @@ export function createRemindersApiHandler({
 
       _err(res, `not found: ${req.method} ${path}`, 404);
     } catch (err) {
-      _err(res, (err as Error).message, 500);
+      if ((err as Error).message === 'body too large') {
+        return _err(res, 'body too large', 413);
+      }
+      log.error(`reminders-api route failed: ${(err as Error).message}`);
+      _err(res, 'internal error', 500);
     }
   };
 }

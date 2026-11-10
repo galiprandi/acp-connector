@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -56,6 +56,14 @@ describe('ReminderManager', () => {
     expect(stored()).toHaveLength(1);
     expect(stored()[0].id).toMatch(/^[a-z0-9]{8}$/);
     expect(manager.list()[0].firesAt).toBe(new Date(nowMs + 60_000).toISOString());
+  });
+
+  it('writes the reminders store with owner-only permissions', () => {
+    const nested = join(dir, 'state', 'reminders.json');
+    const { manager } = createManager({ storePath: nested });
+    manager.create('ping', nowMs + 60_000);
+    expect(statSync(nested).mode & 0o777).toBe(0o600);
+    expect(statSync(join(dir, 'state')).mode & 0o777).toBe(0o700);
   });
 
   it('rejects reminders in the past and above the cap', () => {

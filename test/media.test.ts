@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AcpClient } from '../src/acp-client';
@@ -122,6 +122,14 @@ describe('MediaHandler', () => {
     expect(existsSync(file.path)).toBe(true);
     expect(file.mimeType).toBe('image/jpeg');
     expect(file.data).toBe(data.toString('base64'));
+  });
+
+  it('stores uploads with owner-only permissions', () => {
+    const dir = join(TEST_UPLOADS_DIR, 'nested');
+    const handler = new MediaHandler({ uploadsDir: dir, supportsImage: true });
+    const file = handler.saveFile(Buffer.from('x'), 'image/jpeg', 'jpg');
+    expect(statSync(dir).mode & 0o777).toBe(0o700);
+    expect(statSync(file.path).mode & 0o777).toBe(0o600);
   });
 
   it('creates ImageContent when agent supports image', () => {

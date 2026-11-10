@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import * as chrono from 'chrono-node';
 import { log } from './logger.js';
@@ -411,8 +411,13 @@ export class ReminderManager {
 
   private _save(): void {
     try {
-      mkdirSync(dirname(this.storePath), { recursive: true });
-      writeFileSync(this.storePath, `${JSON.stringify(this._reminders, null, 2)}\n`, 'utf8');
+      mkdirSync(dirname(this.storePath), { recursive: true, mode: 0o700 });
+      writeFileSync(this.storePath, `${JSON.stringify(this._reminders, null, 2)}\n`, {
+        encoding: 'utf8',
+        mode: 0o600,
+      });
+      chmodSync(this.storePath, 0o600);
+      chmodSync(dirname(this.storePath), 0o700);
     } catch (err) {
       this.onLog(`⚠️ failed to save reminders store: ${(err as Error).message}`);
     }

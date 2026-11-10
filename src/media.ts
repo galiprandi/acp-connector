@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { ContentBlock } from '@agentclientprotocol/sdk';
 import { log } from './logger.js';
@@ -65,7 +65,12 @@ export class MediaHandler {
     this.uploadsDir = uploadsDir || DEFAULT_UPLOADS_DIR;
     this.supportsImage = supportsImage;
     try {
-      mkdirSync(this.uploadsDir, { recursive: true });
+      mkdirSync(this.uploadsDir, { recursive: true, mode: 0o700 });
+      try {
+        chmodSync(this.uploadsDir, 0o700);
+      } catch {
+        // best-effort: tighten pre-existing dirs; creation mode covers new ones
+      }
     } catch {
       // dir may already exist
     }
@@ -77,7 +82,7 @@ export class MediaHandler {
   saveFile(data: Buffer, mimeType: string, ext: string): DownloadedFile {
     const filename = `media_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`;
     const path = join(this.uploadsDir, filename);
-    writeFileSync(path, data);
+    writeFileSync(path, data, { mode: 0o600 });
     log.info(`📄 file saved: ${path}`);
     return { path, mimeType, filename, data: data.toString('base64') };
   }

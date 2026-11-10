@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -88,6 +88,13 @@ describe('shared-file strategy', () => {
 
     await svc.stop();
     expect(readInstances()).toHaveLength(0);
+  });
+
+  it('writes the instances file with owner-only permissions', async () => {
+    const svc = makeService();
+    await svc.start();
+    expect(statSync(instancesFile).mode & 0o777).toBe(0o600);
+    await svc.stop();
   });
 
   it('discovers other live instances', async () => {

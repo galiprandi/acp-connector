@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { type LogLevel, log } from './logger.js';
 
@@ -263,5 +263,10 @@ export function saveConfig(config: BridgeConfig, path: string = defaultConfigPat
     throw new Error('saveConfig: config must be an object');
   }
   const json = JSON.stringify(config, null, 2);
-  writeFileSync(path, `${json}\n`, 'utf8');
+  writeFileSync(path, `${json}\n`, { encoding: 'utf8', mode: 0o600 });
+  try {
+    chmodSync(path, 0o600);
+  } catch {
+    // best-effort: tighten pre-existing files; creation mode covers new ones
+  }
 }

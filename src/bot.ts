@@ -430,12 +430,12 @@ export class BridgeBot extends BaseBot {
         buttons.push({ text: 'Deny', callback_data: `perm_deny_${rejectOpt.optionId}` });
 
       const text = `Permission required:\n\n${desc}`.slice(0, TG_MAX_LEN);
-      await this.bot.sendMessage(chatId, text, {
+      const sent = await this.bot.sendMessage(chatId, text, {
         reply_markup: { inline_keyboard: [buttons] },
       });
 
       return new Promise<PermissionResponse>((resolve) => {
-        this.permissionPending = { resolve };
+        this.permissionPending = { resolve, messageId: sent.message_id };
       });
     } catch {
       const allowOpt = params.options?.find(
@@ -506,6 +506,10 @@ export class BridgeBot extends BaseBot {
       return;
     }
     if (data.startsWith('perm_') && this.permissionPending) {
+      if (query.message?.message_id !== this.permissionPending.messageId) {
+        this.bot.answerCallbackQuery(query.id, { text: '⌛ Permission request expired' });
+        return;
+      }
       const [, outcome, ...rest] = data.split('_');
       const optionId = rest.join('_');
       const response: PermissionResponse = { outcome: { outcome: 'selected', optionId } };

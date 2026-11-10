@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import type { A2aConfig } from './config.js';
@@ -210,8 +210,17 @@ export class DiscoveryService {
   }
 
   private writeInstances(instances: InstanceRecord[]): void {
-    mkdirSync(dirname(this.instancesFile), { recursive: true });
-    writeFileSync(this.instancesFile, `${JSON.stringify(instances, null, 2)}\n`, 'utf8');
+    mkdirSync(dirname(this.instancesFile), { recursive: true, mode: 0o700 });
+    writeFileSync(this.instancesFile, `${JSON.stringify(instances, null, 2)}\n`, {
+      encoding: 'utf8',
+      mode: 0o600,
+    });
+    try {
+      chmodSync(this.instancesFile, 0o600);
+      chmodSync(dirname(this.instancesFile), 0o700);
+    } catch {
+      // best-effort: tighten pre-existing files; creation mode covers new ones
+    }
   }
 
   private registerSelf(): void {

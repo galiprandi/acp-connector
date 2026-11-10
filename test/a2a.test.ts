@@ -322,6 +322,97 @@ describe('agent-facing endpoints (loopback)', () => {
     });
     expect(res.status).toBe(403);
   });
+
+  it('propagates the inbound delegation chain on agent-initiated tasks', async () => {
+    const peerDir = mkdtempSync(join(tmpdir(), 'acp-peer-'));
+    const peerNetwork = new NetworkStore(join(peerDir, 'network.json'));
+    peerNetwork.upsertPeer({
+      id: 'donna',
+      cardUrl: 'http://x',
+      status: 'approved',
+      source: 'declared',
+    });
+    const peer = new A2aServer({
+      config: { enabled: true, port: 0, card: { name: 'Lean', description: 'x' } },
+      network: peerNetwork,
+      selfId: 'lean',
+      enqueue: (_t, _c, _b, done) => done?.('ok'),
+    });
+    await peer.start();
+    const paddr = peer.address();
+    const pport = typeof paddr === 'object' && paddr ? paddr.port : 0;
+
+    network.upsertPeer({
+      id: 'lean',
+      cardUrl: `http://127.0.0.1:${pport}/.well-known/agent-card.json`,
+      status: 'approved',
+      source: 'discovered',
+    });
+    network.upsertPeer({
+      id: 'job',
+      cardUrl: 'http://x',
+      status: 'approved',
+      source: 'declared',
+    });
+
+    // Inbound task arrives via 'job' carrying chain ['job']
+    await sendMessage('adapt this', 'job', 't-deep', ['job']);
+
+    // Agent delegates the same task onward to 'lean'
+    const res = await fetch(`http://127.0.0.1:${port}/a2a/delegate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ to: 'lean', text: 'continue', taskId: 't-deep' }),
+    });
+    expect(res.status).toBe(200);
+    // biome-ignore lint/suspicious/noExplicitAny: private state under test
+    expect((peer as any)._taskChains.get('t-deep')).toEqual(['job', 'donna']);
+
+    await peer.stop();
+    rmSync(peerDir, { recursive: true, force: true });
+  });
+
+  it('rejects outbound delegation that would loop back to an earlier hop', async () => {
+    const peerDir = mkdtempSync(join(tmpdir(), 'acp-peer-'));
+    const peerNetwork = new NetworkStore(join(peerDir, 'network.json'));
+    peerNetwork.upsertPeer({
+      id: 'donna',
+      cardUrl: 'http://x',
+      status: 'approved',
+      source: 'declared',
+    });
+    const peerEnqueue = vi.fn((_t, _c, _b, done) => done?.('ok'));
+    const peer = new A2aServer({
+      config: { enabled: true, port: 0, card: { name: 'Lean', description: 'x' } },
+      network: peerNetwork,
+      selfId: 'lean',
+      enqueue: peerEnqueue,
+    });
+    await peer.start();
+    const paddr = peer.address();
+    const pport = typeof paddr === 'object' && paddr ? paddr.port : 0;
+
+    network.upsertPeer({
+      id: 'lean',
+      cardUrl: `http://127.0.0.1:${pport}/.well-known/agent-card.json`,
+      status: 'approved',
+      source: 'discovered',
+    });
+
+    // 'lean' originated task t-loop; we delegate it back to 'lean'
+    await sendMessage('ping', 'lean', 't-loop', ['lean']);
+    const res = await fetch(`http://127.0.0.1:${port}/a2a/delegate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ to: 'lean', text: 'pong', taskId: 't-loop' }),
+    });
+    expect(res.status).toBe(502);
+    expect(await res.json()).toEqual({ error: 'Delegation rejected' });
+    expect(peerEnqueue).not.toHaveBeenCalled();
+
+    await peer.stop();
+    rmSync(peerDir, { recursive: true, force: true });
+  });
 });
 
 describe('edge cases', () => {

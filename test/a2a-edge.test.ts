@@ -141,6 +141,20 @@ describe('edge: dedup and loops', () => {
   });
 });
 
+describe('edge: resource limits', () => {
+  it('rejects bodies larger than 1 MiB with 413', async () => {
+    const res = await post('/', 'x'.repeat(1024 * 1024 + 1));
+    expect(res.status).toBe(413);
+    expect(await res.json()).toEqual({ error: 'body too large' });
+  });
+
+  it('accepts bodies at the 1 MiB boundary', async () => {
+    const res = await post('/a2a/join', `{"pad":"${'x'.repeat(1024 * 1024 - 32)}"}`);
+    // well-formed JSON but missing required fields → 400, not 413
+    expect(res.status).toBe(400);
+  });
+});
+
 describe('edge: join endpoint', () => {
   it('join with missing fields returns 400', async () => {
     const res = await post('/a2a/join', JSON.stringify({ id: 'x' }));
@@ -155,6 +169,18 @@ describe('edge: join endpoint', () => {
   it('non-POST methods on /a2a/join return 404', async () => {
     const res = await fetch(`http://127.0.0.1:${port}/a2a/join`);
     expect(res.status).toBe(404);
+  });
+});
+
+describe('edge: error hygiene', () => {
+  it('returns a generic error when request handling fails internally', async () => {
+    network.upsertPeer(approved);
+    enqueue.mockImplementation(() => {
+      throw new Error('secret internals: db password hunter2');
+    });
+    const res = await send([{ kind: 'text', text: 'hi' }]);
+    expect(res.error).toBe('internal error');
+    expect(JSON.stringify(res)).not.toContain('hunter2');
   });
 });
 

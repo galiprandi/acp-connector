@@ -41,6 +41,15 @@ describe('pairing', () => {
     await manager.handleJoinRequest(pendingPeer);
     expect(notify).not.toHaveBeenCalled();
   });
+
+  it('drops join requests beyond the pending peer cap', async () => {
+    for (let i = 0; i < 105; i++) {
+      await manager.handleJoinRequest({ ...pendingPeer, id: `p${i}` });
+    }
+    expect(network.listPeers('pending')).toHaveLength(100);
+    expect(notify).toHaveBeenCalledTimes(100);
+    expect(network.getPeer('p104')).toBeUndefined();
+  });
 });
 
 describe('/a2a commands', () => {

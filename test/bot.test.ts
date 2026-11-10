@@ -412,6 +412,42 @@ describe('BridgeBot', () => {
     expect(onComplete).toHaveBeenCalledWith('', 'agent crashed');
   });
 
+  it('drops injected prompts when the queue is full', async () => {
+    const { bot } = createBot();
+    await bot.start();
+    // biome-ignore lint/suspicious/noExplicitAny: protected members under test
+    const b = bot as any;
+    b.busy = true;
+    for (let i = 0; i < 100; i++) b.queue.push({ channelId: 123, text: `q${i}` });
+    const onComplete = vi.fn();
+    await bot.enqueuePrompt('overflow', 123, undefined, onComplete, 'http');
+    expect(onComplete).toHaveBeenCalledWith('', 'queue full');
+    expect(b.queue.length).toBe(100);
+    expect(mockBot.sendMessage).toHaveBeenCalledWith(
+      123,
+      '⚠️ Queue is full — try again later.',
+      expect.anything()
+    );
+  });
+
+  it('drops user messages when the queue is full', async () => {
+    const { bot, acp } = createBot();
+    await bot.start();
+    // biome-ignore lint/suspicious/noExplicitAny: protected members under test
+    const b = bot as any;
+    b.busy = true;
+    for (let i = 0; i < 100; i++) b.queue.push({ channelId: 123, text: `q${i}` });
+    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    await handler({ chat: { id: 123 }, text: 'one more' });
+    expect(b.queue.length).toBe(100);
+    expect(acp.prompt).not.toHaveBeenCalled();
+    expect(mockBot.sendMessage).toHaveBeenCalledWith(
+      123,
+      '⚠️ Queue is full — try again later.',
+      expect.anything()
+    );
+  });
+
   it('stop() stops polling', async () => {
     const { bot } = createBot();
     bot.stop();
@@ -884,7 +920,7 @@ describe('BridgeBot', () => {
     await bot.start();
     const resolve = vi.fn();
     // biome-ignore lint/suspicious/noExplicitAny: protected member under test
-    (bot as any).permissionPending = { resolve };
+    (bot as any).permissionPending = { resolve, messageId: 42 };
     const cbHandler = mockBot.on.mock.calls.find((c) => c[0] === 'callback_query')[1];
     await cbHandler({
       id: 'q1',
@@ -904,7 +940,7 @@ describe('BridgeBot', () => {
     await bot.start();
     const resolve = vi.fn();
     // biome-ignore lint/suspicious/noExplicitAny: protected member under test
-    (bot as any).permissionPending = { resolve };
+    (bot as any).permissionPending = { resolve, messageId: 42 };
     const cbHandler = mockBot.on.mock.calls.find((c) => c[0] === 'callback_query')[1];
     await cbHandler({
       id: 'q1',
@@ -920,7 +956,7 @@ describe('BridgeBot', () => {
     await bot.start();
     const resolve = vi.fn();
     // biome-ignore lint/suspicious/noExplicitAny: protected member under test
-    (bot as any).permissionPending = { resolve };
+    (bot as any).permissionPending = { resolve, messageId: 42 };
     const cbHandler = mockBot.on.mock.calls.find((c) => c[0] === 'callback_query')[1];
     await cbHandler({
       id: 'q1',
@@ -938,7 +974,7 @@ describe('BridgeBot', () => {
     await bot.start();
     const resolve = vi.fn();
     // biome-ignore lint/suspicious/noExplicitAny: protected member under test
-    (bot as any).permissionPending = { resolve };
+    (bot as any).permissionPending = { resolve, messageId: 42 };
     const cbHandler = mockBot.on.mock.calls.find((c) => c[0] === 'callback_query')[1];
     await cbHandler({
       id: 'q1',
@@ -947,6 +983,27 @@ describe('BridgeBot', () => {
       message: { chat: { id: 123, type: 'private' }, message_id: 42 },
     });
     expect(resolve).toHaveBeenCalled();
+  });
+
+  it('rejects permission callbacks from a stale message', async () => {
+    const { bot } = createBot();
+    await bot.start();
+    const resolve = vi.fn();
+    // biome-ignore lint/suspicious/noExplicitAny: protected member under test
+    (bot as any).permissionPending = { resolve, messageId: 42 };
+    const cbHandler = mockBot.on.mock.calls.find((c) => c[0] === 'callback_query')[1];
+    await cbHandler({
+      id: 'q1',
+      data: 'perm_allow_opt1',
+      from: { id: 555 },
+      message: { chat: { id: 123, type: 'private' }, message_id: 99 },
+    });
+    expect(resolve).not.toHaveBeenCalled();
+    expect(mockBot.answerCallbackQuery).toHaveBeenCalledWith('q1', {
+      text: '⌛ Permission request expired',
+    });
+    // biome-ignore lint/suspicious/noExplicitAny: protected member under test
+    expect((bot as any).permissionPending).not.toBeNull();
   });
 
   it('reconnect failure edits the message with the error', async () => {

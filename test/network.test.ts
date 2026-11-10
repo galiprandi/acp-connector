@@ -1,5 +1,13 @@
 import { createHmac } from 'node:crypto';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -49,6 +57,19 @@ describe('NetworkStore persistence', () => {
     store.save();
     const reloaded = new NetworkStore(path);
     expect(reloaded.getPeer('lean')?.status).toBe('approved');
+  });
+
+  it('writes state files and their directory with owner-only permissions', () => {
+    const nested = join(dir, 'state', 'network.json');
+    const s2 = new NetworkStore(nested);
+    s2.upsertPeer(makePeer('lean'));
+    s2.save();
+    expect(statSync(nested).mode & 0o777).toBe(0o600);
+    expect(statSync(join(dir, 'state')).mode & 0o777).toBe(0o700);
+    // pre-existing loose permissions are tightened on rewrite
+    chmodSync(nested, 0o644);
+    s2.save();
+    expect(statSync(nested).mode & 0o777).toBe(0o600);
   });
 
   it('rejects an unsupported schemaVersion', () => {

@@ -97,7 +97,7 @@ export function installDaemon(
       const dir = join(home, '.config', 'systemd', 'user');
       mkdirSync(dir, { recursive: true });
       const unitPath = join(dir, `${SERVICE_NAME}.service`);
-      writeFileSync(unitPath, buildSystemdUnit(opts));
+      writeFileSync(unitPath, buildSystemdUnit(opts), { mode: 0o600 });
       exec('systemctl --user daemon-reload');
       exec(`systemctl --user enable --now ${SERVICE_NAME}.service`);
       // Best-effort: linger keeps the user service alive without a login.
@@ -112,7 +112,7 @@ export function installDaemon(
       const dir = join(home, 'Library', 'LaunchAgents');
       mkdirSync(dir, { recursive: true });
       const plistPath = join(dir, 'com.assistant.acp-connector.plist');
-      writeFileSync(plistPath, buildLaunchdPlist(opts));
+      writeFileSync(plistPath, buildLaunchdPlist(opts), { mode: 0o600 });
       exec(`launchctl unload ${plistPath} 2>/dev/null || true`);
       exec(`launchctl load -w ${plistPath}`);
       return { mechanism: 'launchd', detail: plistPath };

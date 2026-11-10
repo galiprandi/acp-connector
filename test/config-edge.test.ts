@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -148,6 +148,15 @@ describe('config edge cases', () => {
     const cfg = loadConfig(cfgPath);
     expect(cfg).not.toBeNull();
     expect(cfg).toEqual(validConfig);
+  });
+
+  it('saveConfig writes the file with owner-only permissions', () => {
+    saveConfig(validConfig, cfgPath);
+    expect(statSync(cfgPath).mode & 0o777).toBe(0o600);
+    // pre-existing loose permissions are tightened on rewrite
+    chmodSync(cfgPath, 0o644);
+    saveConfig(validConfig, cfgPath);
+    expect(statSync(cfgPath).mode & 0o777).toBe(0o600);
   });
 
   it('saveConfig writes to a path inside a non-existent nested dir fails predictably', () => {

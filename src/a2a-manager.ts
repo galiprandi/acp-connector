@@ -32,6 +32,8 @@ export interface A2aManagerOptions {
   signer?: (body: string) => string | undefined;
 }
 
+const MAX_PENDING_PEERS = 100;
+
 const STATUS_ICON: Record<string, string> = {
   approved: '✅',
   pending: '⏳',
@@ -75,6 +77,14 @@ export class A2aManager {
   async handleJoinRequest(req: JoinRequest): Promise<void> {
     const existing = this.network.getPeer(req.id);
     if (existing && existing.status === 'approved') return;
+
+    if (!existing && this.network.listPeers('pending').length >= MAX_PENDING_PEERS) {
+      this.audit?.write({ event: 'join_rejected', peer: req.id, detail: 'pending cap reached' });
+      log.warn(
+        `A2A join from '${req.id}' dropped — pending peer cap (${MAX_PENDING_PEERS}) reached`
+      );
+      return;
+    }
 
     if (!existing) {
       this.network.upsertPeer({
@@ -160,7 +170,10 @@ export class A2aManager {
    * Notifies the owner about newly discovered peers (not yet joined).
    */
   async notifyDiscovered(peers: Array<{ id: string; cardUrl: string }>): Promise<void> {
-    const fresh = peers.filter((p) => !this.network.getPeer(p.id));
+    const pendingCount = this.network.listPeers('pending').length;
+    const fresh = peers
+      .filter((p) => !this.network.getPeer(p.id))
+      .slice(0, Math.max(0, MAX_PENDING_PEERS - pendingCount));
     for (const p of fresh) {
       this.network.upsertPeer({
         id: p.id,

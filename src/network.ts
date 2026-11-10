@@ -1,6 +1,7 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import {
   appendFileSync,
+  chmodSync,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -89,8 +90,17 @@ export class NetworkStore {
   }
 
   save(): void {
-    mkdirSync(dirname(this.filePath), { recursive: true });
-    writeFileSync(this.filePath, `${JSON.stringify(this.state, null, 2)}\n`, 'utf8');
+    mkdirSync(dirname(this.filePath), { recursive: true, mode: 0o700 });
+    writeFileSync(this.filePath, `${JSON.stringify(this.state, null, 2)}\n`, {
+      encoding: 'utf8',
+      mode: 0o600,
+    });
+    try {
+      chmodSync(this.filePath, 0o600);
+      chmodSync(dirname(this.filePath), 0o700);
+    } catch {
+      // best-effort: tighten pre-existing files; creation mode covers new ones
+    }
   }
 
   get role(): NetworkRole {
@@ -217,9 +227,10 @@ export class AuditLog {
 
   write(entry: AuditEntry): void {
     try {
-      mkdirSync(dirname(this.filePath), { recursive: true });
+      mkdirSync(dirname(this.filePath), { recursive: true, mode: 0o700 });
       const line = JSON.stringify({ ts: new Date().toISOString(), ...entry });
-      appendFileSync(this.filePath, `${line}\n`);
+      appendFileSync(this.filePath, `${line}\n`, { encoding: 'utf8', mode: 0o600 });
+      chmodSync(this.filePath, 0o600);
     } catch {
       // Audit must never break the bridge.
     }

@@ -113,7 +113,10 @@ accepts `message/send` from approved peers into the prompt queue, and gives the
 agent `list_remote_agents`/`send_message` MCP tools (injected via `session/new`
 `mcpServers` — agents without MCP support don't see them). Invariant: **remote
 A2A content never triggers bridge commands** — only operator entry points
-(Telegram/Discord chats, /prompt, cron, routines) can run `/a2a`.
+(Telegram/Discord chats, /prompt, cron, routines) can run `/a2a`. Delegation
+chains (`a2a.delegationChain`) propagate across agent-initiated delegations;
+loops and chains ≥ maxDepth (3) are rejected. Hardening caps: prompt queue 100,
+A2A bodies 1 MiB, pending joins 100.
 
 ### Agent reminders (always on)
 
@@ -137,7 +140,7 @@ one-line warning at startup and no tools.
 - **Thin bridge**: no agent loop, no model provider, no tool ecosystem
 - **Agent-agnostic**: no hardcoded agent references anywhere
 - **Config is truth**: all state in `acp-connector.jsonc`, persisted by routines
-- **Serialized queue**: one prompt at a time, no concurrent prompts
+- **Serialized queue**: one prompt at a time, no concurrent prompts (cap 100)
 
 ## BEHAVIOR.md (auto-generated)
 

@@ -555,4 +555,17 @@ describe('HttpServer security tests', () => {
     expect(res.status).toBe(200);
     expect(enqueue).toHaveBeenCalledOnce();
   });
+
+  it('returns a generic error when prompt handling fails internally', async () => {
+    const { server, enqueue } = createServer();
+    enqueue.mockImplementation(() => {
+      throw new Error('secret internals: db password hunter2');
+    });
+    await server.start();
+    cleanup.push(() => server.stop());
+    const res = await fetchServer(server, 'POST', '/prompt', { text: 'hi' });
+    expect(res.status).toBe(500);
+    expect(res.body.error).toBe('internal error');
+    expect(res.raw).not.toContain('hunter2');
+  });
 });

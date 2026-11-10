@@ -400,10 +400,10 @@ export class DiscordBot extends BaseBot {
       }
 
       const content = `Permission required:\n\n${desc}`.slice(0, DISCORD_MAX_LEN);
-      await channel.send({ content, components: [row] });
+      const msg = await channel.send({ content, components: [row] });
 
       return new Promise<PermissionResponse>((resolve) => {
-        this.permissionPending = { resolve };
+        this.permissionPending = { resolve, messageId: msg.id };
       });
     } catch (err) {
       log.error('Discord permission send failed:', (err as Error).message);
@@ -463,6 +463,12 @@ export class DiscordBot extends BaseBot {
       return;
     }
     if (data.startsWith('perm_') && this.permissionPending) {
+      if (interaction.message?.id !== this.permissionPending.messageId) {
+        await interaction
+          .reply({ content: '⌛ Permission request expired', ephemeral: true })
+          .catch(() => {});
+        return;
+      }
       const [, outcome, ...rest] = data.split('_');
       const optionId = rest.join('_');
       const response: PermissionResponse = { outcome: { outcome: 'selected', optionId } };

@@ -170,8 +170,9 @@ export class HttpServer {
         res.writeHead(404);
         res.end(JSON.stringify({ error: 'not found' }));
       } catch (err) {
+        log.error(`HTTP request failed: ${(err as Error).message}`);
         res.writeHead(500);
-        res.end(JSON.stringify({ error: (err as Error).message }));
+        res.end(JSON.stringify({ error: 'internal error' }));
       }
     });
 
@@ -312,8 +313,14 @@ export class HttpServer {
       res.writeHead(200);
       res.end(JSON.stringify({ ok: true }));
     } catch (err) {
-      res.writeHead(400);
-      res.end(JSON.stringify({ error: (err as Error).message }));
+      if ((err as Error).message === 'body too large') {
+        res.writeHead(413);
+        res.end(JSON.stringify({ error: 'body too large' }));
+        return;
+      }
+      log.error(`HTTP /prompt failed: ${(err as Error).message}`);
+      res.writeHead(500);
+      res.end(JSON.stringify({ error: 'internal error' }));
     }
   }
 
@@ -368,7 +375,9 @@ export class HttpServer {
         size += chunk.length;
         if (size > this.maxBodySize) {
           tooLarge = true;
-          req.destroy();
+          // Drain instead of destroying so the 413 response can be written.
+          req.removeAllListeners('data');
+          req.resume();
           reject(new Error('body too large'));
           return;
         }

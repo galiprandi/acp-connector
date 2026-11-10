@@ -829,6 +829,16 @@ v0.13.0 is a security release — see the [CHANGELOG migration table](CHANGELOG.
 - **Agent cron** — agent-created jobs are remote content: `/`-prompts never run bridge commands.
 - **Audit backlog** — full findings and statuses live in [`docs/security-audit-2026-10-21.md`](docs/security-audit-2026-10-21.md); remediation plans in [`plans/`](plans/README.md).
 
+### Defense-in-depth hardening
+
+Non-breaking hardening on top of the trust-model fixes:
+
+- **File permissions** — `acp-connector.jsonc`, `.acp-connector/*` state (`network.json`, `reminders.json`, `audit.log`, `instances.json`) and media uploads are written `0600` inside `0700` directories; pre-existing loose permissions are tightened on the next write.
+- **Resource caps** — the prompt queue holds at most 100 items (chat messages and injected sources alike; excess is dropped with a warning), A2A request bodies are capped at 1 MiB (`413`), and pending A2A join requests are capped at 100.
+- **Permission buttons** — `perm_*` buttons are bound to the message that carried the request; stale buttons from older prompts can no longer resolve the current permission request.
+- **Error hygiene** — internal failures return a generic `internal error` to HTTP/A2A clients (details stay in logs and the audit trail), and HTTP bearer auth uses a constant-time comparison.
+- **Delegation chains** — the A2A delegation chain is propagated across agent-initiated delegations, so multi-hop loops are rejected at `maxDepth` (default 3) instead of only direct A→B→A cycles.
+
 ***
 
 ## 💾 Session persistence

@@ -10,6 +10,7 @@ import { log } from './logger.js';
 import type { MediaHandler } from './media.js';
 
 const STREAM_BATCH_MS = 800;
+const MAX_QUEUE = 100;
 
 export interface BaseBotOpts {
   acp: AcpClient;
@@ -52,6 +53,9 @@ export interface PermissionResponse {
 
 export interface PermissionPending {
   resolve: (response: PermissionResponse) => void;
+  /** Id of the message carrying the permission buttons — stale buttons from
+   * older prompts must not resolve the current pending request. */
+  messageId?: number | string;
 }
 
 export abstract class BaseBot implements PlatformBot {
@@ -568,6 +572,12 @@ export abstract class BaseBot implements PlatformBot {
       const suffix = text.length > 200 ? '…' : '';
       await this._sendPlain(`${icon} ${label} ${preview}${suffix}`, chatId);
     }
+    if (this.queue.length >= MAX_QUEUE) {
+      log.warn(`prompt queue full (${MAX_QUEUE}), dropping ${source ?? 'user'} prompt`);
+      onComplete?.('', 'queue full');
+      void this.sendMessage(chatId, '⚠️ Queue is full — try again later.').catch(() => {});
+      return;
+    }
     this.queue.push({ channelId: chatId, text, blocks, onComplete, onChunk });
     this._processQueue();
   }
@@ -584,6 +594,11 @@ export abstract class BaseBot implements PlatformBot {
     blocks?: ContentBlock[]
   ): void {
     const item: QueueItem = { channelId, text, blocks, messageId };
+    if (this.queue.length >= MAX_QUEUE) {
+      log.warn(`prompt queue full (${MAX_QUEUE}), dropping user message`);
+      void this.sendMessage(channelId, '⚠️ Queue is full — try again later.').catch(() => {});
+      return;
+    }
     if (this.busy) {
       item.queuedReaction = true;
       this._addQueuedReaction(channelId, messageId).catch(() => {

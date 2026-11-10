@@ -63,6 +63,9 @@ export class A2aServer {
   private _card: AgentCard;
   /** Peers that sent an unsigned request while `secure` is off (warn once per process). */
   private _legacyPeerWarned = new Set<string>();
+  /** taskId → delegation chain seen inbound, so agent-initiated outbound
+   * delegations keep the chain instead of resetting it to [selfId]. */
+  private _taskChains = new Map<string, string[]>();
 
   constructor(private opts: A2aServerOptions) {
     this.enqueue = opts.enqueue;
@@ -152,8 +155,14 @@ export class A2aServer {
         res.writeHead(404);
         res.end(JSON.stringify({ error: 'not found' }));
       } catch (err) {
+        if ((err as Error).message === 'body too large') {
+          res.writeHead(413);
+          res.end(JSON.stringify({ error: 'body too large' }));
+          return;
+        }
+        log.error(`A2A request failed: ${(err as Error).message}`);
         res.writeHead(500);
-        res.end(JSON.stringify({ error: (err as Error).message }));
+        res.end(JSON.stringify({ error: 'internal error' }));
       }
     });
 
@@ -362,12 +371,25 @@ export class A2aServer {
     const msg = rpc.params?.message;
     const taskId = String(msg?.metadata?.['a2a.taskId'] ?? msg?.messageId ?? '');
     const chain = (msg?.metadata?.['a2a.delegationChain'] as string[] | undefined) ?? [];
+    if (taskId) {
+      if (this._taskChains.size >= 1000) {
+        const oldest = this._taskChains.keys().next().value;
+        if (oldest !== undefined) this._taskChains.delete(oldest);
+      }
+      this._taskChains.set(taskId, [...chain]);
+    }
 
     try {
       this.opts.network.checkDelegationChain(chain, this.opts.selfId);
     } catch (err) {
+      this.opts.audit?.write({
+        event: 'delegation_rejected',
+        peer: peerId,
+        taskId,
+        detail: (err as Error).message,
+      });
       res.writeHead(200);
-      res.end(JSON.stringify(rpcError(rpc.id, ERR_LOOP, (err as Error).message)));
+      res.end(JSON.stringify(rpcError(rpc.id, ERR_LOOP, 'Delegation rejected')));
       return;
     }
 
@@ -440,6 +462,8 @@ export class A2aServer {
       return;
     }
     const taskId = body.taskId ?? `d-${Date.now()}`;
+    const priorChain = this._taskChains.get(taskId) ?? [];
+    const chain = [...priorChain, this.opts.selfId];
     this.opts.audit?.write({ event: 'task_out', peer: body.to, taskId });
     const origin = new URL(peer.cardUrl).origin;
     // Sign the exact bytes we POST when we hold a pairing secret for the
@@ -453,7 +477,7 @@ export class A2aServer {
           role: 'user',
           messageId: taskId,
           parts: [{ kind: 'text', text: body.text }],
-          metadata: { 'a2a.taskId': taskId, 'a2a.delegationChain': [this.opts.selfId] },
+          metadata: { 'a2a.taskId': taskId, 'a2a.delegationChain': chain },
         },
       },
     });
@@ -576,13 +600,26 @@ export function signBody(secret: string, body: string): string {
   return createHmac('sha256', secret).update(body).digest('hex');
 }
 
+const MAX_A2A_BODY = 1024 * 1024;
+
 function readBody(req: IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
-    let data = '';
-    req.on('data', (chunk) => {
-      data += chunk;
+    const chunks: Buffer[] = [];
+    let size = 0;
+    req.on('data', (chunk: Buffer | string) => {
+      const buf = typeof chunk === 'string' ? Buffer.from(chunk, 'utf8') : chunk;
+      size += buf.length;
+      if (size > MAX_A2A_BODY) {
+        // Stop accumulating but keep draining so the 413 response can be
+        // written; destroying the socket here would prevent it.
+        req.removeAllListeners('data');
+        req.resume();
+        reject(new Error('body too large'));
+        return;
+      }
+      chunks.push(buf);
     });
-    req.on('end', () => resolve(data));
+    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
     req.on('error', reject);
   });
 }

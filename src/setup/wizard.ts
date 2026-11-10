@@ -76,7 +76,7 @@ function writeConnectorConfig(targetDir: string, agentCmd: string, tgToken: stri
   }
 }
 `;
-  writeFileSync(join(targetDir, 'acp-connector.jsonc'), config);
+  writeFileSync(join(targetDir, 'acp-connector.jsonc'), config, { mode: 0o600 });
 }
 
 function handoff(agent: DetectedAgent, targetDir: string): void {
