@@ -463,8 +463,14 @@ After discovery, the card is always fetched via the standard well-known URI.
 Joining the network requires **explicit approval from both owners**:
 
 1. You discover a peer → `/a2a join <id>` → your card is sent to their `/a2a/join`
-2. Their owner gets notified and runs `/a2a approve <you>`
-3. On approval, the peer confirms you back → both sides end up `approved`
+2. Their owner gets notified and runs `/a2a approve <you>` → your side gets a confirm callback
+3. Your owner runs `/a2a approve <them>` → both sides end up `approved`
+
+The confirm callback is **informational only** — it never grants trust by
+itself. Each side's operator must run `/a2a approve`; there is no auto-promotion
+(v0.13.0+, audit SEC-01). On approval the bridge also issues a random
+per-pairing secret delivered once inside the approve → confirm POST — see
+[Peer authentication](#peer-authentication).
 
 Same owner does **not** imply auto-approval. Pending requests persist in
 `.acp-connector/network.json` and are re-announced on startup until resolved
