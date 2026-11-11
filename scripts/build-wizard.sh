@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
 # Compile assistant-setup + acp-connector into single-file binaries via
-# `bun build --compile`. Outputs land in dist/wizard/.
+# `bun build --compile`. Outputs land in dist-wizard/ — deliberately
+# OUTSIDE dist/ so `files: ["dist/"]` in package.json doesn't ship the
+# ~200MB of bun-compiled binaries inside the npm tarball (they are
+# distributed as GitHub release assets instead).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 BUN="${BUN:-$HOME/.bun/bin/bun}"
-OUT=dist/wizard
+OUT=dist-wizard
 ENTRY=src/setup/wizard.ts
 BRIDGE_ENTRY=src/index.ts
 VERSION="$(node -p "require('./package.json').version")"

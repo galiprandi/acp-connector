@@ -15,10 +15,12 @@
  *  7. Handoff: spawn the agent on the template's setup skill.
  */
 import { spawn, spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import {
   createWriteStream,
   existsSync,
   mkdirSync,
+  readFileSync,
   renameSync,
   rmSync,
   writeFileSync,
@@ -30,7 +32,13 @@ import { pipeline } from 'node:stream/promises';
 import { type DetectedAgent, defaultWhich, detectAgents, KNOWN_AGENTS } from './agents.js';
 import { installDaemon } from './daemon.js';
 
-const TEMPLATE_TARBALL = 'https://github.com/galiprandi/assistant/archive/refs/heads/main.tar.gz';
+// Pinned to an exact commit of galiprandi/assistant — the template is
+// release-managed, so bump TEMPLATE_REF + TEMPLATE_SHA256 together when
+// the template ships a new version.
+const TEMPLATE_REF = 'be0a5e9432aea343a35990d42cb097b47b1bc82a';
+const TEMPLATE_TARBALL = `https://github.com/galiprandi/assistant/archive/${TEMPLATE_REF}.tar.gz`;
+const TEMPLATE_SHA256 = '79b8dd7ac5a18897603f4526fa52ff4fe8c5f1dd6349331ab42e183152b647e2';
+const TEMPLATE_TOP_DIR = `assistant-${TEMPLATE_REF}`;
 const SETUP_PROMPT = 'Read AGENTS.md and run the setup skill in .agents/skills/setup/SKILL.md';
 
 function ask(rl: Interface, prompt: string): Promise<string> {
@@ -44,6 +52,24 @@ async function askYesNo(rl: Interface, prompt: string, defaultYes = false): Prom
   return answer === 'y' || answer === 'yes';
 }
 
+/**
+ * Like ask(), but mutes terminal echo so secrets (bot tokens) don't end up
+ * in scrollback or shoulder-surfed. Falls back to normal echo when the
+ * readline internals aren't available (e.g. some runtimes).
+ */
+async function askSecret(rl: Interface, prompt: string): Promise<string> {
+  const anyRl = rl as unknown as { _writeToOutput?: (s: string) => void };
+  const orig = anyRl._writeToOutput;
+  process.stdout.write(prompt);
+  if (typeof orig === 'function') anyRl._writeToOutput = () => {};
+  try {
+    return await new Promise((res) => rl.question('', (a) => res(a.trim())));
+  } finally {
+    if (typeof orig === 'function') anyRl._writeToOutput = orig;
+    process.stdout.write('\n');
+  }
+}
+
 function step(n: number, title: string): void {
   console.log(`\n── Step ${n}: ${title} ${'─'.repeat(Math.max(2, 50 - title.length))}\n`);
 }
@@ -55,6 +81,12 @@ async function downloadAndExtract(targetDir: string): Promise<void> {
   if (!res.ok || !res.body) throw new Error(`Download failed: HTTP ${res.status}`);
   await pipeline(res.body as unknown as NodeJS.ReadableStream, createWriteStream(tgz));
 
+  const digest = createHash('sha256').update(readFileSync(tgz)).digest('hex');
+  if (digest !== TEMPLATE_SHA256) {
+    rmSync(tgz, { force: true });
+    throw new Error('Template checksum mismatch — refusing to install untrusted content.');
+  }
+
   const extractDir = join(tmpdir(), `assistant-extract-${Date.now()}`);
   mkdirSync(extractDir, { recursive: true });
   const tar = spawnSync('tar', ['-xzf', tgz, '-C', extractDir], { stdio: 'inherit' });
@@ -62,7 +94,7 @@ async function downloadAndExtract(targetDir: string): Promise<void> {
     rmSync(tgz, { force: true });
     throw new Error('tar extraction failed — is `tar` available on this system?');
   }
-  renameSync(join(extractDir, 'assistant-main'), targetDir);
+  renameSync(join(extractDir, TEMPLATE_TOP_DIR), targetDir);
   rmSync(tgz, { force: true });
   rmSync(extractDir, { recursive: true, force: true });
 }
@@ -115,8 +147,16 @@ function installBunAndShim(): boolean {
   const localBin = join(home, '.local', 'bin');
   mkdirSync(localBin, { recursive: true });
   const shim = join(localBin, 'node');
-  writeFileSync(shim, `#!/bin/sh\nexec "${bunBin}" "$@"\n`);
-  spawnSync('chmod', ['+x', shim]);
+  if (existsSync(shim)) {
+    const existing = readFileSync(shim, 'utf8');
+    if (existing.includes(bunBin)) {
+      console.log(`  ✓ node shim already installed -> ${shim}`);
+      return true;
+    }
+    console.log(`  ! ${shim} already exists and is not the bun shim — leaving it untouched.`);
+    return true;
+  }
+  writeFileSync(shim, `#!/bin/sh\nexec "${bunBin}" "$@"\n`, { mode: 0o755 });
   console.log(`  ✓ bun installed; node shim -> ${shim} (add ~/.local/bin to PATH)`);
   return true;
 }
@@ -218,7 +258,7 @@ export async function wizard(): Promise<void> {
   step(5, 'Messaging channel (optional)');
   if (await askYesNo(rl, 'Connect a Telegram bot?', false)) {
     console.log('Create a bot via @BotFather on Telegram, then paste the token.');
-    const token = await ask(rl, 'Telegram bot token: ');
+    const token = await askSecret(rl, 'Telegram bot token: ');
     if (token) {
       writeConnectorConfig(targetDir, selected.spec.agentCmd, token);
       console.log('Wrote acp-connector.jsonc (allowedChatIds empty — fill after first /start).');

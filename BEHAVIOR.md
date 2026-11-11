@@ -38,6 +38,7 @@
 - accepts a signed message/send from a peer with auth
 - accepts an unsigned legacy peer when secure is false
 - rejects a wrong signature when secure is false
+- rejects an unsigned peer by default (secure defaults to true)
 - rejects an unsigned peer when secure is true
 
 ## Module: message/stream (SSE)
@@ -290,6 +291,7 @@
 - starts and sets up handlers
 - stop() stops polling
 - streams agent_message_chunk and edits single message
+- truncates the 👤 log preview to logPreviewLength
 - updates current mode on current_mode_update
 
 ## Module: echoInjectedPrompts

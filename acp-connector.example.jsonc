@@ -132,6 +132,6 @@
   //   "registry": "http://host:7741",   // optional: curated registry URL
   //   "trustedPeers": ["lean"],        // optional: statically approved peer ids
   //   "registryMode": false,           // act as a discovery-only registry
-  //   "secure": true                   // require HMAC peer signatures on inbound requests (0.14 defaults to true)
+  //   "secure": true                   // require HMAC peer signatures on inbound requests (default true; false only for legacy meshes)
   // }
 }

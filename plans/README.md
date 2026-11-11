@@ -51,9 +51,12 @@ operator's go**.
   into the breaking-changes bang. Revisit in a follow-up hardening release.
 - Setup/daemon/wizard hardening (`loginctl` env interpolation, fake
   `~/.local/bin/node` shim, unpinned template tarball, token echo in
-  terminal) — pre-bootstrap surfaces, own work package later.
-- `npm pack` ~485 MB unpacked (wizard binaries in `dist/wizard/`) — packaging
-  hygiene, not an exploitable surface; separate packaging task.
+  terminal) — DONE post-0.13.1: template pinned to commit + SHA-256
+  verified, tokens read without echo (wizard + `setup`), `USER`
+  sanitized before `loginctl`, node shim never overwrites foreign files.
+- `npm pack` ~485 MB unpacked (wizard binaries in `dist/wizard/`) — DONE:
+  wizard output moved to `dist-wizard/` (outside `files: ["dist/"]`);
+  binaries remain GitHub-release assets only.
 - `a2a.card` config could hold operator-pasted secrets — "config is truth" is
   the documented policy; documentation caveat only, no code change.
 

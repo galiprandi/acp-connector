@@ -5,6 +5,24 @@ function ask(rl: Interface, prompt: string): Promise<string> {
   return new Promise((resolve) => rl.question(prompt, (answer) => resolve(answer.trim())));
 }
 
+/**
+ * Like ask(), but mutes terminal echo so bot tokens don't end up in
+ * scrollback or shoulder-surfed. Falls back to normal echo when the
+ * readline internals aren't available.
+ */
+async function askSecret(rl: Interface, prompt: string): Promise<string> {
+  const anyRl = rl as unknown as { _writeToOutput?: (s: string) => void };
+  const orig = anyRl._writeToOutput;
+  process.stdout.write(prompt);
+  if (typeof orig === 'function') anyRl._writeToOutput = () => {};
+  try {
+    return await new Promise((res) => rl.question('', (a) => res(a.trim())));
+  } finally {
+    if (typeof orig === 'function') anyRl._writeToOutput = orig;
+    process.stdout.write('\n');
+  }
+}
+
 export async function setup(): Promise<void> {
   const rl = createInterface({ input: process.stdin, output: process.stdout });
 
@@ -40,7 +58,7 @@ export async function setup(): Promise<void> {
   console.log('  1. Send /newbot to @BotFather');
   console.log('  2. Pick a name and username');
   console.log('  3. Copy the token it gives you (looks like 123456:ABC-DEF...)\n');
-  const telegramToken = await ask(rl, 'Paste your Telegram bot token (or Enter to skip): ');
+  const telegramToken = await askSecret(rl, 'Paste your Telegram bot token (or Enter to skip): ');
 
   let telegramChatId: number | null = null;
   if (telegramToken) {
@@ -65,7 +83,7 @@ export async function setup(): Promise<void> {
   console.log('  2. Go to Bot > Reset Token to get your bot token');
   console.log('  3. Enable Message Content Intent under Bot > Privileged Gateway Intents');
   console.log('  4. Invite the bot to your server with the OAuth2 URL Generator\n');
-  const discordToken = await ask(rl, 'Paste your Discord bot token (or Enter to skip): ');
+  const discordToken = await askSecret(rl, 'Paste your Discord bot token (or Enter to skip): ');
 
   let discordChannelId: string | null = null;
   if (discordToken) {

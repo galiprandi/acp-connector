@@ -86,6 +86,20 @@ describe('installDaemon', () => {
     expect(r.mechanism).toBe('systemd --user');
   });
 
+  it('linux: skips loginctl when USER contains shell metacharacters', () => {
+    tmp = mkdtempSync(join(tmpdir(), 'daemon-test-'));
+    const home = join(tmp, 'home');
+    const prev = process.env.USER;
+    process.env.USER = 'evil; touch /tmp/pwned';
+    try {
+      const cmds: string[] = [];
+      installDaemon('linux', opts, (c) => cmds.push(c), home);
+      expect(cmds.some((c) => c.startsWith('loginctl'))).toBe(false);
+    } finally {
+      process.env.USER = prev;
+    }
+  });
+
   it('darwin: writes plist and loads it with launchctl', () => {
     tmp = mkdtempSync(join(tmpdir(), 'daemon-test-'));
     const home = join(tmp, 'home');

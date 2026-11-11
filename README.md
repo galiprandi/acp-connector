@@ -88,9 +88,9 @@ Build the binaries (requires [Bun](https://bun.sh) on the build machine only):
 
 ```bash
 pnpm build:wizard
-# → dist/wizard/assistant-setup-linux-x64
-#   dist/wizard/assistant-setup-macos-arm64
-#   dist/wizard/assistant-setup-windows-x64.exe
+# → dist-wizard/assistant-setup-linux-x64
+#   dist-wizard/assistant-setup-macos-arm64
+#   dist-wizard/assistant-setup-windows-x64.exe
 ```
 
 On every push to `main` that touches `src/`, the `wizard.yml` workflow
@@ -511,15 +511,13 @@ confirm POST. Both sides then sign A2A traffic with the same key:
 - Inbound: a present signature must verify against the raw body — mismatch is
   rejected before any processing
 
-`a2a.secure: true` makes signatures mandatory: unsigned peers are rejected
-with a `signature required` error. While it is off (default), peers without a
-secret are still accepted — a legacy transition so mixed-version meshes keep
-working; every unsigned request is audited as `legacy-peer` (once per peer).
-Set `secure: true` once the whole mesh runs 0.13+; 0.14 will default it to
-true. Known tradeoff: the pairing secret itself crosses the wire exactly
-once (in the approve → confirm POST), so a first-message man-in-the-middle
-on a plain-HTTP LAN could capture it — accepted for LAN deployments without
-TLS.
+`a2a.secure` defaults to `true`: signatures are mandatory and unsigned peers
+are rejected with a `signature required` error. Set `secure: false` only for
+mixed-version meshes during migration — unsigned requests are then accepted
+but audited as `legacy-peer` (once per peer). Known tradeoff: the pairing
+secret itself crosses the wire exactly once (in the approve → confirm POST),
+so a first-message man-in-the-middle on a plain-HTTP LAN could capture it —
+accepted for LAN deployments without TLS.
 
 ### Registry role
 
@@ -824,7 +822,7 @@ Find your Telegram user ID via [@userinfobot](https://t.me/userinfobot); Discord
 
 v0.13.0 is a security release — see the [CHANGELOG migration table](CHANGELOG.md) for the breaking-change summary. The relevant knobs:
 
-- **A2A peer auth** — `a2a.secure: true` makes HMAC peer signatures mandatory (default off during the 0.13 transition; becomes default in 0.14). Details: [Peer authentication](#peer-authentication).
+- **A2A peer auth** — `a2a.secure: true` makes HMAC peer signatures mandatory (**default on**; set `a2a.secure: false` only for mixed-version meshes during migration). Details: [Peer authentication](#peer-authentication).
 - **HTTP API** — non-loopback `http.host` requires `http.auth.token` (refuses to start otherwise); `http.commands: true` allows `/` bridge commands via `POST /prompt` (default: agent input only); `http.callbackAllow` whitelists internal `callbackUrl` hosts.
 - **Group permissions** — `platforms.*.allowedUserIds` gates who can approve agent permissions / reconnect inside groups (private chats and DMs always allowed).
 - **Agent cron** — agent-created jobs are remote content: `/`-prompts never run bridge commands.
@@ -839,6 +837,7 @@ Non-breaking hardening on top of the trust-model fixes:
 - **Permission buttons** — `perm_*` buttons are bound to the message that carried the request; stale buttons from older prompts can no longer resolve the current permission request.
 - **Error hygiene** — internal failures return a generic `internal error` to HTTP/A2A clients (details stay in logs and the audit trail), and HTTP bearer auth uses a constant-time comparison.
 - **Delegation chains** — the A2A delegation chain is propagated across agent-initiated delegations, so multi-hop loops are rejected at `maxDepth` (default 3) instead of only direct A→B→A cycles.
+- **Setup hardening** — the `assistant-setup` wizard downloads the template tarball pinned to an exact commit with SHA-256 verification, reads bot tokens without terminal echo, never interpolates `USER` into `loginctl` unsanitized, and refuses to overwrite a foreign `~/.local/bin/node`. Wizard binaries ship as GitHub release assets only — they are excluded from the npm tarball.
 
 ***
 

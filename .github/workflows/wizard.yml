@@ -29,7 +29,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: wizard-binaries
-          path: dist/wizard/
+          path: dist-wizard/
           retention-days: 30
       - name: Attach to latest release
         if: success()
@@ -37,4 +37,4 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG=$(gh release view --json tagName -q .tagName)
-          gh release upload "$TAG" dist/wizard/assistant-setup-* dist/wizard/acp-connector-* --clobber
+          gh release upload "$TAG" dist-wizard/assistant-setup-* dist-wizard/acp-connector-* --clobber

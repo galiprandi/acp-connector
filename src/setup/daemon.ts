@@ -101,10 +101,15 @@ export function installDaemon(
       exec('systemctl --user daemon-reload');
       exec(`systemctl --user enable --now ${SERVICE_NAME}.service`);
       // Best-effort: linger keeps the user service alive without a login.
-      try {
-        exec(`loginctl enable-linger ${process.env.USER ?? ''}`.trim());
-      } catch {
-        /* non-fatal */
+      // USER comes from the environment — only interpolate it when it
+      // matches a strict username charset so it can't inject shell syntax.
+      const user = process.env.USER ?? '';
+      if (/^[a-zA-Z0-9._-]+$/.test(user)) {
+        try {
+          exec(`loginctl enable-linger ${user}`);
+        } catch {
+          /* non-fatal */
+        }
       }
       return { mechanism: 'systemd --user', detail: unitPath };
     }
