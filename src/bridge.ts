@@ -156,6 +156,7 @@ export async function run(): Promise<void> {
       showPlan: config.showPlan,
       streaming: config.streaming,
       echoInjectedPrompts: config.echoInjectedPrompts,
+      logPreviewLength: config.logPreviewLength,
     });
     bots.push(bot);
     primaryBot = bot;
@@ -173,6 +174,7 @@ export async function run(): Promise<void> {
       showPlan: config.showPlan,
       streaming: config.streaming,
       echoInjectedPrompts: config.echoInjectedPrompts,
+      logPreviewLength: config.logPreviewLength,
     });
     bots.push(bot);
     if (!primaryBot) primaryBot = bot;

@@ -131,6 +131,8 @@ export interface BridgeConfig {
   streaming?: boolean;
   echoInjectedPrompts?: boolean;
   logLevel?: LogLevel;
+  /** Max chars of chat/agent previews written to the log (default 150). */
+  logPreviewLength?: number;
   /**
    * IANA timezone used to parse `at`-style reminder times (default:
    * system timezone). E.g. "America/Argentina/Tucuman".

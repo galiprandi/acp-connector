@@ -65,6 +65,9 @@
   // Log level: "error" | "warn" | "info" | "debug" (default: "info")
   "logLevel": "info",
 
+  // Max chars of 👤/🤖 chat previews written to the log (default: 150, min: 20)
+  // "logPreviewLength": 150,
+
   // Timezone for agent reminder `at` times, e.g. "America/Argentina/Tucuman"
   // (default: system timezone). Used by the reminder_* MCP tools.
   // "timezone": "America/Argentina/Tucuman",

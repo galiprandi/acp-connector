@@ -29,6 +29,8 @@ export interface BaseBotOpts {
    * HTTP is agent input, never bridge administration.
    */
   httpCommandsAllowed?: boolean;
+  /** Max chars for 👤/🤖 log previews (default 150). */
+  logPreviewLength?: number;
 }
 
 export interface QueueItem {
@@ -83,6 +85,7 @@ export abstract class BaseBot implements PlatformBot {
   protected planText: string;
   protected typingTimer: NodeJS.Timeout | null;
   protected startedAt: number;
+  protected previewLength: number;
 
   protected abstract readonly maxLen: number;
 
@@ -98,6 +101,7 @@ export abstract class BaseBot implements PlatformBot {
     onCommand,
     onPrompt,
     httpCommandsAllowed = false,
+    logPreviewLength,
   }: BaseBotOpts) {
     this.acp = acp;
     this.agentCmd = agentCmd;
@@ -122,6 +126,7 @@ export abstract class BaseBot implements PlatformBot {
     this.planText = '';
     this.typingTimer = null;
     this.startedAt = Date.now();
+    this.previewLength = Math.max(20, Math.floor(logPreviewLength ?? 150));
   }
 
   abstract start(): Promise<void>;
@@ -646,8 +651,8 @@ export abstract class BaseBot implements PlatformBot {
       await this._flushOverflow();
 
       const respLen = this.streamBuffer.length;
-      const respPreview = this.streamBuffer.slice(0, 80).replace(/\n/g, ' ');
-      log.info(`🤖 ${respPreview}${respLen > 80 ? '…' : ''}`);
+      const respPreview = this.streamBuffer.slice(0, this.previewLength).replace(/\n/g, ' ');
+      log.info(`🤖 ${respPreview}${respLen > this.previewLength ? '…' : ''}`);
 
       if (!this.streamBuffer && this.currentChannelId) {
         const stopReason = message?.stopReason;

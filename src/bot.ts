@@ -36,6 +36,7 @@ interface BridgeBotOpts {
   showPlan?: boolean;
   streaming?: boolean;
   echoInjectedPrompts?: boolean;
+  logPreviewLength?: number;
   mediaHandler?: MediaHandler | null;
   onCommand?: ((text: string, chatId: number | string) => Promise<boolean>) | null;
   onPrompt?: ((text: string, chatId: number | string) => void) | null;
@@ -59,6 +60,7 @@ export class BridgeBot extends BaseBot {
     showPlan = true,
     streaming = true,
     echoInjectedPrompts = true,
+    logPreviewLength,
     mediaHandler = null,
     onCommand = null,
     onPrompt = null,
@@ -71,6 +73,7 @@ export class BridgeBot extends BaseBot {
       showPlan,
       streaming,
       echoInjectedPrompts,
+      logPreviewLength,
       mediaHandler,
       onCommand,
       onPrompt,
@@ -234,8 +237,8 @@ export class BridgeBot extends BaseBot {
       if (handled) return;
     }
 
-    const preview = text.slice(0, 80).replace(/\n/g, ' ');
-    log.info(`👤 ${preview}${text.length > 80 ? '…' : ''}`);
+    const preview = text.slice(0, this.previewLength).replace(/\n/g, ' ');
+    log.info(`👤 ${preview}${text.length > this.previewLength ? '…' : ''}`);
 
     this._enqueueUserMessage(chatId, msg.message_id, `${this._replyContext(msg)}${text}`);
   }

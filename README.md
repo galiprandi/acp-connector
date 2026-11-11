@@ -207,6 +207,7 @@ See [`acp-connector.example.jsonc`](acp-connector.example.jsonc) for the full re
 | `streaming` | `boolean` | no | `true` | Stream responses with live message edits |
 | `echoInjectedPrompts` | `boolean` | no | `true` | Echo prompts injected via cron, HTTP, or routines into the chat with a source label (`⏰ [cron]`/`[reminder]`, `🌐 [http]`, `🔁 [routine]`) so you can see what triggered the agent's response |
 | `logLevel` | `string` | no | `"info"` | Bridge log verbosity: `"error"` (errors only) \| `"warn"` \| `"info"` \| `"debug"`. Does not affect the agent subprocess's own stderr output |
+| `logPreviewLength` | `number` | no | `150` | Max characters of `👤`/`🤖` chat previews written to the log (min `20`; longer text is cut with `…`) |
 | `timezone` | `string` | no | system TZ | IANA timezone used to parse `at`-style reminder times (e.g. `"America/Argentina/Tucuman"`). `in`-style delays are timezone-agnostic |
 | `cron` | `CronJob[]` | no | `[]` | Scheduled jobs (see below) |
 | `routines` | `Routine[]` | no | `[]` | Named reusable prompts |

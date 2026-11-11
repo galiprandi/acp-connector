@@ -448,6 +448,20 @@ describe('BridgeBot', () => {
     );
   });
 
+  it('truncates the 👤 log preview to logPreviewLength', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      const { bot } = createBot({ logPreviewLength: 30 });
+      await bot.start();
+      const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+      await handler({ chat: { id: 123 }, message_id: 1, text: 'a'.repeat(100) });
+      const line = logSpy.mock.calls.map((c) => String(c[0])).find((l) => l.startsWith('👤'));
+      expect(line).toBe(`👤 ${'a'.repeat(30)}…`);
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+
   it('stop() stops polling', async () => {
     const { bot } = createBot();
     bot.stop();
