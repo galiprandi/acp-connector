@@ -80,9 +80,15 @@ export class MediaHandler {
    * Save raw buffer data to disk and return file info with base64 data.
    */
   saveFile(data: Buffer, mimeType: string, ext: string): DownloadedFile {
-    const filename = `media_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`;
+    // `ext` comes from user-controlled file names — restrict it to a safe
+    // charset so it can't smuggle path separators or odd filenames into
+    // the uploads dir.
+    const safeExt = ext.replace(/[^a-zA-Z0-9]/g, '').slice(0, 10) || 'bin';
+    const filename = `media_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${safeExt}`;
     const path = join(this.uploadsDir, filename);
-    writeFileSync(path, data, { mode: 0o600 });
+    // 'wx' = O_CREAT|O_EXCL: fails instead of following a pre-existing
+    // symlink at the target path.
+    writeFileSync(path, data, { mode: 0o600, flag: 'wx' });
     log.info(`📄 file saved: ${path}`);
     return { path, mimeType, filename, data: data.toString('base64') };
   }

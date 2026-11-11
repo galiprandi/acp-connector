@@ -124,6 +124,20 @@ describe('MediaHandler', () => {
     expect(file.data).toBe(data.toString('base64'));
   });
 
+  it('sanitizes hostile extensions out of the saved filename', () => {
+    const handler = new MediaHandler({ uploadsDir: TEST_UPLOADS_DIR, supportsImage: true });
+    const file = handler.saveFile(Buffer.from('x'), 'text/plain', '../../etc/cron.d/evil');
+    expect(file.filename).toMatch(/^media_\d+_[a-z0-9]+\.[a-zA-Z0-9]+$/);
+    expect(file.filename.endsWith('.etccrondev')).toBe(true);
+    expect(file.path.startsWith(TEST_UPLOADS_DIR)).toBe(true);
+  });
+
+  it('falls back to .bin for extensions with no safe characters', () => {
+    const handler = new MediaHandler({ uploadsDir: TEST_UPLOADS_DIR, supportsImage: true });
+    const file = handler.saveFile(Buffer.from('x'), 'application/octet-stream', '.../');
+    expect(file.filename.endsWith('.bin')).toBe(true);
+  });
+
   it('stores uploads with owner-only permissions', () => {
     const dir = join(TEST_UPLOADS_DIR, 'nested');
     const handler = new MediaHandler({ uploadsDir: dir, supportsImage: true });

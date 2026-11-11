@@ -737,6 +737,7 @@
 
 ## Module: installDaemon
 - darwin: writes plist and loads it with launchctl
+- linux: skips loginctl when USER contains shell metacharacters
 - linux: still succeeds if loginctl fails
 - linux: writes unit and runs systemctl --user commands
 - throws on unsupported platforms

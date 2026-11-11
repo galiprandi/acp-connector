@@ -832,7 +832,7 @@ v0.13.0 is a security release — see the [CHANGELOG migration table](CHANGELOG.
 
 Non-breaking hardening on top of the trust-model fixes:
 
-- **File permissions** — `acp-connector.jsonc`, `.acp-connector/*` state (`network.json`, `reminders.json`, `audit.log`, `instances.json`) and media uploads are written `0600` inside `0700` directories; pre-existing loose permissions are tightened on the next write.
+- **File permissions** — `acp-connector.jsonc`, `.acp-connector/*` state (`network.json`, `reminders.json`, `audit.log`, `instances.json`) and media uploads are written `0600` inside `0700` directories; pre-existing loose permissions are tightened on the next write. Upload filenames sanitize the extension to a safe charset and are created with `O_EXCL`, so a pre-planted symlink is never followed.
 - **Resource caps** — the prompt queue holds at most 100 items (chat messages and injected sources alike; excess is dropped with a warning), A2A request bodies are capped at 1 MiB (`413`), and pending A2A join requests are capped at 100.
 - **Permission buttons** — `perm_*` buttons are bound to the message that carried the request; stale buttons from older prompts can no longer resolve the current permission request.
 - **Error hygiene** — internal failures return a generic `internal error` to HTTP/A2A clients (details stay in logs and the audit trail), and HTTP bearer auth uses a constant-time comparison.
