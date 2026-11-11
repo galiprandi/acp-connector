@@ -5,6 +5,18 @@ All notable changes to acp-connector will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.1] - 2026-11-09
+
+Non-breaking security hardening (audit findings #8–#15). No config or behavior changes required.
+
+### Security
+- State files with secrets (`acp-connector.jsonc`, `.acp-connector/network.json`, `reminders.json`, `audit.log`, `instances.json`) and media uploads are now written `0600` inside `0700` directories; pre-existing loose permissions are tightened on the next write
+- Prompt queue capped at 100 items (chat + injected sources); excess is dropped with a warning instead of growing memory unbounded
+- A2A request bodies capped at 1 MiB (`413 Payload Too Large`); pending join requests capped at 100 (extras dropped and audited, no owner notification)
+- Permission buttons (`perm_*`) are bound to the message that carried the request — stale buttons from older prompts can no longer resolve the current permission request
+- Internal failures return a generic `internal error` to HTTP `/prompt`, A2A and reminders-api clients (details remain in logs and the audit trail); oversized bodies now correctly return `413` instead of a dropped connection
+- A2A delegation chains propagate across agent-initiated delegations, so multi-hop loops are rejected by the existing loop/depth checks instead of resetting to `[selfId]` each hop
+
 ## [0.13.0] - 2026-11-09
 
 Security release. **Breaking changes** — migrate before upgrading:

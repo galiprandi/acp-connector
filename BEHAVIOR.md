@@ -17,10 +17,17 @@
 - self in the middle of the chain is rejected
 - taskId dedup works even when messageId differs
 
+## Module: edge: resource limits
+- accepts bodies at the 1 MiB boundary
+- rejects bodies larger than 1 MiB with 413
+
 ## Module: edge: join endpoint
 - join with malformed JSON returns 500/400 but never hangs
 - join with missing fields returns 400
 - non-POST methods on /a2a/join return 404
+
+## Module: edge: error hygiene
+- returns a generic error when request handling fails internally
 
 ## Module: edge: misc
 - GET on the RPC endpoint returns 404
@@ -48,6 +55,7 @@
 - unauthenticated announce cannot change cardUrl or card
 
 ## Module: pairing
+- drops join requests beyond the pending peer cap
 - ignores a duplicate join request from an already-approved peer
 - registers a join request as pending and notifies the owner
 
@@ -95,6 +103,8 @@
 - GET /a2a/peers lists approved peers with their skills
 - POST /a2a/delegate forwards a task to an approved peer via message/send
 - POST /a2a/delegate rejects unknown or unapproved peers
+- propagates the inbound delegation chain on agent-initiated tasks
+- rejects outbound delegation that would loop back to an earlier hop
 
 ## Module: edge cases
 - delegate rejects peers without cardUrl
@@ -247,6 +257,8 @@
 - delegates bridge commands to onCommand
 - denies group callbacks when allowedUserIds is empty
 - denies permission callbacks from non-operator users in groups
+- drops injected prompts when the queue is full
+- drops user messages when the queue is full
 - enqueuePrompt adds to queue and processes
 - enqueuePrompt with onComplete calls it with error on failure
 - enqueuePrompt with onComplete calls it with response after processing
@@ -263,6 +275,7 @@
 - reconnect button triggers acp.restart and confirms
 - reconnect failure edits the message with the error
 - rejects non-text messages
+- rejects permission callbacks from a stale message
 - rejects unauthorized chat ID
 - renders plan update when showPlan is true
 - renders tool_call update when showTools is true
@@ -350,6 +363,7 @@
 - saveConfig then loadConfig round-trips a valid config
 - saveConfig with empty object writes a file that loads as null
 - saveConfig with null/undefined throws a clear error
+- saveConfig writes the file with owner-only permissions
 - saveConfig writes to a path inside a non-existent nested dir fails predictably
 
 ## Module: config
@@ -416,6 +430,7 @@
 - ignores bot messages
 - ignores empty text
 - ignores thoughts when showThoughts=false
+- rejects permission interactions from a stale message
 - rejects unauthorized channel ID
 - reports message handler errors without rejecting
 - responds with channel ID in setup mode (empty allowlist)
@@ -436,6 +451,7 @@
 - registers itself on start and deregisters on stop
 - returns an empty list when the instances file is missing or corrupt
 - skips stale entries with dead pids
+- writes the instances file with owner-only permissions
 
 ## Module: static strategy
 - returns the registry URL and trusted peers as declared peers
@@ -525,6 +541,7 @@
 - rejects path traversal in URL
 - rejects token with extra spaces
 - rejects very long token (DoS attempt)
+- returns a generic error when prompt handling fails internally
 
 ## Module: HttpServer
 - GET /health returns 200 with health info
@@ -558,6 +575,7 @@
 - creates uploads dir if it does not exist
 - processMedia downloads, saves, and converts
 - saves file to disk
+- stores uploads with owner-only permissions
 
 ## Module: fetchBuffer
 - fails fast on HTTP 4xx without retrying
@@ -579,6 +597,7 @@
 - persists peers to disk
 - rejects an unsupported schemaVersion
 - reloads state across instances
+- writes state files and their directory with owner-only permissions
 
 ## Module: peer management
 - adds a peer as pending by default
@@ -642,6 +661,7 @@
 - persists created reminders to the store file
 - rejects reminders in the past and above the cap
 - restarts with persisted reminders and re-schedules them
+- writes the reminders store with owner-only permissions
 
 ## Module: parseReminderTime
 - parses chrono relative strings
