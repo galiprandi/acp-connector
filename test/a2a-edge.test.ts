@@ -28,7 +28,7 @@ beforeEach(async () => {
   network = new NetworkStore(join(dir, 'network.json'));
   enqueue = vi.fn((_t, _c, _b, done) => done?.('ok'));
   server = new A2aServer({
-    config: { enabled: true, port: 0, card: { name: 'T', description: 't' } },
+    config: { enabled: true, port: 0, card: { name: 'T', description: 't' }, secure: false },
     network,
     selfId: 'self',
     enqueue,
@@ -275,6 +275,35 @@ describe('edge: peer auth', () => {
     } finally {
       await secureServer.stop();
       rmSync(secureDir, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects an unsigned peer by default (secure defaults to true)', async () => {
+    const defDir = mkdtempSync(join(tmpdir(), 'acp-edge-defsec-'));
+    const defNetwork = new NetworkStore(join(defDir, 'network.json'));
+    defNetwork.upsertPeer({ ...approved, status: 'approved' });
+    defNetwork.issuePeerAuth('p');
+    const defServer = new A2aServer({
+      config: { enabled: true, port: 0, card: { name: 'D', description: 'd' } },
+      network: defNetwork,
+      selfId: 'self',
+      enqueue: vi.fn((_t, _c, _b, done) => done?.('ok')),
+    });
+    await defServer.start();
+    const defAddr = defServer.address();
+    const defPort = typeof defAddr === 'object' && defAddr ? defAddr.port : 0;
+    try {
+      const body = bodyOf([{ kind: 'text', text: 'unsigned' }]);
+      const res = await fetch(`http://127.0.0.1:${defPort}/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-A2A-Peer-Id': 'p' },
+        body,
+      }).then((r) => r.json());
+      expect(res.error.code).toBe(-32001);
+      expect(res.error.message).toMatch(/signature required/i);
+    } finally {
+      await defServer.stop();
+      rmSync(defDir, { recursive: true, force: true });
     }
   });
 
@@ -527,7 +556,7 @@ describe('edge: membership hardening (confirm + announce)', () => {
         notify,
       });
       const memberServer = new A2aServer({
-        config: { enabled: true, port: 0, card: { name: 'M', description: 'm' } },
+        config: { enabled: true, port: 0, card: { name: 'M', description: 'm' }, secure: false },
         network: memberNetwork,
         selfId: 'theirs',
         enqueue: vi.fn((_t, _c, _b, done) => done?.('ok')),

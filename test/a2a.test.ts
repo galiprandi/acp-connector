@@ -50,7 +50,7 @@ beforeEach(async () => {
   dir = mkdtempSync(join(tmpdir(), 'acp-a2a-'));
   network = new NetworkStore(join(dir, 'network.json'));
   server = new A2aServer({
-    config,
+    config: { ...config, secure: false },
     network,
     selfId: 'donna',
     enqueue: (_text, _chatId, _blocks, onComplete) => {
@@ -281,7 +281,7 @@ describe('agent-facing endpoints (loopback)', () => {
     });
     const peerEnqueue = vi.fn((_t, _c, _b, done) => done?.('peer did the thing'));
     const peer = new A2aServer({
-      config: { enabled: true, port: 0, card: { name: 'Lean', description: 'x' } },
+      config: { enabled: true, port: 0, card: { name: 'Lean', description: 'x' }, secure: false },
       network: peerNetwork,
       selfId: 'lean',
       enqueue: peerEnqueue,
@@ -333,7 +333,7 @@ describe('agent-facing endpoints (loopback)', () => {
       source: 'declared',
     });
     const peer = new A2aServer({
-      config: { enabled: true, port: 0, card: { name: 'Lean', description: 'x' } },
+      config: { enabled: true, port: 0, card: { name: 'Lean', description: 'x' }, secure: false },
       network: peerNetwork,
       selfId: 'lean',
       enqueue: (_t, _c, _b, done) => done?.('ok'),
@@ -383,7 +383,7 @@ describe('agent-facing endpoints (loopback)', () => {
     });
     const peerEnqueue = vi.fn((_t, _c, _b, done) => done?.('ok'));
     const peer = new A2aServer({
-      config: { enabled: true, port: 0, card: { name: 'Lean', description: 'x' } },
+      config: { enabled: true, port: 0, card: { name: 'Lean', description: 'x' }, secure: false },
       network: peerNetwork,
       selfId: 'lean',
       enqueue: peerEnqueue,
@@ -453,7 +453,7 @@ describe('edge cases', () => {
       source: 'declared',
     });
     const peer = new A2aServer({
-      config: { enabled: true, port: 0, card: { name: 'Lean', description: 'x' } },
+      config: { enabled: true, port: 0, card: { name: 'Lean', description: 'x' }, secure: false },
       network: peerNetwork,
       selfId: 'lean',
       enqueue: (_t, _c, _b, done) => done?.('ok'),

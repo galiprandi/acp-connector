@@ -1,4 +1,5 @@
 import { type ChildProcess, spawn } from 'node:child_process';
+import { createHmac } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -83,23 +84,106 @@ async function sendPrompt(httpPort: number, text: string) {
   });
 }
 
-async function rpcMessageSend(a2aPort: number, peerId: string, text: string, taskId: string) {
+function peerSecret(s: Spawned, peerId: string): string | undefined {
+  try {
+    const net = JSON.parse(readFileSync(join(s.dir, '.acp-connector', 'network.json'), 'utf8')) as {
+      peers?: Array<{ id: string; auth?: { secret?: string } }>;
+    };
+    return net.peers?.find((p) => p.id === peerId)?.auth?.secret;
+  } catch {
+    return undefined;
+  }
+}
+
+async function waitForPeerSecret(s: Spawned, peerId: string, tries = 40): Promise<void> {
+  for (let i = 0; i < tries; i++) {
+    if (peerSecret(s, peerId)) return;
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  throw new Error(`peer secret for ${peerId} never arrived`);
+}
+
+async function waitForPeerApproved(s: Spawned, peerId: string, tries = 40): Promise<void> {
+  for (let i = 0; i < tries; i++) {
+    try {
+      const net = JSON.parse(
+        readFileSync(join(s.dir, '.acp-connector', 'network.json'), 'utf8')
+      ) as { peers?: Array<{ id: string; status?: string }> };
+      if (net.peers?.find((p) => p.id === peerId)?.status === 'approved') return;
+    } catch {
+      // not written yet
+    }
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  throw new Error(`peer ${peerId} never approved on ${s.dir}`);
+}
+
+function signedHeaders(s: Spawned, senderId: string, receiverId: string, body: string) {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    'X-A2A-Peer-Id': senderId,
+  };
+  const secret = peerSecret(s, receiverId);
+  if (secret) {
+    headers['X-A2A-Peer-Signature'] = createHmac('sha256', secret).update(body).digest('hex');
+  }
+  return headers;
+}
+
+async function joinRequest(target: Spawned, id: string, peer: Spawned) {
+  return fetch(`http://127.0.0.1:${target.a2aPort}/a2a/join`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      id,
+      cardUrl: `http://127.0.0.1:${peer.a2aPort}/.well-known/agent-card.json`,
+      card: { name: id, description: `${id} agent` },
+    }),
+  });
+}
+
+/**
+ * Full double opt-in pairing required by a2a.secure (default since the
+ * hardening release): both sides join, both owners approve, and each side
+ * must receive the other's pairing secret before approving locally —
+ * otherwise each would mint a different secret and signatures would fail.
+ */
+async function pairAgents(a: Spawned, b: Spawned): Promise<void> {
+  await joinRequest(b, 'alpha', a);
+  await joinRequest(a, 'beta', b);
+  await sendPrompt(b.httpPort, '/a2a approve alpha');
+  await waitForPeerApproved(b, 'alpha');
+  await waitForPeerSecret(a, 'beta');
+  await sendPrompt(a.httpPort, '/a2a approve beta');
+  await waitForPeerApproved(a, 'beta');
+  await waitForPeerSecret(b, 'alpha');
+}
+
+async function rpcMessageSend(
+  sender: Spawned,
+  senderId: string,
+  receiverId: string,
+  a2aPort: number,
+  text: string,
+  taskId: string
+) {
+  const body = JSON.stringify({
+    jsonrpc: '2.0',
+    id: 1,
+    method: 'message/send',
+    params: {
+      message: {
+        role: 'user',
+        messageId: taskId,
+        parts: [{ kind: 'text', text }],
+        metadata: { 'a2a.taskId': taskId },
+      },
+    },
+  });
   const res = await fetch(`http://127.0.0.1:${a2aPort}/`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-A2A-Peer-Id': peerId },
-    body: JSON.stringify({
-      jsonrpc: '2.0',
-      id: 1,
-      method: 'message/send',
-      params: {
-        message: {
-          role: 'user',
-          messageId: taskId,
-          parts: [{ kind: 'text', text }],
-          metadata: { 'a2a.taskId': taskId },
-        },
-      },
-    }),
+    headers: signedHeaders(sender, senderId, receiverId, body),
+    body,
   });
   return res.json();
 }
@@ -115,25 +199,10 @@ describe('e2e: two real bridges with fake agents', () => {
   it('join → approve → message/send roundtrip', async () => {
     const a = await spawnAgent('alpha');
     const b = await spawnAgent('beta');
+    await pairAgents(a, b);
 
-    // alpha discovers beta (simulated) and requests to join
-    const joinRes = await fetch(`http://127.0.0.1:${b.a2aPort}/a2a/join`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        id: 'alpha',
-        cardUrl: `http://127.0.0.1:${a.a2aPort}/.well-known/agent-card.json`,
-        card: { name: 'alpha', description: 'alpha agent' },
-      }),
-    });
-    expect(joinRes.status).toBe(202);
-
-    // beta owner approves via /prompt (operator entry point)
-    await sendPrompt(b.httpPort, '/a2a approve alpha');
-    await new Promise((r) => setTimeout(r, 500));
-
-    // now alpha can send a task to beta — the fake agent echoes back
-    const res = await rpcMessageSend(b.a2aPort, 'alpha', 'ping from alpha', 't-e2e-1');
+    // alpha can send a task to beta — the fake agent echoes back
+    const res = await rpcMessageSend(a, 'alpha', 'beta', b.a2aPort, 'ping from alpha', 't-e2e-1');
     expect(res.result.role).toBe('agent');
     const replyText = res.result.parts.map((p: { text?: string }) => p.text).join('');
     expect(replyText).toContain('echo:');
@@ -142,7 +211,7 @@ describe('e2e: two real bridges with fake agents', () => {
 
   it('unapproved peer is rejected before reaching the agent', async () => {
     const b = await spawnAgent('beta');
-    const res = await rpcMessageSend(b.a2aPort, 'stranger', 'hi', 't-e2e-2');
+    const res = await rpcMessageSend(b, 'stranger', 'stranger', b.a2aPort, 'hi', 't-e2e-2');
     expect(res.error.code).toBe(-32001);
   }, 30000);
 
@@ -150,30 +219,8 @@ describe('e2e: two real bridges with fake agents', () => {
     const a = await spawnAgent('alpha');
     const b = await spawnAgent('beta');
 
-    // Real double opt-in, both directions: alpha joins beta AND beta
-    // joins alpha; each owner approves via /prompt on their bridge.
-    await fetch(`http://127.0.0.1:${a.a2aPort}/a2a/join`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        id: 'beta',
-        cardUrl: `http://127.0.0.1:${b.a2aPort}/.well-known/agent-card.json`,
-        card: { name: 'beta', description: 'beta agent' },
-      }),
-    });
-    await sendPrompt(a.httpPort, '/a2a approve beta');
-    await new Promise((r) => setTimeout(r, 800));
-    await fetch(`http://127.0.0.1:${b.a2aPort}/a2a/join`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        id: 'alpha',
-        cardUrl: `http://127.0.0.1:${a.a2aPort}/.well-known/agent-card.json`,
-        card: { name: 'alpha', description: 'alpha agent' },
-      }),
-    });
-    await sendPrompt(b.httpPort, '/a2a approve alpha');
-    await new Promise((r) => setTimeout(r, 800));
+    // Real double opt-in, both directions: each owner approves via /prompt.
+    await pairAgents(a, b);
 
     // ask alpha's agent (via its own loopback /a2a/delegate) to call beta
     const res = await fetch(`http://127.0.0.1:${a.a2aPort}/a2a/delegate`, {
@@ -190,35 +237,25 @@ describe('e2e: two real bridges with fake agents', () => {
   it('message/stream returns SSE events to an approved peer', async () => {
     const a = await spawnAgent('alpha');
     const b = await spawnAgent('beta');
-    // approve alpha on beta (one direction is enough for inbound)
-    await fetch(`http://127.0.0.1:${b.a2aPort}/a2a/join`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        id: 'alpha',
-        cardUrl: `http://127.0.0.1:${a.a2aPort}/.well-known/agent-card.json`,
-        card: { name: 'alpha', description: 'alpha agent' },
-      }),
-    });
-    await sendPrompt(b.httpPort, '/a2a approve alpha');
-    await new Promise((r) => setTimeout(r, 800));
+    await pairAgents(a, b);
 
+    const streamBody = JSON.stringify({
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'message/stream',
+      params: {
+        message: {
+          role: 'user',
+          messageId: 'stream-e2e',
+          parts: [{ kind: 'text', text: 'stream test' }],
+          metadata: { 'a2a.taskId': 'stream-e2e' },
+        },
+      },
+    });
     const res = await fetch(`http://127.0.0.1:${b.a2aPort}/`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-A2A-Peer-Id': 'alpha' },
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        id: 1,
-        method: 'message/stream',
-        params: {
-          message: {
-            role: 'user',
-            messageId: 'stream-e2e',
-            parts: [{ kind: 'text', text: 'stream test' }],
-            metadata: { 'a2a.taskId': 'stream-e2e' },
-          },
-        },
-      }),
+      headers: signedHeaders(a, 'alpha', 'beta', streamBody),
+      body: streamBody,
     });
     expect(res.headers.get('content-type')).toBe('text/event-stream');
     const body = await res.text();

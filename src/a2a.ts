@@ -331,14 +331,13 @@ export class A2aServer {
     }
 
     // Peer authentication: a present signature must verify against the
-    // raw body with the pairing secret issued at approve time; in
-    // `secure` mode a missing signature rejects too. Unsigned peers are
-    // tolerated (with a once-per-process audit entry) while `secure` is
-    // off — the mixed-version mesh keeps working during the transition.
+    // raw body with the pairing secret issued at approve time; `secure`
+    // mode (default since 0.14) rejects missing signatures too. Set
+    // `a2a.secure: false` only for mixed-version meshes during migration.
     const signature = Array.isArray(req.headers[PEER_SIGNATURE_HEADER])
       ? String(req.headers[PEER_SIGNATURE_HEADER][0])
       : String(req.headers[PEER_SIGNATURE_HEADER] ?? '');
-    const secure = this.opts.config.secure ?? false;
+    const secure = this.opts.config.secure ?? true;
     if (signature) {
       if (!this.opts.network.verifyPeerSignature(peerId, body, signature)) {
         this.opts.audit?.write({
