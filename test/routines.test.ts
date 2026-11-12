@@ -1,5 +1,6 @@
-import { existsSync, rmSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Routine } from '../src/config';
 
@@ -14,6 +15,7 @@ vi.mock('../src/config.js', () => ({
 }));
 
 const { RoutineManager } = await import('../src/routines.js');
+const { ReminderManager } = await import('../src/reminders.js');
 
 interface MockCronManager {
   list: vi.Mock;
@@ -25,6 +27,8 @@ interface MockCronManager {
 
 interface CreateManagerOverrides {
   routines?: Routine[];
+  reminderManager?: InstanceType<typeof ReminderManager>;
+  timezone?: string;
 }
 
 interface CreateManagerResult {
@@ -200,5 +204,109 @@ describe('RoutineManager', () => {
     const { manager, sendMessage } = createManager();
     await manager.handleCommand('/routine', 123);
     expect(sendMessage).toHaveBeenCalledWith(123, expect.stringContaining('Routine commands'));
+  });
+
+  describe('/reminder', () => {
+    let remDir: string;
+    let reminderManager: InstanceType<typeof ReminderManager>;
+
+    beforeEach(() => {
+      remDir = mkdtempSync(join(tmpdir(), 'acp-routines-rem-'));
+      reminderManager = new ReminderManager({
+        storePath: join(remDir, 'reminders.json'),
+        canDeliver: () => false,
+        deliver: vi.fn(),
+        onLog: () => {},
+      });
+    });
+
+    afterEach(() => {
+      reminderManager.stop();
+      rmSync(remDir, { recursive: true, force: true });
+    });
+
+    function withReminders(timezone?: string) {
+      return createManager({ reminderManager, timezone });
+    }
+
+    it('says unavailable without a reminder manager', async () => {
+      const { manager, sendMessage } = createManager();
+      await manager.handleCommand('/reminder list', 123);
+      expect(sendMessage).toHaveBeenCalledWith(123, expect.stringContaining('not available'));
+    });
+
+    it('lists empty and populated reminders with owner badges', async () => {
+      const { manager, sendMessage } = withReminders('UTC');
+      await manager.handleCommand('/reminder list', 123);
+      expect(sendMessage).toHaveBeenCalledWith(123, expect.stringContaining('No reminders'));
+
+      reminderManager.create('agent task', Date.now() + 60_000);
+      reminderManager.create('operator task', Date.now() + 120_000, 'operator');
+      await manager.handleCommand('/reminder list', 123);
+      const msg = sendMessage.mock.calls.at(-1)?.[1] as string;
+      expect(msg).toContain('🤖');
+      expect(msg).toContain('👤');
+      expect(msg).toContain('GMT');
+    });
+
+    it('adds a duration reminder and confirms with local time + zone', async () => {
+      const { manager, sendMessage } = withReminders('America/Argentina/Buenos_Aires');
+      await manager.handleCommand('/reminder add in 20 minutes check the oven', 123);
+      expect(reminderManager.list()).toHaveLength(1);
+      const r = reminderManager.list()[0];
+      expect(r.prompt).toBe('check the oven');
+      expect(r.managed).toBe('operator');
+      const msg = sendMessage.mock.calls.at(-1)?.[1] as string;
+      expect(msg).toContain('✅');
+      expect(msg).toContain('GMT-3');
+      expect(msg).toContain('America/Argentina/Buenos_Aires');
+    });
+
+    it('adds an absolute reminder using config.timezone', async () => {
+      const { manager } = withReminders('America/Argentina/Tucuman');
+      await manager.handleCommand('/reminder add tomorrow 6pm call mom', 123);
+      const r = reminderManager.list()[0];
+      expect(r.prompt).toBe('call mom');
+      // 18:00 in UTC-3 → 21:00 UTC
+      expect(Date.parse(r.firesAt)).toBeGreaterThan(Date.now());
+    });
+
+    it('rejects naive absolute times without config.timezone', async () => {
+      const { manager, sendMessage } = withReminders();
+      await manager.handleCommand('/reminder add tomorrow 6pm call mom', 123);
+      expect(reminderManager.list()).toHaveLength(0);
+      expect(sendMessage).toHaveBeenCalledWith(123, expect.stringContaining('Could not parse'));
+    });
+
+    it('rejects input with no parseable time', async () => {
+      const { manager, sendMessage } = withReminders('UTC');
+      await manager.handleCommand('/reminder add check the oven', 123);
+      expect(reminderManager.list()).toHaveLength(0);
+      expect(sendMessage).toHaveBeenCalledWith(123, expect.stringContaining('Could not parse'));
+    });
+
+    it('does not let a partial chrono match steal prompt words', async () => {
+      const { manager } = withReminders('UTC');
+      await manager.handleCommand('/reminder add in 20 minutes revisar el horno', 123);
+      const r = reminderManager.list()[0];
+      expect(r.prompt).toBe('revisar el horno');
+    });
+
+    it('removes reminders by id', async () => {
+      const { manager, sendMessage } = withReminders('UTC');
+      reminderManager.create('task', Date.now() + 60_000, 'operator');
+      const id = reminderManager.list()[0].id;
+      await manager.handleCommand(`/reminder remove ${id}`, 123);
+      expect(reminderManager.list()).toHaveLength(0);
+      expect(sendMessage).toHaveBeenCalledWith(123, expect.stringContaining('cancelled'));
+      await manager.handleCommand('/reminder remove nope', 123);
+      expect(sendMessage).toHaveBeenCalledWith(123, expect.stringContaining('not found'));
+    });
+
+    it('shows help for bare /reminder', async () => {
+      const { manager, sendMessage } = withReminders();
+      await manager.handleCommand('/reminder', 123);
+      expect(sendMessage).toHaveBeenCalledWith(123, expect.stringContaining('Reminder commands'));
+    });
   });
 });

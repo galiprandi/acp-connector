@@ -74,7 +74,7 @@ server.registerTool(
   'reminder_list',
   {
     description:
-      'List all pending reminders with their id, firesAt (UTC) and firesAtLocal (operator timezone with GMT offset). Use it before creating duplicates or when the operator asks what is scheduled.',
+      'List all pending reminders with their id, firesAt (UTC), firesAtLocal (operator timezone with GMT offset) and managed owner. Only reminders you created (managed "agent") can be cancelled or updated — operator reminders are read-only. Use it before creating duplicates or when the operator asks what is scheduled.',
     inputSchema: {},
   },
   async () => call('/reminder/list')
@@ -83,7 +83,8 @@ server.registerTool(
 server.registerTool(
   'reminder_cancel',
   {
-    description: 'Cancel a pending reminder by id (get ids from reminder_list).',
+    description:
+      'Cancel a pending reminder by id (get ids from reminder_list). Only agent-owned reminders can be cancelled — operator reminders are read-only.',
     inputSchema: {
       id: z.string().describe('Reminder id from reminder_list'),
     },
@@ -94,7 +95,7 @@ server.registerTool(
 server.registerTool(
   'reminder_update',
   {
-    description: `Reschedule (snooze) or reword a pending reminder. Pass the id plus a new "in"/"at" and/or a new "prompt". ${TIME_HINT}`,
+    description: `Reschedule (snooze) or reword a pending reminder. Only agent-owned reminders can be updated — operator reminders are read-only. Pass the id plus a new "in"/"at" and/or a new "prompt". ${TIME_HINT}`,
     inputSchema: {
       id: z.string().describe('Reminder id from reminder_list'),
       in: z.string().optional().describe('New delay until firing, e.g. "30m"'),

@@ -648,6 +648,7 @@
 - creates a reminder with "in" and returns id + firesAt
 - lists, updates and cancels reminders
 - rejects naive absolute times when timezone is not configured
+- returns firesAtLocal with zone info in create/list/update
 
 ## Module: cron api
 - POST /cron/create with a "/" prompt is delivered prefixed, never dispatched as a bridge command

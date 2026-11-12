@@ -38,10 +38,12 @@ export class LoopbackBot implements PlatformBot {
     _chatId?: number | string,
     blocks?: ContentBlock[],
     onComplete?: (response: string, error?: string) => void,
-    source?: 'cron' | 'agent-cron' | 'http' | 'routine' | 'a2a' | 'reminder',
+    source?: 'cron' | 'agent-cron' | 'agent-reminder' | 'http' | 'routine' | 'a2a' | 'reminder',
     onChunk?: (chunk: string) => void
   ): Promise<void> {
-    if (source !== 'a2a' && text.startsWith('/') && this.onCommand) {
+    const isRemoteContent =
+      source === 'a2a' || source === 'agent-cron' || source === 'agent-reminder';
+    if (!isRemoteContent && text.startsWith('/') && this.onCommand) {
       const handled = await this.onCommand(text, 'loopback');
       if (handled) return;
     }

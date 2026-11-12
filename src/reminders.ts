@@ -9,6 +9,8 @@ import { log } from './logger.js';
  * Future reminders only — there is no state machine: a reminder is
  * either waiting to fire or gone (deleted on delivery).
  */
+export type ReminderManaged = 'operator' | 'agent';
+
 export interface Reminder {
   id: string;
   prompt: string;
@@ -16,6 +18,13 @@ export interface Reminder {
   firesAt: string;
   /** Creation instant, ISO 8601 UTC. */
   createdAt: string;
+  /**
+   * Who owns the reminder. Agent-created reminders are remote content at
+   * fire time — their prompt can never run bridge commands. Operator
+   * reminders (`/reminder add`) keep operator authority. Entries written
+   * before this field existed are agent-created by definition.
+   */
+  managed?: ReminderManaged;
 }
 
 /** Maximum active reminders. */
@@ -35,8 +44,8 @@ type LogFn = (msg: string) => void;
  */
 type CanDeliverFn = () => boolean;
 
-/** Enqueue the delivered text into the bridge queue. */
-type DeliverFn = (text: string) => void;
+/** Enqueue the delivered text into the bridge queue, tagged by owner. */
+type DeliverFn = (text: string, managed: ReminderManaged) => void;
 
 export interface ReminderManagerOptions {
   /** Path to the JSON store file. */
@@ -180,6 +189,12 @@ function _hasExplicitZone(text: string): boolean {
     _EXPLICIT_ZONE_RE.test(text) ||
     (/^\d{4}-\d{2}-\d{2}T/.test(text) && /[zZ]|[+-]\d{2}/.test(text.slice(10)))
   );
+}
+
+/** True when the input is a pure duration ("30m", "in 45 minutes"). */
+export function isReminderDuration(text: string): boolean {
+  const t = text.trim();
+  return _DURATION_RE.test(t) || _DURATION_RE.test(t.replace(/^in\s+/i, ''));
 }
 
 /**
@@ -343,7 +358,7 @@ export class ReminderManager {
    * @param firesAt UTC instant (ms or ISO string).
    * @throws when the cap (MAX_REMINDERS) is reached or firesAt is not future.
    */
-  create(prompt: string, firesAt: number | string): Reminder {
+  create(prompt: string, firesAt: number | string, managed: ReminderManaged = 'agent'): Reminder {
     const ts = typeof firesAt === 'number' ? firesAt : Date.parse(firesAt);
     if (Number.isNaN(ts)) throw new Error(`invalid firesAt: ${firesAt}`);
     if (ts <= this.now()) throw new Error('reminder must be in the future');
@@ -355,6 +370,7 @@ export class ReminderManager {
       prompt,
       firesAt: new Date(ts).toISOString(),
       createdAt: new Date(this.now()).toISOString(),
+      managed,
     };
     this._reminders.push(reminder);
     this._save();
@@ -415,7 +431,7 @@ export class ReminderManager {
         this.onLog(`⏰ reminder ${r.id} due but agent not connected — kept for retry`);
         continue;
       }
-      this.deliver(`[Reminder ${r.id}] ${r.prompt}`);
+      this.deliver(`[Reminder ${r.id}] ${r.prompt}`, r.managed ?? 'agent');
       this._remove(r.id);
       this.onLog(`⏰ reminder ${r.id} delivered`);
     }
@@ -455,9 +471,10 @@ export class ReminderManager {
       const raw = readFileSync(this.storePath, 'utf8');
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed)) {
-        this._reminders = parsed.filter(
-          (r) => r && typeof r.id === 'string' && typeof r.prompt === 'string' && r.firesAt
-        );
+        this._reminders = parsed
+          .filter((r) => r && typeof r.id === 'string' && typeof r.prompt === 'string' && r.firesAt)
+          // Migration: pre-`managed` entries were all agent-created.
+          .map((r) => ({ ...r, managed: r.managed === 'operator' ? 'operator' : 'agent' }));
       }
     } catch (err) {
       this.onLog(`⚠️ failed to load reminders store: ${(err as Error).message}`);

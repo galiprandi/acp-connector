@@ -31,7 +31,7 @@ The bridge is intentionally thin. It doesn't implement its own agent loop, model
 **Key features:**
 - 🤝 **A2A agent network** — peer discovery (LAN broadcast, shared file, registry), double opt-in pairing, `message/send` + `message/stream` (SSE)
 - 🛠 **MCP tools for your agent** — `list_remote_agents` and `send_message` injected into the session so agents can discover and delegate on their own
-- ⏰ **Agent reminders** — the agent can schedule one-shot self-reminders (`reminder_*` tools) and manage its own recurring cron jobs (`cron_*` tools) — follow-ups, checks, "ping me if they replied" — persisted, late-delivery safe, human time strings
+- ⏰ **Agent reminders** — the agent can schedule one-shot self-reminders (`reminder_*` tools) and manage its own recurring cron jobs (`cron_*` tools) — follow-ups, checks, "ping me if they replied" — persisted, late-delivery safe, human time strings. You get `/reminder` chat commands for your own one-shots
 - 🤖 Works with any ACP agent (Devin, Claude Code, Codex, OpenCode, pi, Antigravity)
 - 💬 Telegram and Discord as messaging interfaces with streaming responses
 - 🖥 Headless mode — run without any messaging platform (containers, test rigs)
@@ -205,7 +205,7 @@ See [`acp-connector.example.jsonc`](acp-connector.example.jsonc) for the full re
 | `showTools` | `boolean` | no | `true` | Show tool calls (e.g. "Read file", "Run tests") in chat. Set to `false` when only the final answer matters |
 | `showPlan` | `boolean` | no | `true` | Show agent plan/checklist in chat |
 | `streaming` | `boolean` | no | `true` | Stream responses with live message edits |
-| `echoInjectedPrompts` | `boolean` | no | `true` | Echo prompts injected via cron, HTTP, or routines into the chat with a source label (`⏰ [cron]`/`[reminder]`, `🌐 [http]`, `🔁 [routine]`) so you can see what triggered the agent's response |
+| `echoInjectedPrompts` | `boolean` | no | `true` | Echo prompts injected via cron, HTTP, routines or reminders into the chat with a source label (`⏰ [cron]`/`[agent-cron]`/`[reminder]`/`[agent-reminder]`, `🌐 [http]`, `🔁 [routine]`) so you can see what triggered the agent's response |
 | `logLevel` | `string` | no | `"info"` | Bridge log verbosity: `"error"` (errors only) \| `"warn"` \| `"info"` \| `"debug"`. Does not affect the agent subprocess's own stderr output |
 | `logPreviewLength` | `number` | no | `150` | Max characters of `👤`/`🤖` chat previews written to the log (min `20`; longer text is cut with `…`) |
 | `timezone` | `string` | no | — | IANA timezone for absolute reminder times without an explicit zone (`"mañana 18hs"`, `"tomorrow 10am"`, `at` values) — e.g. `"America/Argentina/Tucuman"`. **Required for those**: unset means they're rejected rather than guessed against the host's zone. Pure durations (`"30m"`, `"in 45 minutes"`) and explicit zones (`Z`, `±HH:MM`) don't need it. Written automatically by `acp-connector setup` |
@@ -279,19 +279,35 @@ The bridge always injects an `agent-reminders` MCP server into `session/new`, gi
 
 **Reminders are one-shot.** When a reminder fires, its prompt is injected into the queue as `[Reminder <id>] <prompt>` and the entry is deleted. If the agent isn't connected when it fires, the entry is kept and retried — a late action beats a lost one. Reminders persist across restarts in `.acp-connector/reminders.json` (max 50 active; entries past `firesAt` by more than 7 days are discarded).
 
+Every reminder is tagged `managed: "agent" | "operator"`. Agent-created reminders fire as remote content (source `agent-reminder`): their prompt **cannot run `/` bridge commands** even if it starts with one. Operator reminders created via `/reminder add` keep full operator authority. The agent API can list all reminders but `reminder_cancel`/`reminder_update` only touch `managed: "agent"` entries — operator reminders are read-only, same rule as cron. Entries written before `managed` existed are migrated as agent-owned on load.
+
+Responses include `firesAt` (UTC ISO) and `firesAtLocal` — the fire time rendered in `timezone` with its GMT offset **and** IANA zone name (e.g. `Nov 12, 2026, 6:00 PM GMT-3 (America/Argentina/Buenos_Aires)`), so the agent can confirm the schedule to you and you can spot a wrong-zone setup at a glance.
+
 | Tool | Purpose |
 |---|---|
 | `reminder_create({ prompt, in?, at? })` | Schedule a one-shot reminder. Exactly one of `in`/`at`. Accepts human strings (`"15m"`, `"2 hours"`, `"tomorrow 10am"`) and ISO datetimes. Pure durations are relative to now; absolute times without an explicit zone are parsed in `timezone` (required — unset rejects them) and stored in UTC |
-| `reminder_list()` | List pending reminders with id + firesAt |
-| `reminder_cancel({ id })` | Cancel a pending reminder |
-| `reminder_update({ id, in?, at?, prompt? })` | Snooze/reschedule or reword a reminder |
+| `reminder_list()` | List pending reminders with id, firesAt, firesAtLocal and managed owner |
+| `reminder_cancel({ id })` | Cancel an agent-owned pending reminder (operator reminders are read-only) |
+| `reminder_update({ id, in?, at?, prompt? })` | Snooze/reschedule or reword an agent-owned reminder |
 | `cron_create({ every \| expr, prompt })` | Create a recurring job owned by the agent. `every` accepts `"30m"`, `"1h"`, `"1d"`, `"1w"` (even divisors); `expr` is a raw 5-field cron expression |
 | `cron_list()` | List all jobs — operator jobs are flagged `readOnly: true` |
 | `cron_update({ id, ... })` / `cron_delete({ id })` | Modify/delete only `managed: "agent"` jobs; operator jobs are read-only |
 
 Agent-created cron jobs are persisted to `acp-connector.jsonc` with `managed: "agent"` — they survive restarts and the agent can update/delete them later (capped at 50 active agent-created jobs). Jobs you write in the config or create via `/cron` chat commands are operator-owned: the agent can list them but cannot modify them.
 
-**Agent-created cron prompts are agent input, not bridge administration.** When an agent-managed job fires, its prompt is injected as `[Agent cron <id>] <prompt>` and cannot run `/` bridge commands (`/a2a`, `/mode`, `/cron`…) even if the prompt starts with one — the same guard reminders apply. Operator jobs fire verbatim, unchanged.
+**Agent-created cron prompts are agent input, not bridge administration.** When an agent-managed job fires, its prompt is injected as `[Agent cron <id>] <prompt>` and cannot run `/` bridge commands (`/a2a`, `/mode`, `/cron`…) even if the prompt starts with one — agent reminders get the same guard. Operator jobs fire verbatim, unchanged.
+
+### Operator reminders (`/reminder`)
+
+You can also schedule one-shot reminders yourself from the chat — symmetric to `/cron`:
+
+| Command | Purpose |
+|---|---|
+| `/reminder list` | List pending reminders with id, owner (`👤` operator / `🤖` agent), local time + zone, and prompt |
+| `/reminder add `<when> <prompt>`` | Schedule a reminder — e.g. `/reminder add in 20 minutes check the oven` or `/reminder add tomorrow 18hs call mom`. The "when" comes first; absolute times resolve in `timezone` (or an explicit `±HH:MM`/`Z` offset) |
+| `/reminder remove `<id>`` | Cancel a reminder (`rm`/`cancel` aliases) |
+
+Operator reminders are stored in the same `.acp-connector/reminders.json` and confirmed with the local time + GMT offset + IANA zone, so a wrong-zone schedule is visible immediately. Unlike agent reminders they keep operator authority: a prompt starting with `/` can run bridge commands, exactly like `/cron` jobs.
 
 ### HTTP API
 

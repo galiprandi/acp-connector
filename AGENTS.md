@@ -124,15 +124,22 @@ The bridge always injects an `agent-reminders` MCP server in `session/new`
 `mcpServers` (not gated on a2a.enabled). Its tools hit a loopback HTTP API
 (`src/reminders-api.ts`, 127.0.0.1, ephemeral port passed via
 `REMINDERS_API_URL`). One-shot reminders live in
-`.acp-connector/reminders.json`; delivery goes through the same serialized
-queue with source `'reminder'` and entries are deleted on delivery —
+`.acp-connector/reminders.json`; entries are deleted on delivery —
 undeliverable entries (no agent session/chat id) are kept and retried.
-`cron_*` tools can only touch jobs persisted with `managed: "agent"`;
-operator jobs are listed read-only. Agent-created cron jobs are capped
+Every reminder carries `managed: "agent" | "operator"` (pre-field entries
+migrate to `"agent"` on load). Agent reminders deliver with source
+`'agent-reminder'` — remote content that never runs bridge commands;
+operator reminders (`/reminder add` chat command: list/add/remove) deliver
+with source `'reminder'` and keep operator authority. `reminder_*` tools
+can only mutate `managed: "agent"` entries; operator reminders are listed
+read-only. `cron_*` tools can only touch jobs persisted with
+`managed: "agent"`; operator jobs are listed read-only. Agent-created cron jobs are capped
 (50 concurrent) and at fire time their prompt is injected as
 `[Agent cron <name>] <prompt>` with source `'agent-cron'`: agent-scheduled
 prompts are remote content and never run bridge commands, even when they
-start with `/`. Agents without MCP capabilities get a
+start with `/`. Absolute reminder times without an explicit zone require
+`config.timezone` — unset rejects them rather than guessing the host zone.
+Agents without MCP capabilities get a
 one-line warning at startup and no tools.
 
 ### Key principles

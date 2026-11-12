@@ -80,9 +80,14 @@ export async function run(): Promise<void> {
   const reminderManager = new ReminderManager({
     storePath: resolve(stateDir, 'reminders.json'),
     canDeliver: () => !!acp?.session && cronAllowedIds.length > 0,
-    deliver: (text) => {
+    // Agent-owned reminders are remote content (source 'agent-reminder'):
+    // at fire time their prompt can never run bridge commands. Operator
+    // reminders ('/reminder add') keep source 'reminder' and full
+    // operator authority, same as cron.
+    deliver: (text, managed) => {
+      const source = managed === 'operator' ? 'reminder' : 'agent-reminder';
       for (const bot of bots) {
-        bot.enqueuePrompt(text, cronAllowedIds[0], undefined, undefined, 'reminder');
+        bot.enqueuePrompt(text, cronAllowedIds[0], undefined, undefined, source);
       }
     },
   });
@@ -190,6 +195,8 @@ export async function run(): Promise<void> {
   const routineManager = new RoutineManager({
     routines: config.routines || [],
     cronManager,
+    reminderManager,
+    timezone: config.timezone,
     enqueue: (text, chatId) => {
       for (const bot of bots) {
         bot.enqueuePrompt(text, chatId, undefined, undefined, 'routine');

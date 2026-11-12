@@ -37,7 +37,10 @@ function createManager(overrides: Partial<ReminderManagerOptions> = {}) {
 }
 
 function stored() {
-  return JSON.parse(readFileSync(storePath, 'utf8')) as Array<{ id: string }>;
+  return JSON.parse(readFileSync(storePath, 'utf8')) as Array<{
+    id: string;
+    managed?: string;
+  }>;
 }
 
 beforeEach(() => {
@@ -84,7 +87,7 @@ describe('ReminderManager', () => {
       const r = manager.create('ping', nowMs + 1000);
       manager.start();
       vi.advanceTimersByTime(1500);
-      expect(deliver).toHaveBeenCalledWith(`[Reminder ${r.id}] ping`);
+      expect(deliver).toHaveBeenCalledWith(`[Reminder ${r.id}] ping`, 'agent');
       expect(stored()).toHaveLength(0);
     } finally {
       vi.useRealTimers();
@@ -130,7 +133,7 @@ describe('ReminderManager', () => {
     setDeliverable(true);
     manager.flushDue();
     manager.stop();
-    expect(deliver).toHaveBeenCalledWith('[Reminder wait] later');
+    expect(deliver).toHaveBeenCalledWith('[Reminder wait] later', 'agent');
     expect(stored()).toHaveLength(0);
   });
 
@@ -182,6 +185,44 @@ describe('ReminderManager', () => {
     expect(updated?.firesAt).toBe(new Date(nowMs + 9000).toISOString());
     expect(manager.update('nope', {})).toBeNull();
     expect(manager.list()).toHaveLength(1);
+  });
+
+  it('tags reminders with their owner and delivers it to the queue', () => {
+    const { manager, deliver } = createManager();
+    const agent = manager.create('agent one', nowMs + 1000);
+    const op = manager.create('operator one', nowMs + 2000, 'operator');
+    expect(agent.managed).toBe('agent');
+    expect(op.managed).toBe('operator');
+    expect(stored().map((r) => r.managed)).toEqual(['agent', 'operator']);
+    manager.flushDue();
+    // Both are future — nothing delivered yet; force them due instead.
+    nowMs += 3000;
+    manager.flushDue();
+    expect(deliver).toHaveBeenCalledWith(`[Reminder ${agent.id}] agent one`, 'agent');
+    expect(deliver).toHaveBeenCalledWith(`[Reminder ${op.id}] operator one`, 'operator');
+  });
+
+  it('migrates pre-managed store entries as agent-owned', () => {
+    writeFileSync(
+      storePath,
+      JSON.stringify([
+        {
+          id: 'legacy',
+          prompt: 'old',
+          firesAt: new Date(nowMs + 60_000).toISOString(),
+          createdAt: '',
+        },
+      ])
+    );
+    const { manager, deliver } = createManager();
+    manager.start();
+    manager.stop();
+    expect(manager.list()[0]?.managed).toBe('agent');
+    expect(deliver).not.toHaveBeenCalled();
+    // A legacy past-due entry still delivers tagged as agent content.
+    nowMs += 120_000;
+    manager.flushDue();
+    expect(deliver).toHaveBeenCalledWith('[Reminder legacy] old', 'agent');
   });
 });
 

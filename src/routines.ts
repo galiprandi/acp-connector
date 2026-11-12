@@ -1,7 +1,15 @@
+import * as chrono from 'chrono-node';
 import type { CronJob, Routine } from './config.js';
 import { loadConfig, saveConfig } from './config.js';
 import type { CronManager } from './cron.js';
 import { log } from './logger.js';
+import {
+  formatFiresAt,
+  isReminderDuration,
+  needsExplicitTimezone,
+  parseReminderTime,
+  type ReminderManager,
+} from './reminders.js';
 
 /**
  * Persist the current cron jobs (and optionally routines) back to
@@ -19,19 +27,36 @@ export function persistCronAndRoutines(cron: CronJob[], routines?: Routine[]): v
 interface RoutineManagerOpts {
   routines: Routine[];
   cronManager: CronManager;
+  reminderManager?: ReminderManager;
+  /** `config.timezone` — required to resolve naive absolute reminder times. */
+  timezone?: string;
   enqueue: (text: string, chatId?: number) => void;
   sendMessage: (chatId: number, text: string) => Promise<void>;
 }
 
+/** Max leading tokens tried as the "when" part of `/reminder add`. */
+const MAX_WHEN_TOKENS = 8;
+
 export class RoutineManager {
   private routines: Routine[];
   private cronManager: CronManager;
+  private reminderManager?: ReminderManager;
+  private timezone?: string;
   private enqueue: (text: string, chatId?: number) => void;
   private sendMessage: (chatId: number, text: string) => Promise<void>;
 
-  constructor({ routines, cronManager, enqueue, sendMessage }: RoutineManagerOpts) {
+  constructor({
+    routines,
+    cronManager,
+    reminderManager,
+    timezone,
+    enqueue,
+    sendMessage,
+  }: RoutineManagerOpts) {
     this.routines = routines || [];
     this.cronManager = cronManager;
+    this.reminderManager = reminderManager;
+    this.timezone = timezone;
     this.enqueue = enqueue;
     this.sendMessage = sendMessage;
   }
@@ -50,6 +75,8 @@ export class RoutineManager {
         return this._handleRoutine(args, chatId);
       case 'run':
         return this._handleRun(args, chatId);
+      case 'reminder':
+        return this._handleReminder(args, chatId);
       default:
         return false;
     }
@@ -244,6 +271,141 @@ export class RoutineManager {
     this.routines.splice(idx, 1);
     this._persist();
     await this.sendMessage(chatId, `✅ Routine \`${name}\` removed.`);
+    return true;
+  }
+
+  // ------------------------------------------------------------- /reminder
+
+  private async _handleReminder(args: string, chatId: number): Promise<boolean> {
+    const [subcommand, ...rest] = args.split(/\s+/);
+    const restStr = rest.join(' ');
+
+    switch (subcommand) {
+      case 'list':
+        return this._reminderList(chatId);
+      case 'add':
+        return this._reminderAdd(restStr, chatId);
+      case 'remove':
+      case 'rm':
+      case 'cancel':
+        return this._reminderRemove(restStr, chatId);
+      default:
+        await this.sendMessage(
+          chatId,
+          [
+            '*Reminder commands:*',
+            '/reminder list — list scheduled reminders',
+            '/reminder add `<when> <prompt>` — one-shot reminder (e.g. `/reminder add in 20 minutes check the oven`)',
+            '/reminder remove `<id>` — cancel a reminder',
+          ].join('\n')
+        );
+        return true;
+    }
+  }
+
+  private async _reminderList(chatId: number): Promise<boolean> {
+    const mgr = this.reminderManager;
+    if (!mgr) {
+      await this.sendMessage(chatId, 'Reminders are not available on this bridge.');
+      return true;
+    }
+    const items = mgr.list();
+    if (items.length === 0) {
+      await this.sendMessage(chatId, 'No reminders scheduled.');
+      return true;
+    }
+    const lines = items.map(
+      (r) =>
+        `\`${r.id}\` ${r.managed === 'operator' ? '👤' : '🤖'} ${formatFiresAt(r.firesAt, this.timezone)} — ${r.prompt.slice(0, 60)}`
+    );
+    await this.sendMessage(chatId, `*Reminders:*\n${lines.join('\n')}`);
+    return true;
+  }
+
+  /**
+   * Resolve the leading tokens of `/reminder add <when> <prompt>` into a
+   * fire instant. The longest prefix that parses as a complete "when"
+   * wins — durations are anchored, and absolute strings must be fully
+   * consumed by chrono so "in 20 minutes revisar" can't match just
+   * "in 20 minutes".
+   */
+  private _parseWhenPrefix(args: string): { ts: number; rest: string } | { error: string } {
+    const tokens = args.split(/\s+/).filter(Boolean);
+    const now = Date.now();
+    const maxLead = Math.min(tokens.length - 1, MAX_WHEN_TOKENS);
+    for (let i = maxLead; i >= 1; i--) {
+      const candidate = tokens.slice(0, i).join(' ');
+      const rest = tokens.slice(i).join(' ');
+      if (!rest) continue;
+      if (!this.timezone && needsExplicitTimezone(candidate, 'in')) continue;
+      const ts = parseReminderTime(candidate, 'in', this.timezone, now);
+      if (ts === null) continue;
+      if (!isReminderDuration(candidate) && !this._chronoCovers(candidate)) continue;
+      return { ts, rest };
+    }
+    return {
+      error:
+        'Could not parse the time. Put the "when" first, e.g. `/reminder add in 20 minutes check the oven` or `/reminder add tomorrow 18hs call mom`. Absolute times need `timezone` in acp-connector.jsonc or an explicit offset like -03:00.',
+    };
+  }
+
+  /**
+   * True when the candidate is safe to treat as a complete "when".
+   * Durations are anchored by regex and explicit-zone/ISO inputs bypass
+   * chrono entirely — for those, an empty chrono result is fine. Only
+   * chrono-parsed absolutes need full coverage, so a prefix like
+   * "in 20 minutes revisar" can't match just "in 20 minutes".
+   */
+  private _chronoCovers(candidate: string): boolean {
+    const text = candidate.trim();
+    const parsed = chrono.parse(text);
+    if (parsed.length === 0) return true;
+    return (
+      parsed.length === 1 &&
+      parsed[0].index === 0 &&
+      parsed[0].index + parsed[0].text.length === text.length
+    );
+  }
+
+  private async _reminderAdd(restStr: string, chatId: number): Promise<boolean> {
+    const mgr = this.reminderManager;
+    if (!mgr) {
+      await this.sendMessage(chatId, 'Reminders are not available on this bridge.');
+      return true;
+    }
+    const parsed = this._parseWhenPrefix(restStr);
+    if ('error' in parsed) {
+      await this.sendMessage(chatId, parsed.error);
+      return true;
+    }
+    try {
+      const r = mgr.create(parsed.rest, parsed.ts, 'operator');
+      await this.sendMessage(
+        chatId,
+        `✅ Reminder \`${r.id}\` set for ${formatFiresAt(r.firesAt, this.timezone)} — ${r.prompt.slice(0, 80)}`
+      );
+    } catch (err) {
+      await this.sendMessage(chatId, `Failed to schedule reminder: ${(err as Error).message}`);
+    }
+    return true;
+  }
+
+  private async _reminderRemove(restStr: string, chatId: number): Promise<boolean> {
+    const mgr = this.reminderManager;
+    if (!mgr) {
+      await this.sendMessage(chatId, 'Reminders are not available on this bridge.');
+      return true;
+    }
+    const id = restStr.trim();
+    if (!id) {
+      await this.sendMessage(chatId, 'Usage: /reminder remove `<id>` — see /reminder list');
+      return true;
+    }
+    if (!mgr.cancel(id)) {
+      await this.sendMessage(chatId, `Reminder "${id}" not found.`);
+      return true;
+    }
+    await this.sendMessage(chatId, `✅ Reminder \`${id}\` cancelled.`);
     return true;
   }
 

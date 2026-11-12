@@ -128,6 +128,20 @@ export function createRemindersApiHandler({
     return { error: 'exactly one of "every" or "expr" is required' };
   };
 
+  // Operator-owned reminders are read-only for the agent — same rule as
+  // operator cron jobs (agentCron below).
+  const agentReminder = (id: string) => {
+    const r = reminders.list().find((x) => x.id === id);
+    if (!r) return { error: `reminder "${id}" not found`, status: 404 };
+    if ((r.managed ?? 'agent') !== 'agent') {
+      return {
+        error: `reminder "${id}" is operator-managed and read-only for the agent`,
+        status: 400,
+      };
+    }
+    return { reminder: r, status: 200 };
+  };
+
   const agentCron = (id: string) => {
     const job = cronManager.list().find((j) => j.name === id);
     if (!job) return { error: `cron job "${id}" not found`, status: 404 };
@@ -155,20 +169,24 @@ export function createRemindersApiHandler({
         if (!prompt) return _err(res, '"prompt" is required');
         const { ts, error } = parseFire(body);
         if (ts === null) return _err(res, error ?? 'invalid time');
-        const r = reminders.create(prompt, ts);
+        const r = reminders.create(prompt, ts, 'agent');
         return _ok(res, { reminder: withLocal(r) });
       }
       if (path === '/reminder/cancel' && req.method === 'POST') {
         const body = await _readBody(req);
         const id = _str(body.id);
         if (!id) return _err(res, '"id" is required');
-        if (!reminders.cancel(id)) return _err(res, `reminder "${id}" not found`, 404);
+        const { error, status } = agentReminder(id);
+        if (error) return _err(res, error, status);
+        reminders.cancel(id);
         return _ok(res);
       }
       if (path === '/reminder/update' && req.method === 'POST') {
         const body = await _readBody(req);
         const id = _str(body.id);
         if (!id) return _err(res, '"id" is required');
+        const { error, status } = agentReminder(id);
+        if (error) return _err(res, error, status);
         const patch: { firesAt?: number; prompt?: string } = {};
         if (_str(body.in) || _str(body.at)) {
           const { ts, error } = parseFire(body);

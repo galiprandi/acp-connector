@@ -547,19 +547,20 @@ export abstract class BaseBot implements PlatformBot {
     chatId?: number | string,
     blocks?: ContentBlock[],
     onComplete?: (response: string, error?: string) => void,
-    source?: 'cron' | 'agent-cron' | 'http' | 'routine' | 'a2a' | 'reminder',
+    source?: 'cron' | 'agent-cron' | 'agent-reminder' | 'http' | 'routine' | 'a2a' | 'reminder',
     onChunk?: (chunk: string) => void
   ): Promise<void> {
     if (!chatId) return;
     // Commands are processed for user messages and first-class operator
-    // entry points (cron, routine) — and for http only when the operator
-    // opts in via `http.commands`. A2A-injected prompts, default http
-    // prompts, and agent-created cron prompts are remote content: agent
-    // input, not bridge administration.
+    // entry points (cron, routine, operator reminders) — and for http only
+    // when the operator opts in via `http.commands`. A2A-injected prompts,
+    // default http prompts, and agent-created cron/reminder prompts are
+    // remote content: agent input, not bridge administration.
     const isRemoteContent =
       source === 'a2a' ||
       (source === 'http' && !this.httpCommandsAllowed) ||
-      source === 'agent-cron';
+      source === 'agent-cron' ||
+      source === 'agent-reminder';
     if (!isRemoteContent && (await this._handleBuiltinCommand(text, chatId))) return;
     if (!isRemoteContent && text.startsWith('/') && this.onCommand) {
       const handled = await this.onCommand(text, chatId);
@@ -567,7 +568,10 @@ export abstract class BaseBot implements PlatformBot {
     }
     if (this.echoInjectedPrompts && source) {
       const icon =
-        source === 'cron' || source === 'agent-cron' || source === 'reminder'
+        source === 'cron' ||
+        source === 'agent-cron' ||
+        source === 'reminder' ||
+        source === 'agent-reminder'
           ? '⏰'
           : source === 'http'
             ? '🌐'

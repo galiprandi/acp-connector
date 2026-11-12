@@ -131,6 +131,19 @@ describe('reminders api', () => {
     }
   });
 
+  it('keeps operator-managed reminders read-only for the agent', async () => {
+    const op = reminders.create('operator task', Date.now() + 60_000, 'operator');
+    const cancel = await api('/reminder/cancel', { id: op.id });
+    expect(cancel.status).toBe(400);
+    expect(String(cancel.json.error)).toContain('operator-managed');
+    const update = await api('/reminder/update', { id: op.id, prompt: 'hijack' });
+    expect(update.status).toBe(400);
+    expect(reminders.list().find((r) => r.id === op.id)?.prompt).toBe('operator task');
+    const list = await api('/reminder/list');
+    const items = list.json.reminders as Array<{ id: string; managed?: string }>;
+    expect(items.find((r) => r.id === op.id)?.managed).toBe('operator');
+  });
+
   it('returns firesAtLocal with zone info in create/list/update', async () => {
     const { json } = await api('/reminder/create', { prompt: 'x', in: '1h' });
     const r = json.reminder as { firesAtLocal?: string };
