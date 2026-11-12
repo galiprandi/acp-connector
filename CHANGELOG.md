@@ -5,6 +5,11 @@ All notable changes to acp-connector will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.1] - 2026-11-12
+
+### Fixed
+- Operator reminders (`/reminder add`) now deliver their prompt **verbatim** at fire time — same rule as operator cron jobs — so a prompt starting with `/` can run bridge commands. Agent reminders keep the `[Reminder <id>]` prefix + `agent-reminder` remote-content source. (0.15.0 prefixed every reminder, which silently stripped operator command authority.)
+
 ## [0.15.0] - 2026-11-12
 
 **Breaking change** — naive absolute reminder times now require `timezone`. See migration below.
