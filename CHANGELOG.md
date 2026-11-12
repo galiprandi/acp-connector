@@ -5,6 +5,27 @@ All notable changes to acp-connector will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.0] - 2026-11-11
+
+**Breaking change** — `a2a.secure` now defaults to `true`. See migration below.
+
+| Area | Migration |
+|---|---|
+| A2A | Peers must complete **double opt-in pairing on both bridges** (`/a2a approve` each side) so both hold the same pairing secret; unsigned `message/send`/`message/stream` requests are now rejected. Mixed-version meshes can set `"a2a.secure": false` temporarily — unsigned requests are accepted but audited as `legacy-peer`. Local bridges without configured A2A peers are unaffected. |
+
+### Security
+- `a2a.secure` defaults to `true`: HMAC peer signatures are mandatory on inbound A2A requests
+- `assistant-setup` wizard: template tarball pinned to an exact commit with SHA-256 verification (mismatched downloads refused); bot tokens are read without terminal echo; `loginctl` no longer interpolates a raw `USER` env var; the `~/.local/bin/node` bun shim never overwrites a foreign file
+- `pnpm setup` reads Telegram/Discord bot tokens without terminal echo
+- Media uploads: file extensions are sanitized to a safe charset and files are created with `O_EXCL` (a pre-planted symlink is never followed)
+
+### Added
+- `logPreviewLength` config (default `150`, min `20`): length of the `👤`/`🤖` conversation previews in stdout logs; truncated previews end with `…`
+
+### Changed
+- Wizard binaries build to `dist-wizard/` instead of `dist/wizard/` — the npm tarball no longer embeds the ~200 MB of bun-compiled binaries (they remain GitHub release assets); `npm pack` drops from ~211 MB to ~148 KB
+- E2E suite performs full double opt-in A2A pairing with real HMAC signatures
+
 ## [0.13.1] - 2026-11-09
 
 Non-breaking security hardening (audit findings #8–#15). No config or behavior changes required.
