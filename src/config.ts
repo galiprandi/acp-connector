@@ -134,8 +134,11 @@ export interface BridgeConfig {
   /** Max chars of chat/agent previews written to the log (default 150). */
   logPreviewLength?: number;
   /**
-   * IANA timezone used to parse `at`-style reminder times (default:
-   * system timezone). E.g. "America/Argentina/Tucuman".
+   * IANA timezone used to parse absolute reminder times without an
+   * explicit zone (e.g. "America/Argentina/Tucuman"). Required for
+   * naive absolute times — unset means they are rejected rather than
+   * guessed against the host's system zone. Written automatically by
+   * `acp-connector setup`.
    */
   timezone?: string;
   cron?: CronJob[];

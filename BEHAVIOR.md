@@ -575,7 +575,9 @@
 - creates ResourceLink for non-image files
 - creates ResourceLink when agent does not support image
 - creates uploads dir if it does not exist
+- falls back to .bin for extensions with no safe characters
 - processMedia downloads, saves, and converts
+- sanitizes hostile extensions out of the saved filename
 - saves file to disk
 - stores uploads with owner-only permissions
 

@@ -4,7 +4,7 @@ import type { CronManager } from './cron.js';
 import { everyToCron } from './cron.js';
 import { log } from './logger.js';
 import type { ReminderManager } from './reminders.js';
-import { parseReminderTime } from './reminders.js';
+import { needsExplicitTimezone, parseReminderTime } from './reminders.js';
 import { persistCronAndRoutines } from './routines.js';
 
 /**
@@ -64,8 +64,12 @@ function _str(v: unknown): string | undefined {
 export interface RemindersApiOptions {
   reminders: ReminderManager;
   cronManager: CronManager;
-  /** IANA timezone for `at` parsing (default: system timezone). */
-  timezone: string;
+  /**
+   * IANA timezone (`config.timezone`) for absolute times without an
+   * explicit zone. Required for naive absolute times — unset means they
+   * are rejected rather than guessed against the host's system zone.
+   */
+  timezone?: string;
 }
 
 /**
@@ -86,6 +90,12 @@ export function createRemindersApiHandler({
     }
     if (!input) return { ts: null, error: 'exactly one of "in" or "at" is required' };
     const mode = _str(body.in) ? 'in' : 'at';
+    if (!timezone && needsExplicitTimezone(input, mode)) {
+      return {
+        ts: null,
+        error: `"${input}" is an absolute time without a zone — set "timezone" in acp-connector.jsonc (e.g. "America/Argentina/Tucuman") or include an explicit offset like -03:00`,
+      };
+    }
     const ts = parseReminderTime(input, mode, timezone, now());
     if (ts === null) {
       return {

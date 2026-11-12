@@ -68,8 +68,10 @@
   // Max chars of 👤/🤖 chat previews written to the log (default: 150, min: 20)
   // "logPreviewLength": 150,
 
-  // Timezone for agent reminder `at` times, e.g. "America/Argentina/Tucuman"
-  // (default: system timezone). Used by the reminder_* MCP tools.
+  // Timezone for absolute reminder times ("mañana 18hs", "tomorrow 10am")
+  // without an explicit zone, e.g. "America/Argentina/Tucuman". Required
+  // for those — durations ("30m") and explicit zones don't need it.
+  // Written automatically by `acp-connector setup`.
   // "timezone": "America/Argentina/Tucuman",
 
   // Scheduled jobs — can also be managed via /cron commands in Telegram.

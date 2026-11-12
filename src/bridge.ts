@@ -16,7 +16,7 @@ import { log, setLogLevel } from './logger.js';
 import { LoopbackBot } from './loopback.js';
 import { MediaHandler } from './media.js';
 import { AuditLog, NetworkStore } from './network.js';
-import { ReminderManager, systemTimezone } from './reminders.js';
+import { ReminderManager } from './reminders.js';
 import { startRemindersApi } from './reminders-api.js';
 import { RoutineManager } from './routines.js';
 
@@ -92,7 +92,7 @@ export async function run(): Promise<void> {
   const remindersApi = await startRemindersApi({
     reminders: reminderManager,
     cronManager,
-    timezone: config.timezone ?? systemTimezone(),
+    timezone: config.timezone,
   });
 
   // A2A network MCP server: gives the agent list_remote_agents /

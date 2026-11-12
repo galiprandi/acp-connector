@@ -175,54 +175,87 @@ export function systemTimezone(): string {
   return Intl.DateTimeFormat().resolvedOptions().timeZone;
 }
 
-/**
- * Parse a human/ISO datetime into a UTC instant (ms since epoch).
- *
- * @param input raw string ("30m", "2 hours", "tomorrow 10am",
- *   "mañana 10:00", "2026-03-01T10:00", ...)
- * @param mode 'in' = relative to now; 'at' = absolute wall time in `timezone`.
- * @param timezone IANA zone for `at` strings without an explicit offset.
- * @param now current instant (ms).
- * @returns UTC ms, or null when unparseable or not in the future.
- */
-export function parseReminderTime(
-  input: string,
-  mode: 'in' | 'at',
-  timezone: string,
-  now: number
-): number | null {
-  const text = input.trim();
-  if (!text) return null;
-
-  if (mode === 'in') {
-    const m = _DURATION_RE.exec(text);
-    if (m) {
-      const ms = Number(m[1]) * _DURATION_UNIT_MS[m[2].toLowerCase()];
-      return now + ms;
-    }
-    // chrono handles "in 2 hours", "in 30 minutes", "tomorrow" etc.
-    const parsed =
-      chrono.parseDate(`in ${text}`, new Date(now)) ?? chrono.parseDate(text, new Date(now));
-    if (!parsed) return null;
-    const ts = parsed.getTime();
-    return ts > now ? ts : null;
-  }
-
-  // mode === 'at'
-  if (
+function _hasExplicitZone(text: string): boolean {
+  return (
     _EXPLICIT_ZONE_RE.test(text) ||
     (/^\d{4}-\d{2}-\d{2}T/.test(text) && /[zZ]|[+-]\d{2}/.test(text.slice(10)))
-  ) {
-    const ts = Date.parse(text);
-    if (Number.isNaN(ts)) return null;
-    return ts;
+  );
+}
+
+/**
+ * True when the input is an absolute wall time with no explicit zone —
+ * i.e. it needs `config.timezone` to resolve correctly. Pure durations
+ * ("30m", "in 45 minutes") and explicit zones never need it.
+ */
+export function needsExplicitTimezone(input: string, mode: 'in' | 'at'): boolean {
+  const text = input.trim();
+  if (!text || _hasExplicitZone(text)) return false;
+  if (mode === 'in') {
+    const bare = text.replace(/^in\s+/i, '');
+    if (_DURATION_RE.test(text) || _DURATION_RE.test(bare)) return false;
   }
+  return true;
+}
+
+/**
+ * Resolve an absolute datetime string to a UTC instant (ms).
+ *
+ * Explicit zones (`Z`, `±HH:MM`) win; otherwise the string is treated as
+ * wall time in `timezone` — never the host's system zone, which may be
+ * UTC on servers while the operator lives elsewhere. Returns null for
+ * naive wall times when no timezone is configured.
+ */
+function _parseAbsolute(text: string, timezone: string | undefined, now: number): number | null {
+  if (_hasExplicitZone(text)) {
+    const ts = Date.parse(text);
+    return Number.isNaN(ts) ? null : ts;
+  }
+  if (!timezone) return null;
   // Naive wall time: let chrono resolve it against "now" as seen in the
   // operator's timezone, then convert that wall time to UTC in `timezone`.
   const ref = _wallClockInZone(new Date(now), timezone);
   const parsed = chrono.parseDate(text, ref);
   if (!parsed) return null;
   return zoneWallToUtc(parsed, timezone);
+}
+
+/**
+ * Parse a human/ISO datetime into a UTC instant (ms since epoch).
+ *
+ * @param input raw string ("30m", "2 hours", "tomorrow 10am",
+ *   "mañana 10:00", "2026-03-01T10:00", ...)
+ * @param mode 'in' = relative to now; 'at' = absolute wall time in `timezone`.
+ * @param timezone IANA zone for absolute times without an explicit offset.
+ *   Required for naive absolute times — there is no silent system-zone
+ *   fallback, so a UTC host can never shift the operator's wall time.
+ * @param now current instant (ms).
+ * @returns UTC ms, or null when unparseable, past, or missing timezone.
+ */
+export function parseReminderTime(
+  input: string,
+  mode: 'in' | 'at',
+  timezone: string | undefined,
+  now: number
+): number | null {
+  const text = input.trim();
+  if (!text) return null;
+
+  if (mode === 'in') {
+    const bare = text.replace(/^in\s+/i, '');
+    const m = _DURATION_RE.exec(text) ?? _DURATION_RE.exec(bare);
+    if (m) {
+      const ms = Number(m[1]) * _DURATION_UNIT_MS[m[2].toLowerCase()];
+      return now + ms;
+    }
+    // Non-duration "in" strings ("mañana 18hs", "tomorrow 10am") are
+    // absolute wall times — resolve them in the operator timezone like
+    // `at`, not the host's system zone.
+    const ts = _parseAbsolute(text, timezone, now);
+    return ts !== null && ts > now ? ts : null;
+  }
+
+  // mode === 'at'
+  return _parseAbsolute(text, timezone, now);
 }
 
 // ---------------------------------------------------------------------------

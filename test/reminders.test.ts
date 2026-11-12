@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   MAX_REMINDERS,
+  needsExplicitTimezone,
   parseReminderTime,
   ReminderManager,
   type ReminderManagerOptions,
@@ -197,6 +198,53 @@ describe('parseReminderTime', () => {
     expect(parseReminderTime('2 hours', 'in', 'UTC', now)).toBe(now + 2 * 3600_000);
     expect(parseReminderTime('in 45 minutes', 'in', 'UTC', now)).toBe(now + 45 * 60_000);
   });
+
+  it('resolves non-duration "in" strings in the operator timezone', () => {
+    // "tomorrow 6pm" is an absolute wall time: 2026-03-02 18:00 in
+    // America/Argentina/Tucuman (UTC-3) = 21:00 UTC — NOT 18:00 UTC.
+    const ts = parseReminderTime('tomorrow 6pm', 'in', 'America/Argentina/Tucuman', now);
+    expect(ts).toBe(Date.parse('2026-03-02T21:00:00Z'));
+    // "in 45 minutes" stays a pure offset regardless of timezone.
+    expect(parseReminderTime('in 45 minutes', 'in', 'America/Argentina/Tucuman', now)).toBe(
+      now + 45 * 60_000
+    );
+  });
+
+  it('honors explicit zones in "in" strings', () => {
+    const ts = parseReminderTime('2026-03-02T18:00:00Z', 'in', 'UTC', now);
+    expect(ts).toBe(Date.parse('2026-03-02T18:00:00Z'));
+  });
+
+  it('rejects naive absolute times when no timezone is configured', () => {
+    expect(parseReminderTime('tomorrow 6pm', 'in', undefined, now)).toBeNull();
+    expect(parseReminderTime('2026-03-02 15:00', 'at', undefined, now)).toBeNull();
+    // durations and explicit zones still work without a timezone
+    expect(parseReminderTime('30m', 'in', undefined, now)).toBe(now + 30 * 60_000);
+    expect(parseReminderTime('in 45 minutes', 'in', undefined, now)).toBe(now + 45 * 60_000);
+    expect(parseReminderTime('2026-03-02T18:00:00Z', 'at', undefined, now)).toBe(
+      Date.parse('2026-03-02T18:00:00Z')
+    );
+  });
+});
+
+describe('needsExplicitTimezone', () => {
+  it('flags naive absolute times in both modes', () => {
+    expect(needsExplicitTimezone('tomorrow 10am', 'at')).toBe(true);
+    expect(needsExplicitTimezone('mañana 18hs', 'in')).toBe(true);
+    expect(needsExplicitTimezone('2026-03-02 15:00', 'at')).toBe(true);
+  });
+
+  it('does not flag durations or explicit zones', () => {
+    expect(needsExplicitTimezone('30m', 'in')).toBe(false);
+    expect(needsExplicitTimezone('2 hours', 'in')).toBe(false);
+    expect(needsExplicitTimezone('in 45 minutes', 'in')).toBe(false);
+    expect(needsExplicitTimezone('2026-03-02T18:00:00Z', 'at')).toBe(false);
+    expect(needsExplicitTimezone('2026-03-02T15:00:00-03:00', 'in')).toBe(false);
+  });
+});
+
+describe('parseReminderTime absolute', () => {
+  const now = Date.parse('2026-03-01T12:00:00Z');
 
   it('rejects unparseable or non-future "in" values', () => {
     expect(parseReminderTime('banana', 'in', 'UTC', now)).toBeNull();

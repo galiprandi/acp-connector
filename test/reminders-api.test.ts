@@ -104,6 +104,33 @@ describe('reminders api', () => {
     expect(missing.json.ok).toBe(false);
   });
 
+  it('rejects naive absolute times when timezone is not configured', async () => {
+    const { server, port } = await startRemindersApi({ reminders, cronManager });
+    const url = `http://127.0.0.1:${port}`;
+    const post = (body: Record<string, unknown>) =>
+      fetch(`${url}/reminder/create`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      }).then(async (r) => ({
+        status: r.status,
+        json: (await r.json()) as Record<string, unknown>,
+      }));
+    try {
+      const naive = await post({ prompt: 'x', at: 'tomorrow 10am' });
+      expect(naive.json.ok).toBe(false);
+      expect(String(naive.json.error)).toContain('timezone');
+      const naiveIn = await post({ prompt: 'x', in: 'mañana 18hs' });
+      expect(naiveIn.json.ok).toBe(false);
+      // durations and explicit zones never need a configured timezone
+      expect((await post({ prompt: 'x', in: '30m' })).json.ok).toBe(true);
+      expect((await post({ prompt: 'x', in: 'in 45 minutes' })).json.ok).toBe(true);
+      expect((await post({ prompt: 'x', at: '2030-01-01T10:00:00Z' })).json.ok).toBe(true);
+    } finally {
+      server.close();
+    }
+  });
+
   it('lists, updates and cancels reminders', async () => {
     const created = await api('/reminder/create', { prompt: 'a', in: '1h' });
     const id = (created.json.reminder as { id: string }).id;

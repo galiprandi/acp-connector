@@ -208,7 +208,7 @@ See [`acp-connector.example.jsonc`](acp-connector.example.jsonc) for the full re
 | `echoInjectedPrompts` | `boolean` | no | `true` | Echo prompts injected via cron, HTTP, or routines into the chat with a source label (`⏰ [cron]`/`[reminder]`, `🌐 [http]`, `🔁 [routine]`) so you can see what triggered the agent's response |
 | `logLevel` | `string` | no | `"info"` | Bridge log verbosity: `"error"` (errors only) \| `"warn"` \| `"info"` \| `"debug"`. Does not affect the agent subprocess's own stderr output |
 | `logPreviewLength` | `number` | no | `150` | Max characters of `👤`/`🤖` chat previews written to the log (min `20`; longer text is cut with `…`) |
-| `timezone` | `string` | no | system TZ | IANA timezone used to parse `at`-style reminder times (e.g. `"America/Argentina/Tucuman"`). `in`-style delays are timezone-agnostic |
+| `timezone` | `string` | no | — | IANA timezone for absolute reminder times without an explicit zone (`"mañana 18hs"`, `"tomorrow 10am"`, `at` values) — e.g. `"America/Argentina/Tucuman"`. **Required for those**: unset means they're rejected rather than guessed against the host's zone. Pure durations (`"30m"`, `"in 45 minutes"`) and explicit zones (`Z`, `±HH:MM`) don't need it. Written automatically by `acp-connector setup` |
 | `cron` | `CronJob[]` | no | `[]` | Scheduled jobs (see below) |
 | `routines` | `Routine[]` | no | `[]` | Named reusable prompts |
 | `http` | `HttpConfig` | no | off | HTTP server config (see below) |
@@ -281,7 +281,7 @@ The bridge always injects an `agent-reminders` MCP server into `session/new`, gi
 
 | Tool | Purpose |
 |---|---|
-| `reminder_create({ prompt, in?, at? })` | Schedule a one-shot reminder. Exactly one of `in`/`at`. Accepts human strings (`"15m"`, `"2 hours"`, `"tomorrow 10am"`) and ISO datetimes. `at` times without an explicit zone are parsed in `timezone` (default: system TZ) and stored in UTC |
+| `reminder_create({ prompt, in?, at? })` | Schedule a one-shot reminder. Exactly one of `in`/`at`. Accepts human strings (`"15m"`, `"2 hours"`, `"tomorrow 10am"`) and ISO datetimes. Pure durations are relative to now; absolute times without an explicit zone are parsed in `timezone` (required — unset rejects them) and stored in UTC |
 | `reminder_list()` | List pending reminders with id + firesAt |
 | `reminder_cancel({ id })` | Cancel a pending reminder |
 | `reminder_update({ id, in?, at?, prompt? })` | Snooze/reschedule or reword a reminder |

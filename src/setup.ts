@@ -1,5 +1,6 @@
 import { createInterface, type Interface } from 'node:readline';
 import { type BridgeConfig, type PlatformsConfig, saveConfig } from './config.js';
+import { systemTimezone } from './reminders.js';
 
 function ask(rl: Interface, prompt: string): Promise<string> {
   return new Promise((resolve) => rl.question(prompt, (answer) => resolve(answer.trim())));
@@ -142,6 +143,9 @@ export async function setup(): Promise<void> {
     agentCwd: process.cwd(),
     platforms,
     sessionConfigPath: sessionConfigPath || undefined,
+    // Detected at install time — on the user's own machine this IS the
+    // operator timezone, so absolute reminder times resolve correctly.
+    timezone: systemTimezone(),
     showThoughts,
     streaming: true,
     logLevel: 'info',
