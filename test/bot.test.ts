@@ -845,6 +845,11 @@ describe('BridgeBot', () => {
       expect.stringContaining('/rename <new title> — Rename this session'),
       { parse_mode: 'Markdown' }
     );
+    expect(mockBot.sendMessage).toHaveBeenCalledWith(
+      123,
+      expect.stringContaining('/reminder add `<when> <prompt>`'),
+      { parse_mode: 'Markdown' }
+    );
   });
 
   it('/help omits agent section when agent reports no commands', async () => {

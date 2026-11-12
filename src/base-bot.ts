@@ -504,6 +504,46 @@ export abstract class BaseBot implements PlatformBot {
   }
 
   /**
+   * Static bridge-command lines shared by the /help output of every
+   * platform — session commands, then cron, routine and reminder groups.
+   * Agent-advertised commands are appended separately by each platform.
+   */
+  protected _bridgeCommandHelpLines(): string[] {
+    return [
+      '  /stop — cancel the current task',
+      '  /new — start a fresh session (clears context)',
+      '  /sessions — list available sessions',
+      '  /session `<id>` — switch to an existing session',
+      '  /delete `<id>` — delete a session',
+      '  /mode — list available session modes',
+      '  /mode `<id>` — switch session mode (e.g. /mode bypass)',
+      '  /config — list session config options',
+      '  /config `<id> [value]` — show or set an option',
+      '  /model `[value]` — show or set the model',
+      '  /queue — list pending prompts',
+      '  /queue cancel `<n>` — remove a pending prompt',
+      '  /queue clear — remove all pending prompts',
+      '  /status — agent state, session, queue and uptime',
+      '',
+      '  /cron list — list scheduled jobs',
+      '  /cron add `<schedule> <prompt>` — add a job',
+      '  /cron remove `<name>` — remove a job',
+      '  /cron toggle `<name>` — pause/activate',
+      '  /cron run `<name>` — run now',
+      '',
+      '  /routine list — list routines',
+      '  /routine add `<name> <prompt>` — add a routine',
+      '  /routine remove `<name>` — remove a routine',
+      '',
+      '  /reminder list — list scheduled reminders',
+      '  /reminder add `<when> <prompt>` — one-shot reminder (e.g. in 20 minutes check the oven)',
+      '  /reminder remove `<id>` — cancel a reminder',
+      '',
+      '  /run `<name>` — run a routine',
+    ];
+  }
+
+  /**
    * Help lines for slash commands advertised by the agent via
    * `available_commands_update`. Empty when the agent reports none (e.g. pi).
    */
