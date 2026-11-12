@@ -5,6 +5,28 @@ All notable changes to acp-connector will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.0] - 2026-11-12
+
+**Breaking change** — naive absolute reminder times now require `timezone`. See migration below.
+
+| Area | Migration |
+|---|---|
+| Reminders | Absolute times without an explicit zone (`"mañana 18hs"`, `"tomorrow 10am"`, `at` values) are **rejected** unless `timezone` is set in `acp-connector.jsonc` — previously they were silently resolved against the host's system zone (often UTC). `acp-connector setup` writes `timezone` automatically; add it manually to existing configs. Pure durations (`"30m"`, `"in 45 minutes"`) and explicit zones (`Z`, `±HH:MM`) are unaffected. |
+
+### Security
+- Agent-created reminders are now remote content (source `agent-reminder`): a fired reminder prompt can **never run `/` bridge commands** (`/a2a`, `/mode`, `/cron`…) even if it starts with one — closes the same hole agent-cron had
+- `reminder_cancel`/`reminder_update` only touch `managed: "agent"` reminders; operator reminders are read-only for the agent (same rule as cron)
+- `LoopbackBot` applies the same remote-content gate to `agent-cron`/`agent-reminder` sources
+
+### Added
+- `/reminder` operator chat command: `list` (owner badge `👤`/`🤖`, local time + zone), `add <when> <prompt>`, `remove <id>` (`rm`/`cancel` aliases) — symmetric to `/cron`
+- `firesAtLocal` in `reminder_create`/`reminder_update`/`reminder_list` responses: fire time rendered in `timezone` with GMT offset **and** IANA zone name, so the agent can confirm the schedule and a wrong-zone setup is visible at a glance
+- `managed: "agent" | "operator"` attribution on reminders, persisted in `.acp-connector/reminders.json` (pre-field entries migrate to `"agent"` on load)
+
+### Changed
+- `in`-mode non-duration strings (`"mañana 18hs"`, `"tomorrow 10am"`) resolve in `config.timezone` like `at` mode — previously they fell back to the host system zone
+- `echoInjectedPrompts` labels now distinguish `[agent-reminder]` from operator `[reminder]`
+
 ## [0.14.0] - 2026-11-11
 
 **Breaking change** — `a2a.secure` now defaults to `true`. See migration below.
