@@ -5,6 +5,14 @@ All notable changes to acp-connector will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.2] - 2026-11-12
+
+### Added
+- `/help` now lists the `/reminder` commands (`list`/`add`/`remove`) on Telegram and Discord
+
+### Changed
+- The static `/help` command list moved to `BaseBot._bridgeCommandHelpLines()` — shared by both platforms; adding a command no longer requires editing `bot.ts` and `discord.ts` separately
+
 ## [0.15.1] - 2026-11-12
 
 ### Fixed
