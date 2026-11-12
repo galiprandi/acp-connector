@@ -199,7 +199,8 @@ describe('ReminderManager', () => {
     nowMs += 3000;
     manager.flushDue();
     expect(deliver).toHaveBeenCalledWith(`[Reminder ${agent.id}] agent one`, 'agent');
-    expect(deliver).toHaveBeenCalledWith(`[Reminder ${op.id}] operator one`, 'operator');
+    // Operator reminders deliver verbatim — a leading "/" can run commands.
+    expect(deliver).toHaveBeenCalledWith('operator one', 'operator');
   });
 
   it('migrates pre-managed store entries as agent-owned', () => {

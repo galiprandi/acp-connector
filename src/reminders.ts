@@ -431,7 +431,13 @@ export class ReminderManager {
         this.onLog(`⏰ reminder ${r.id} due but agent not connected — kept for retry`);
         continue;
       }
-      this.deliver(`[Reminder ${r.id}] ${r.prompt}`, r.managed ?? 'agent');
+      // Same delivery rule as cron: agent-owned reminders are remote
+      // content and get a [Reminder id] prefix so a leading "/" is never
+      // parsed as a bridge command; operator reminders enqueue verbatim
+      // and keep full operator authority.
+      const managed = r.managed ?? 'agent';
+      const text = managed === 'operator' ? r.prompt : `[Reminder ${r.id}] ${r.prompt}`;
+      this.deliver(text, managed);
       this._remove(r.id);
       this.onLog(`⏰ reminder ${r.id} delivered`);
     }

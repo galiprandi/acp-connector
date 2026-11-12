@@ -331,7 +331,9 @@
 ## Module: command source isolation
 - never runs commands for a2a content, even with httpCommandsAllowed
 - never runs commands for agent-created cron content
+- never runs commands for agent-created reminder content
 - runs commands for http prompts when httpCommandsAllowed is true
+- runs commands for operator reminder content
 - treats http prompts as agent input by default: no commands run, prompt reaches the agent
 
 ## Module: bridge
@@ -646,6 +648,7 @@
 ## Module: reminders api
 - creates a reminder with "at" and rejects both in+at
 - creates a reminder with "in" and returns id + firesAt
+- keeps operator-managed reminders read-only for the agent
 - lists, updates and cancels reminders
 - rejects naive absolute times when timezone is not configured
 - returns firesAtLocal with zone info in create/list/update
@@ -664,9 +667,11 @@
 - delivers past-due reminders on start (boot flush), oldest first
 - discards entries older than 7 days past firesAt on start
 - keeps undeliverable due reminders and retries on the next flush
+- migrates pre-managed store entries as agent-owned
 - persists created reminders to the store file
 - rejects reminders in the past and above the cap
 - restarts with persisted reminders and re-schedules them
+- tags reminders with their owner and delivers it to the queue
 - writes the reminders store with owner-only permissions
 
 ## Module: parseReminderTime
@@ -718,8 +723,17 @@
 - /run executes routine by name
 - /run with no args shows usage
 - /run with unknown name returns error
+- adds a duration reminder and confirms with local time + zone
+- adds an absolute reminder using config.timezone
+- does not let a partial chrono match steal prompt words
+- lists empty and populated reminders with owner badges
+- rejects input with no parseable time
+- rejects naive absolute times without config.timezone
+- removes reminders by id
 - returns false for non-command text
 - returns false for unknown command
+- says unavailable without a reminder manager
+- shows help for bare /reminder
 
 ## Module: parseWhichOutput
 - handles multi-line `where` output (Windows)
