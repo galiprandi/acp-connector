@@ -647,6 +647,7 @@
 - creates a reminder with "at" and rejects both in+at
 - creates a reminder with "in" and returns id + firesAt
 - lists, updates and cancels reminders
+- rejects naive absolute times when timezone is not configured
 
 ## Module: cron api
 - POST /cron/create with a "/" prompt is delivered prefixed, never dispatched as a bridge command
@@ -668,8 +669,17 @@
 - writes the reminders store with owner-only permissions
 
 ## Module: parseReminderTime
+- honors explicit zones in "in" strings
 - parses chrono relative strings
 - parses duration shorthands relative to now
+- rejects naive absolute times when no timezone is configured
+- resolves non-duration "in" strings in the operator timezone
+
+## Module: needsExplicitTimezone
+- does not flag durations or explicit zones
+- flags naive absolute times in both modes
+
+## Module: parseReminderTime absolute
 - parses explicit-zone ISO datetimes as absolute
 - parses naive wall times in the given timezone
 - rejects unparseable or non-future "in" values

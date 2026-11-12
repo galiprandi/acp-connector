@@ -221,6 +221,7 @@ vi.mock('../src/reminders.ts', () => ({
     constructor(public opts: unknown) {}
   },
   systemTimezone: () => 'UTC',
+  formatFiresAt: (iso: string) => iso,
 }));
 vi.mock('../src/reminders-api.ts', () => ({
   startRemindersApi: vi.fn(async () => ({

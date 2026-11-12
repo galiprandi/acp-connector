@@ -52,12 +52,12 @@ async function call(
 }
 
 const TIME_HINT =
-  'Human relative strings ("30m", "2 hours", "tomorrow 10am", "mañana 10:00") or ISO datetimes are accepted. `in` = delay from now; `at` = absolute local time in the operator timezone.';
+  'Human relative strings ("30m", "2 hours", "tomorrow 10am", "mañana 10:00") or ISO datetimes are accepted. `in` = delay from now; `at` = absolute local time in the operator timezone. Naive absolute times require the configured `timezone` — if the tool errors about a missing zone, ask the operator or include an explicit offset (e.g. -03:00).';
 
 server.registerTool(
   'reminder_create',
   {
-    description: `Schedule a one-shot self-reminder. Use it after an action that needs follow-up (e.g. "check if X replied", "verify the deploy finished"). Write the prompt fully self-contained — when it fires you will not see this conversation, so include all needed context (names, ids, what to check, what to do). For recurring work use cron_create instead. ${TIME_HINT}`,
+    description: `Schedule a one-shot self-reminder. Use it after an action that needs follow-up (e.g. "check if X replied", "verify the deploy finished"). Write the prompt fully self-contained — when it fires you will not see this conversation, so include all needed context (names, ids, what to check, what to do). For recurring work use cron_create instead. The response includes firesAtLocal — relay the confirmed time AND its GMT offset to the user so they can spot a wrong timezone. ${TIME_HINT}`,
     inputSchema: {
       prompt: z.string().describe('Self-contained instruction to receive when the reminder fires'),
       in: z.string().optional().describe('Delay until firing, e.g. "15m", "2 hours", "1 day"'),
@@ -74,7 +74,7 @@ server.registerTool(
   'reminder_list',
   {
     description:
-      'List all pending reminders with their id and firesAt (UTC). Use it before creating duplicates or when the operator asks what is scheduled.',
+      'List all pending reminders with their id, firesAt (UTC) and firesAtLocal (operator timezone with GMT offset). Use it before creating duplicates or when the operator asks what is scheduled.',
     inputSchema: {},
   },
   async () => call('/reminder/list')

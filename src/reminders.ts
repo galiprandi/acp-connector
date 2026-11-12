@@ -258,6 +258,28 @@ export function parseReminderTime(
   return _parseAbsolute(text, timezone, now);
 }
 
+/**
+ * Format a reminder's firesAt for chat confirmation, rendered in `timezone`
+ * with its GMT offset so the operator can spot a wrong-zone schedule at a
+ * glance. Without a configured timezone the instant is shown in UTC and the
+ * message says so explicitly.
+ */
+export function formatFiresAt(firesAtIso: string, timezone?: string): string {
+  const when = new Intl.DateTimeFormat('en-US', {
+    timeZone: timezone || 'UTC',
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    timeZoneName: 'shortOffset',
+  }).format(new Date(firesAtIso));
+  // Include the IANA zone name too — the GMT offset alone doesn't tell the
+  // agent WHICH zone was used, and the name is what it can sanity-check
+  // against what it knows about the operator's location.
+  return timezone ? `${when} (${timezone})` : `${when} — no config.timezone set (shown in UTC)`;
+}
+
 // ---------------------------------------------------------------------------
 // Manager
 // ---------------------------------------------------------------------------

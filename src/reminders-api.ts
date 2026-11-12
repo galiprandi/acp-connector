@@ -3,8 +3,8 @@ import type { AddressInfo } from 'node:net';
 import type { CronManager } from './cron.js';
 import { everyToCron } from './cron.js';
 import { log } from './logger.js';
-import type { ReminderManager } from './reminders.js';
-import { needsExplicitTimezone, parseReminderTime } from './reminders.js';
+import type { Reminder, ReminderManager } from './reminders.js';
+import { formatFiresAt, needsExplicitTimezone, parseReminderTime } from './reminders.js';
 import { persistCronAndRoutines } from './routines.js';
 
 /**
@@ -83,6 +83,13 @@ export function createRemindersApiHandler({
 }: RemindersApiOptions) {
   const now = () => Date.now();
 
+  // Attach a human-readable local rendering (with GMT offset) so the agent
+  // can confirm "alarm set for <time> (<zone>)" to the operator.
+  const withLocal = (r: Reminder): Reminder & { firesAtLocal: string } => ({
+    ...r,
+    firesAtLocal: formatFiresAt(r.firesAt, timezone),
+  });
+
   const parseFire = (body: Json): { ts: number | null; error?: string } => {
     const input = _str(body.in) ?? _str(body.at);
     if (_str(body.in) && _str(body.at)) {
@@ -139,7 +146,7 @@ export function createRemindersApiHandler({
     try {
       // ---------------------------------------------------------- reminders
       if (path === '/reminder/list' && req.method === 'GET') {
-        _ok(res, { reminders: reminders.list() });
+        _ok(res, { reminders: reminders.list().map(withLocal) });
         return;
       }
       if (path === '/reminder/create' && req.method === 'POST') {
@@ -149,7 +156,7 @@ export function createRemindersApiHandler({
         const { ts, error } = parseFire(body);
         if (ts === null) return _err(res, error ?? 'invalid time');
         const r = reminders.create(prompt, ts);
-        return _ok(res, { reminder: r });
+        return _ok(res, { reminder: withLocal(r) });
       }
       if (path === '/reminder/cancel' && req.method === 'POST') {
         const body = await _readBody(req);
@@ -175,7 +182,7 @@ export function createRemindersApiHandler({
         }
         const r = reminders.update(id, patch);
         if (!r) return _err(res, `reminder "${id}" not found`, 404);
-        return _ok(res, { reminder: r });
+        return _ok(res, { reminder: withLocal(r) });
       }
 
       // ---------------------------------------------------------------- cron

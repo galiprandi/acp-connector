@@ -131,6 +131,16 @@ describe('reminders api', () => {
     }
   });
 
+  it('returns firesAtLocal with zone info in create/list/update', async () => {
+    const { json } = await api('/reminder/create', { prompt: 'x', in: '1h' });
+    const r = json.reminder as { firesAtLocal?: string };
+    expect(r.firesAtLocal).toContain('GMT');
+    expect(r.firesAtLocal).toContain('UTC');
+    const list = await api('/reminder/list');
+    const items = list.json.reminders as Array<{ firesAtLocal?: string }>;
+    expect(items[0].firesAtLocal).toContain('GMT');
+  });
+
   it('lists, updates and cancels reminders', async () => {
     const created = await api('/reminder/create', { prompt: 'a', in: '1h' });
     const id = (created.json.reminder as { id: string }).id;
