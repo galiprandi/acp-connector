@@ -5,7 +5,7 @@ All notable changes to acp-connector will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.16.0] - 2026-11-14
 
 ### Added
 - **Voice note transcription** (on by default): Telegram `voice` messages and Discord voice messages (`IsVoiceMessage`) are transcribed to plain text on the bridge machine via the `audio-transcription` package (sherpa-onnx Parakeet TDT v3, fully local — no audio leaves the host). The agent receives the transcript as regular text. First use lazily installs the ~150MB runtime and downloads ~490MB of model weights into a shared per-user cache (`~/.cache/audio-transcription`), serialized across processes with lock files.
