@@ -1,5 +1,4 @@
 import { existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AcpClient } from '../src/acp-client';
 import type { Transcriber } from '../src/transcriber';
