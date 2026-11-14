@@ -203,7 +203,7 @@ describe('BridgeBot voice note handling', () => {
     expect(promptArg[0]).toMatchObject({ type: 'text', text: 'el transcript del audio' });
     // caption rides along as a second text block
     expect(promptArg[1]).toMatchObject({ type: 'text', text: 'dime algo' });
-    // 🎧-equivalent reaction lifecycle (👀 on Telegram)
+    // 🎧-equivalent reaction lifecycle (🤔 on Telegram)
     expect(mockBot.setMessageReaction).toHaveBeenCalled();
     expect(savedFiles()).toHaveLength(0);
   });

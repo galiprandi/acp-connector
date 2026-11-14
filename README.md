@@ -706,7 +706,7 @@ Spanish, ~3x faster than real time on a modern CPU).
   `ffmpeg-static`, ~150MB) and downloads model weights (~490MB) into a shared
   per-user cache (`~/.cache/audio-transcription`). All acp-connector
   instances on the machine share it; concurrent installs/downloads are
-  serialized with lock files. Expect minutes on first use — a 👀/🎧 reaction
+  serialized with lock files. Expect minutes on first use — a 🤔/🎧 reaction
   shows transcription is in progress.
 - The agent receives the transcript as **plain text** — it can't tell (and
   doesn't need to) that the message was a voice note.

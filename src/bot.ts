@@ -197,10 +197,10 @@ export class BridgeBot extends BaseBot {
     channelId: string | number,
     messageId: string | number
   ): Promise<void> {
-    // Telegram only allows a fixed emoji set for reactions — 👀 signals
-    // "processing" (🎧/🎙 are not in the allowed list).
+    // Telegram only allows a fixed emoji set for reactions — 🤔 signals
+    // "processing" (🎧/🎙/👂 are not in the allowed list).
     await this.bot.setMessageReaction(channelId as number, messageId as number, {
-      reaction: [{ type: 'emoji', emoji: '👀' }],
+      reaction: [{ type: 'emoji', emoji: '🤔' }],
     });
   }
 
