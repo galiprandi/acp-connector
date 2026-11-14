@@ -20,6 +20,12 @@ when done.
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) | REJECTED (with one-line rationale — finding fixed independently or approach abandoned)
 
+## Feature plans (outside the security set)
+
+| Plan | Title | Priority | Effort | Status |
+|------|-------|----------|--------|--------|
+| 006-voice-transcription | Voice note transcription (Telegram + Discord) | P2 | L | DONE — implemented differently: transcription engine extracted to the standalone `audio-transcription` npm package (sherpa-onnx Parakeet TDT v3, lazy runtime+model install, machine-wide decode mutex); acp-connector consumes it via `transcription.*` config (commit 156f010). Plan's in-repo `src/transcription/` layout superseded by the package boundary. |
+
 ## Dependency notes
 
 - **002** references the signature plumbing from **001** — if 002 executes
