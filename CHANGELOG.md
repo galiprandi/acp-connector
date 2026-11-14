@@ -5,6 +5,12 @@ All notable changes to acp-connector will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.1] - 2026-11-14
+
+### Fixed
+- Telegram transcription indicator now uses 🤔 instead of 👀 — clearer "processing" affordance for voice notes (Discord keeps 🎧)
+- Added `transcription-updates` agent skill documenting how to evaluate `audio-transcription` releases and whether the bridge needs a new release
+
 ## [0.16.0] - 2026-11-14
 
 ### Added
