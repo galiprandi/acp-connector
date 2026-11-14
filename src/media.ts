@@ -1,7 +1,8 @@
-import { chmodSync, mkdirSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { ContentBlock } from '@agentclientprotocol/sdk';
 import { log } from './logger.js';
+import type { Transcriber } from './transcriber.js';
 
 const DEFAULT_UPLOADS_DIR = '/tmp/acp-connector-uploads';
 
@@ -44,6 +45,10 @@ export async function fetchBuffer(url: string, opts: FetchBufferOpts = {}): Prom
 export interface MediaHandlerOpts {
   uploadsDir: string;
   supportsImage: boolean;
+  /** Optional voice-note transcriber; when set, voice notes become text. */
+  transcriber?: Transcriber | null;
+  /** Delete the audio file after transcription (success AND failure). */
+  deleteAfterTranscribe?: boolean;
 }
 
 export interface DownloadedFile {
@@ -60,10 +65,19 @@ export interface DownloadedFile {
 export class MediaHandler {
   private uploadsDir: string;
   private supportsImage: boolean;
+  private transcriber: Transcriber | null;
+  private deleteAfterTranscribe: boolean;
 
-  constructor({ uploadsDir, supportsImage }: MediaHandlerOpts) {
+  constructor({
+    uploadsDir,
+    supportsImage,
+    transcriber = null,
+    deleteAfterTranscribe = true,
+  }: MediaHandlerOpts) {
     this.uploadsDir = uploadsDir || DEFAULT_UPLOADS_DIR;
     this.supportsImage = supportsImage;
+    this.transcriber = transcriber;
+    this.deleteAfterTranscribe = deleteAfterTranscribe;
     try {
       mkdirSync(this.uploadsDir, { recursive: true, mode: 0o700 });
       try {
@@ -139,5 +153,55 @@ export class MediaHandler {
     const data = await downloadFn();
     const file = this.saveFile(data, mimeType, ext);
     return this.toContentBlocks(file, caption);
+  }
+
+  /** Whether voice notes should go through transcription. */
+  get canTranscribe(): boolean {
+    return this.transcriber !== null;
+  }
+
+  /**
+   * Download a voice note, transcribe it, and return a plain text block —
+   * indistinguishable from a typed message for the agent. The audio file is
+   * deleted afterwards (always on failure; on success per
+   * `deleteAfterTranscribe`). Throws on any failure so callers can notify
+   * the user; nothing is enqueued in that case.
+   */
+  async processVoiceNote(
+    downloadFn: () => Promise<Buffer>,
+    mimeType: string,
+    ext: string,
+    caption?: string
+  ): Promise<ContentBlock[]> {
+    if (!this.transcriber) {
+      throw new Error('processVoiceNote called without a transcriber');
+    }
+    const transcriber = this.transcriber;
+    const data = await downloadFn();
+    const file = this.saveFile(data, mimeType, ext);
+    const drop = () => {
+      try {
+        unlinkSync(file.path);
+      } catch {
+        /* already gone */
+      }
+    };
+    let transcript: string;
+    try {
+      transcript = await transcriber.transcribe(file.path);
+    } catch (err) {
+      drop(); // failure path always deletes the audio
+      throw err;
+    }
+    if (!transcript.trim()) {
+      // Empty transcript (silence/noise): failure path — always delete.
+      drop();
+      throw new Error('Transcription returned empty text');
+    }
+    if (this.deleteAfterTranscribe) drop();
+    const blocks: ContentBlock[] = [{ type: 'text', text: transcript } as ContentBlock];
+    if (caption) blocks.push({ type: 'text', text: caption } as ContentBlock);
+    log.info(`🎙️ voice note transcribed (${transcript.length} chars)`);
+    return blocks;
   }
 }

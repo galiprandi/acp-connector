@@ -19,6 +19,7 @@ import { AuditLog, NetworkStore } from './network.js';
 import { ReminderManager } from './reminders.js';
 import { startRemindersApi } from './reminders-api.js';
 import { RoutineManager } from './routines.js';
+import { createTranscriber, deleteAfterTranscribe } from './transcriber.js';
 
 function printBanner(): void {
   const title = 'acp-connector';
@@ -376,6 +377,8 @@ export async function run(): Promise<void> {
   const mediaHandler = new MediaHandler({
     uploadsDir: config.media?.uploadsDir || '/tmp/acp-connector-uploads',
     supportsImage,
+    transcriber: createTranscriber(config.transcription),
+    deleteAfterTranscribe: deleteAfterTranscribe(config.transcription),
   });
   // Inject media handler into bots
   for (const bot of bots) {

@@ -9,6 +9,7 @@ import {
   Events,
   GatewayIntentBits,
   type Message,
+  MessageFlags,
   type TextChannel,
 } from 'discord.js';
 import type { AcpClient } from './acp-client.js';
@@ -174,6 +175,35 @@ export class DiscordBot extends BaseBot {
     await message?.reactions.cache.get('⏳')?.users.remove(this.client.user?.id);
   }
 
+  protected async _addTranscribingReaction(
+    channelId: string | number,
+    messageId: string | number
+  ): Promise<void> {
+    try {
+      const channel = this.client.channels.cache.get(String(channelId)) as TextChannel;
+      const message = await channel?.messages?.fetch(String(messageId)).catch(() => null);
+      await message?.react('🎧').catch(() => {});
+    } catch {
+      /* best-effort UX hint */
+    }
+  }
+
+  protected async _clearTranscribingReaction(
+    channelId: string | number,
+    messageId: string | number
+  ): Promise<void> {
+    try {
+      const channel = this.client.channels.cache.get(String(channelId)) as TextChannel;
+      const message = await channel?.messages?.fetch(String(messageId)).catch(() => null);
+      await message?.reactions?.cache
+        ?.get('🎧')
+        ?.users?.remove(this.client.user?.id)
+        .catch(() => {});
+    } catch {
+      /* best-effort UX hint */
+    }
+  }
+
   private async _onMessage(msg: Message): Promise<void> {
     if (msg.author.bot) return;
 
@@ -235,6 +265,14 @@ export class DiscordBot extends BaseBot {
     if (!this.mediaHandler) return;
     const caption = msg.content || '';
 
+    // Discord voice messages (IsVoiceMessage flag) arrive as a single
+    // audio/ogg attachment — transcribe them into plain text when enabled.
+    const isVoiceMessage = msg.flags.has(MessageFlags.IsVoiceMessage);
+    if (isVoiceMessage && this.mediaHandler.canTranscribe) {
+      await this._handleDiscordVoiceNote(msg, channelId, caption);
+      return;
+    }
+
     try {
       const allBlocks: ContentBlock[] = [];
       for (const [, attachment] of msg.attachments) {
@@ -255,6 +293,44 @@ export class DiscordBot extends BaseBot {
       log.error('Discord media download failed:', errorMessage(err));
       const channel = this.client.channels.cache.get(channelId) as TextChannel;
       await channel?.send(`Error downloading media: ${errorMessage(err)}`);
+    }
+  }
+
+  private async _handleDiscordVoiceNote(
+    msg: Message,
+    channelId: string,
+    caption: string
+  ): Promise<void> {
+    const mediaHandler = this.mediaHandler;
+    if (!mediaHandler) return;
+    const messageId = msg.id;
+    await this._addTranscribingReaction(channelId, messageId);
+    try {
+      const allBlocks: ContentBlock[] = [];
+      for (const [, attachment] of msg.attachments) {
+        const mimeType = attachment.contentType || 'audio/ogg';
+        const ext = attachment.name?.split('.').pop() || 'ogg';
+        const downloadFn = () => fetchBuffer(attachment.url);
+        const blocks = await mediaHandler.processVoiceNote(downloadFn, mimeType, ext);
+        allBlocks.push(...blocks);
+      }
+      if (caption) {
+        allBlocks.push({ type: 'text', text: caption } as ContentBlock);
+      }
+      log.info('👤 🎙️ voice message');
+      const context = await this._replyContext(msg);
+      this._enqueueUserMessage(
+        channelId,
+        msg.id,
+        `${context}${caption || '[voice message]'}`,
+        allBlocks
+      );
+    } catch (err) {
+      log.error('Discord voice transcription failed:', errorMessage(err));
+      const channel = this.client.channels.cache.get(channelId) as TextChannel;
+      await channel?.send('🎙️ Transcription failed — please resend the voice message.');
+    } finally {
+      await this._clearTranscribingReaction(channelId, messageId);
     }
   }
 

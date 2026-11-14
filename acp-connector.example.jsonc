@@ -113,6 +113,20 @@
   //   "uploadsDir": "/tmp/acp-connector-uploads"  // where received files are saved (default shown)
   // },
 
+  // Voice note transcription (optional, ON by default)
+  // Transcribes Telegram voice notes and Discord voice messages to text
+  // before they reach the agent (via the local audio-transcription package —
+  // sherpa-onnx Parakeet, fully on-device). On first voice note it lazily
+  // installs a ~150MB runtime + downloads ~490MB of model weights into a
+  // shared per-user cache (~/.cache/audio-transcription).
+  // "transcription": {
+  //   "enabled": true,              // false = voice notes stay resource_link files
+  //   "deleteAfterTranscribe": true,// delete the audio after transcribing (success AND failure)
+  //   "cacheDir": null,             // override the shared cache dir
+  //   "numThreads": null,           // ONNX decode threads (default: min(8, CPU count))
+  //   "lockTimeoutMs": null         // max wait for the machine-wide decode lock
+  // },
+
   // A2A agent network (optional, default off)
   // Lets this bridge interoperate with other acp-connector agents via the
   // A2A protocol: serves an Agent Card at /.well-known/agent-card.json and

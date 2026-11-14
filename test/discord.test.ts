@@ -50,6 +50,7 @@ vi.mock('discord.js', () => ({
   },
   ButtonStyle: { Success: 3, Danger: 4 },
   ChannelType: { GuildText: 0, DM: 1, GroupDM: 3 },
+  MessageFlags: { IsVoiceMessage: 1 << 30 },
 }));
 
 // Mock ACP client
@@ -609,5 +610,44 @@ describe('DiscordBot', () => {
       (c) => typeof c[0] === 'string' && c[0].includes('⚠️')
     );
     expect(report).toBeDefined();
+  });
+
+  it('transcribes voice messages (IsVoiceMessage) into a text block', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        arrayBuffer: async () => new TextEncoder().encode('fake-ogg').buffer,
+      }))
+    );
+    const { MediaHandler } = await import('../src/media.ts');
+    const transcriber = { transcribe: vi.fn(async () => 'discord voice transcript') };
+    const mediaHandler = new MediaHandler({
+      uploadsDir: '/tmp/test-dc-voice-uploads',
+      supportsImage: true,
+      transcriber,
+      deleteAfterTranscribe: true,
+    });
+    const { bot, acp } = createBot({ mediaHandler });
+    await bot.start();
+    const handler = mockClient.on.mock.calls.find((c) => c[0] === 'messageCreate')[1] as (
+      msg: unknown
+    ) => Promise<void>;
+    const attachments = new Map([
+      ['a1', { contentType: 'audio/ogg', name: 'voice.ogg', url: 'https://cdn.example/v.ogg' }],
+    ]);
+    await handler({
+      ...makeMessage('123', ''),
+      id: 'm-voice',
+      flags: { has: (f: number) => f === 1 << 30 },
+      attachments,
+    });
+    await vi.waitFor(() => expect(acp.prompt).toHaveBeenCalled());
+    const promptArg = acp.prompt.mock.calls[0][0];
+    expect(promptArg[0]).toMatchObject({ type: 'text', text: 'discord voice transcript' });
+    expect(transcriber.transcribe).toHaveBeenCalled();
+    vi.unstubAllGlobals();
   });
 });

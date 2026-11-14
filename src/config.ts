@@ -48,6 +48,19 @@ export interface MediaConfig {
   uploadsDir?: string;
 }
 
+export interface TranscriptionConfig {
+  /** Transcribe voice notes to text before sending to the agent (default true). */
+  enabled?: boolean;
+  /** Delete the audio file after transcription, success or failure (default true). */
+  deleteAfterTranscribe?: boolean;
+  /** Shared cache dir for the speech runtime + model (default: audio-transcription's XDG cache). */
+  cacheDir?: string;
+  /** ONNX threads for decoding (default: min(8, CPU count) inside the lib). */
+  numThreads?: number;
+  /** Max wait for the machine-wide decode lock (default 10min inside the lib). */
+  lockTimeoutMs?: number;
+}
+
 export interface A2aSkill {
   id: string;
   name?: string;
@@ -145,6 +158,7 @@ export interface BridgeConfig {
   routines?: Routine[];
   http?: HttpConfig;
   media?: MediaConfig;
+  transcription?: TranscriptionConfig;
   a2a?: A2aConfig;
 }
 

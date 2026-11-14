@@ -193,6 +193,26 @@ export class BridgeBot extends BaseBot {
     });
   }
 
+  protected async _addTranscribingReaction(
+    channelId: string | number,
+    messageId: string | number
+  ): Promise<void> {
+    // Telegram only allows a fixed emoji set for reactions — 👀 signals
+    // "processing" (🎧/🎙 are not in the allowed list).
+    await this.bot.setMessageReaction(channelId as number, messageId as number, {
+      reaction: [{ type: 'emoji', emoji: '👀' }],
+    });
+  }
+
+  protected async _clearTranscribingReaction(
+    channelId: string | number,
+    messageId: string | number
+  ): Promise<void> {
+    await this.bot.setMessageReaction(channelId as number, messageId as number, {
+      reaction: [],
+    });
+  }
+
   private async _onMessage(msg: TelegramBot.Message): Promise<void> {
     const chatId = msg.chat.id;
     const text = msg.text || '';
@@ -292,6 +312,13 @@ export class BridgeBot extends BaseBot {
 
     const caption = msg.caption || '';
 
+    // Voice notes go through transcription when enabled: the agent receives
+    // plain text and the audio file is deleted afterwards.
+    if (msg.voice && this.mediaHandler.canTranscribe) {
+      await this._handleVoiceNote(msg, chatId, fileId, mimeType, ext, caption);
+      return;
+    }
+
     try {
       const link = await this.bot.getFileLink(fileId);
       const downloadFn = () => fetchBuffer(link);
@@ -312,6 +339,43 @@ export class BridgeBot extends BaseBot {
     } catch (err) {
       log.error('Media download failed:', errorMessage(err));
       await this.bot.sendMessage(chatId, `Error downloading media: ${errorMessage(err)}`);
+    }
+  }
+
+  private async _handleVoiceNote(
+    msg: TelegramBot.Message,
+    chatId: number,
+    fileId: string,
+    mimeType: string,
+    ext: string,
+    caption: string
+  ): Promise<void> {
+    const messageId = msg.message_id;
+    const mediaHandler = this.mediaHandler;
+    if (!mediaHandler) return;
+    await this._addTranscribingReaction(chatId, messageId).catch(() => {});
+    try {
+      const link = await this.bot.getFileLink(fileId);
+      const downloadFn = () => fetchBuffer(link);
+      const blocks = await mediaHandler.processVoiceNote(
+        downloadFn,
+        mimeType,
+        ext,
+        caption || undefined
+      );
+      const preview = caption ? `🎙️ ${caption.slice(0, 60)}` : '🎙️ voice note';
+      log.info(`👤 ${preview}`);
+      this._enqueueUserMessage(
+        chatId,
+        messageId,
+        `${this._replyContext(msg)}${caption || '[voice message]'}`,
+        blocks
+      );
+    } catch (err) {
+      log.error('Voice transcription failed:', errorMessage(err));
+      await this.bot.sendMessage(chatId, '🎙️ Transcription failed — please resend the voice note.');
+    } finally {
+      await this._clearTranscribingReaction(chatId, messageId).catch(() => {});
     }
   }
 

@@ -681,6 +681,7 @@ Send photos, documents, stickers, voice messages, videos, or files to the bot an
 
 - **Photos** + agent supports `image` capability → sent as base64 `ImageContent` (agent "sees" the image)
 - **Any file** (or agent without `image` capability) → sent as `ResourceLink` with `file://` URI (agent reads the file from disk)
+- **Voice notes** (Telegram `voice`, Discord voice messages) → transcribed to plain text locally via [audio-transcription](https://www.npmjs.com/package/audio-transcription) (sherpa-onnx Parakeet TDT, on-device) and sent to the agent as if typed — see [Voice transcription](#-voice-transcription) below
 - Files are saved to `media.uploadsDir` (default: `/tmp/acp-connector-uploads`)
 - Captions are included as text alongside the media
 - Downloads retry transient failures (3 attempts, linear backoff); HTTP 4xx fails fast. On final failure the chat shows the underlying cause (e.g. `fetch failed: connect ECONNRESET [ECONNRESET]`)
@@ -689,6 +690,44 @@ Send photos, documents, stickers, voice messages, videos, or files to the bot an
 {
   "media": {
     "uploadsDir": "/tmp/acp-connector-uploads"
+  }
+}
+```
+
+### 🎙️ Voice transcription
+
+Voice notes are transcribed **on the bridge machine** — no audio ever leaves
+your server, no API keys needed. Powered by the
+[`audio-transcription`](https://github.com/galiprandi/audio-transcription)
+package (sherpa-onnx NeMo Parakeet TDT v3, 25 European languages incl.
+Spanish, ~3x faster than real time on a modern CPU).
+
+- **First voice note** lazily installs the runtime (`sherpa-onnx-node` +
+  `ffmpeg-static`, ~150MB) and downloads model weights (~490MB) into a shared
+  per-user cache (`~/.cache/audio-transcription`). All acp-connector
+  instances on the machine share it; concurrent installs/downloads are
+  serialized with lock files. Expect minutes on first use — a 👀/🎧 reaction
+  shows transcription is in progress.
+- The agent receives the transcript as **plain text** — it can't tell (and
+  doesn't need to) that the message was a voice note.
+- After transcription the audio file is **deleted** (success and failure).
+  Set `deleteAfterTranscribe: false` to keep successful transcriptions.
+- On failure the user gets `🎙️ Transcription failed — please resend the voice
+  note.` and nothing reaches the agent.
+- Only **voice notes** are transcribed — audio file attachments (mp3, m4a)
+  still go through as `resource_link` files.
+- Decoding is serialized machine-wide (one transcription at a time across
+  all bridges on the host) so CPUs are never saturated; `numThreads` defaults
+  to `min(8, CPU count)`.
+
+```jsonc
+{
+  "transcription": {
+    "enabled": true,               // default: true — set false for legacy resource_link behavior
+    "deleteAfterTranscribe": true, // default: true
+    "cacheDir": null,              // override ~/.cache/audio-transcription
+    "numThreads": null,            // e.g. 2 on weak/shared machines
+    "lockTimeoutMs": null          // default 10min
   }
 }
 ```

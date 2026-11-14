@@ -80,7 +80,10 @@ src/
 │                    _sendPlatformMessage primitive implemented per platform
 ├── bot.ts         — Telegram bot, PlatformBot interface, _sendPlatformMessage (Markdown + plain fallback)
 ├── discord.ts     — Discord bot, implements PlatformBot, _sendPlatformMessage
-├── media.ts       — MediaHandler: download (fetchBuffer w/ retry), save, convert to ACP ContentBlocks
+├── media.ts       — MediaHandler: download (fetchBuffer w/ retry), save, convert to ACP ContentBlocks,
+│                    voice-note transcription via processVoiceNote
+├── transcriber.ts — voice transcription seam: wraps the audio-transcription package (sherpa-onnx
+│                    Parakeet, lazy runtime+model install into shared user cache)
 ├── cron.ts        — scheduled prompt injection
 ├── routines.ts    — named prompts + /cron, /routine, /run commands
 ├── reminders.ts   — one-shot agent reminders: JSON store, setTimeout scheduler, chrono parsing
