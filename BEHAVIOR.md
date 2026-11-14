@@ -448,6 +448,7 @@
 - starts and logs in
 - stop() destroys the client
 - streams agent response chunks
+- transcribes voice messages (IsVoiceMessage) into a text block
 
 ## Module: shared-file strategy
 - discovers other live instances
@@ -769,6 +770,22 @@
 - linux: writes unit and runs systemctl --user commands
 - throws on unsupported platforms
 - win32: runs the schtasks command
+
+## Module: MediaHandler.processVoiceNote
+- canTranscribe is false without a transcriber
+- deletes the file and rethrows when transcription fails
+- keeps the file when deleteAfterTranscribe is false
+- returns a text block with the transcript and deletes the file
+- treats an empty transcript as failure and deletes the file
+
+## Module: transcriber config helpers
+- createTranscriber returns null when disabled
+- defaults enabled and deleteAfterTranscribe to true
+
+## Module: BridgeBot voice note handling
+- keeps legacy resource_link path when transcription is disabled
+- notifies the user and enqueues nothing when transcription fails
+- transcribes a voice message into a text block for the agent
 
 ## Module: e2e: two real bridges with fake agents
 - agent-side delegation: fake agent calls /a2a/delegate to a peer
