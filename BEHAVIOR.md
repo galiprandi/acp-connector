@@ -188,6 +188,16 @@
 - produces a spec-shaped card
 - throws when card config is missing
 
+## Module: AliasDirectory
+- keeps same-named chats on different platforms distinct
+- lists aliases without exposing raw chat ids
+- persists and reloads aliases across restarts
+- registers a DM alias from the sender name
+- registers a group alias from the chat title, not the sender
+- reports ambiguity when two chats share an alias
+- resolves case-insensitively and accepts the bracketed prompt form
+- updates the alias when a chat is renamed (same chatId, new name)
+
 ## Module: BridgeBot edge cases
 - auto-approves permission with no chatId
 - auto-approves when agentCmd contains "bypass"
@@ -272,9 +282,12 @@
 - ignores thoughts when showThoughts=false
 - keeps typing while busy (interval resend)
 - notifyAgentExit sends a reconnect button to allowed chats
+- prefixes DM prompts with [Telegram] SenderName:
+- prefixes group prompts with [Telegram/Chat] Sender: keeping sender vs destination
 - queues and forwards text to ACP
 - reconnect button triggers acp.restart and confirms
 - reconnect failure edits the message with the error
+- registers chat aliases from inbound messages
 - rejects non-text messages
 - rejects permission callbacks from a stale message
 - rejects unauthorized chat ID
@@ -282,6 +295,7 @@
 - renders tool_call update when showTools is true
 - renders tool_call_update with updated status
 - responds with chat ID in setup mode (empty allowlist)
+- sendFile delivers documents and photos to the given chat
 - sends error message on prompt failure
 - sends error message when acp.prompt() rejects
 - sends permission buttons when agentCmd has no dangerous
@@ -335,6 +349,29 @@
 - runs commands for http prompts when httpCommandsAllowed is true
 - runs commands for operator reminder content
 - treats http prompts as agent input by default: no commands run, prompt reaches the agent
+
+## Module: reminders api
+- creates a reminder with "at" and rejects both in+at
+- creates a reminder with "in" and returns id + firesAt
+- keeps operator-managed reminders read-only for the agent
+- lists, updates and cancels reminders
+- rejects naive absolute times when timezone is not configured
+- returns firesAtLocal with zone info in create/list/update
+
+## Module: cron api
+- POST /cron/create with a "/" prompt is delivered prefixed, never dispatched as a bridge command
+- caps agent-created jobs at AGENT_CRON_CAP
+- creates agent-managed jobs from "every" and "expr"
+- lists all jobs flagging operator-owned ones read-only
+- rejects unsupported intervals and missing schedule
+- updates and deletes only agent-managed jobs
+
+## Module: messaging api
+- GET /aliases lists aliases without raw chat ids
+- POST /file/send defaults to the current chat and delivers the file
+- POST /file/send rejects files over the size cap
+- POST /file/send rejects unknown aliases and paths outside allowed dirs
+- POST /file/send resolves an explicit alias to its chat
 
 ## Module: bridge
 - drops a /prompt chatId missing from the platform allowlist
@@ -434,6 +471,8 @@
 - ignores bot messages
 - ignores empty text
 - ignores thoughts when showThoughts=false
+- prefixes DM messages with [Discord] Sender:
+- prefixes guild messages with [Discord/Channel] Sender:
 - rejects permission interactions from a stale message
 - rejects unauthorized channel ID
 - reports message handler errors without rejecting
@@ -558,6 +597,15 @@
 - stop() closes the server
 - unknown route returns 404
 
+## Module: identityPrefix
+- falls back to platform-only label for groups without a title
+- formats a DM as [Platform] Name:
+- formats a group as [Platform/Chat] Sender:
+
+## Module: aliasDisplayName
+- uses the chat title for groups
+- uses the sender name for DMs
+
 ## Module: logger
 - debug level prints everything
 - defaults to info level (log + warn + error, no debug)
@@ -645,22 +693,6 @@
 
 ## Module: audit log
 - appends JSONL entries to audit.log next to network.json
-
-## Module: reminders api
-- creates a reminder with "at" and rejects both in+at
-- creates a reminder with "in" and returns id + firesAt
-- keeps operator-managed reminders read-only for the agent
-- lists, updates and cancels reminders
-- rejects naive absolute times when timezone is not configured
-- returns firesAtLocal with zone info in create/list/update
-
-## Module: cron api
-- POST /cron/create with a "/" prompt is delivered prefixed, never dispatched as a bridge command
-- caps agent-created jobs at AGENT_CRON_CAP
-- creates agent-managed jobs from "every" and "expr"
-- lists all jobs flagging operator-owned ones read-only
-- rejects unsupported intervals and missing schedule
-- updates and deletes only agent-managed jobs
 
 ## Module: ReminderManager
 - cancels reminders by id and reschedules via update
@@ -786,6 +818,11 @@
 - keeps legacy resource_link path when transcription is disabled
 - notifies the user and enqueues nothing when transcription fails
 - transcribes a voice message into a text block for the agent
+
+## Module: e2e: acp-tools MCP via fake agent
+- injects acp-tools and serves list_aliases through tools/call
+- send_file enforces the path allowlist then fails cleanly with no chat
+- serves consolidated reminder actions (create + list)
 
 ## Module: e2e: two real bridges with fake agents
 - agent-side delegation: fake agent calls /a2a/delegate to a peer
