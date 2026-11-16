@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-11-16
+
 ### Added
 - **`acp-tools` unified MCP server** (replaces `agent-reminders`): one MCP injected into `session/new` with four tools — `send_file` (deliver files to chats via Telegram/Discord transports), `list_aliases`, and consolidated `reminder`/`cron` action tools
 - **Sender identity in prompts**: every user message reaches the agent prefixed `[Platform/Chat] SenderName:` (e.g. `[Telegram] Germán: …`, `[Discord/Familia] Santi: …`) so it knows who is talking and which alias to reply to
