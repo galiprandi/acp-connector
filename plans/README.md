@@ -25,6 +25,7 @@ Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) | REJE
 | Plan | Title | Priority | Effort | Status |
 |------|-------|----------|--------|--------|
 | 006-voice-transcription | Voice note transcription (Telegram + Discord) | P2 | L | DONE — implemented differently: transcription engine extracted to the standalone `audio-transcription` npm package (sherpa-onnx Parakeet TDT v3, lazy runtime+model install, machine-wide decode mutex); acp-connector consumes it via `transcription.*` config (commit 156f010). Plan's in-repo `src/transcription/` layout superseded by the package boundary. |
+| 007-acp-tools-mcp | Unified `acp-tools` MCP: send_file + list_aliases + consolidated reminder/cron, sender identity prefixes, chat alias directory | P2 | L | DONE — `agent-reminders` replaced by `acp-tools` (4 tools); `reminders-api` → `bridge-api`; fake agent gained a minimal MCP stdio client with `call <server>.<tool>` E2E coverage |
 
 ## Dependency notes
 

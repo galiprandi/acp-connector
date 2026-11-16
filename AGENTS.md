@@ -87,8 +87,10 @@ src/
 ├── cron.ts        — scheduled prompt injection
 ├── routines.ts    — named prompts + /cron, /routine, /run commands
 ├── reminders.ts   — one-shot agent reminders: JSON store, setTimeout scheduler, chrono parsing
-├── reminders-api.ts — loopback HTTP API backing the reminders MCP server
-├── reminders-mcp.ts — MCP stdio server: reminder_*/cron_* tools for the agent
+├── bridge-api.ts   — loopback HTTP API backing the acp-tools MCP server
+├── acp-tools.ts    — unified MCP stdio server: send_file, list_aliases, reminder, cron tools
+├── aliases.ts      — chat alias directory (Platform/Name → chatId), persisted in .acp-connector/aliases.json
+├── identity.ts     — sender identity: [Platform/Chat] Name: prompt prefix + alias naming
 ├── http.ts        — optional HTTP API (/health, /prompt)
 ├── a2a.ts         — A2A server: agent card, JSON-RPC message/send, join/confirm, registry
 ├── a2a-manager.ts — pairing flow + /a2a commands (bridge-level, never reaches agent)
@@ -121,22 +123,38 @@ chains (`a2a.delegationChain`) propagate across agent-initiated delegations;
 loops and chains ≥ maxDepth (3) are rejected. Hardening caps: prompt queue 100,
 A2A bodies 1 MiB, pending joins 100.
 
-### Agent reminders (always on)
+### acp-tools MCP + sender identity (always on)
 
-The bridge always injects an `agent-reminders` MCP server in `session/new`
+The bridge always injects a single `acp-tools` MCP server in `session/new`
 `mcpServers` (not gated on a2a.enabled). Its tools hit a loopback HTTP API
-(`src/reminders-api.ts`, 127.0.0.1, ephemeral port passed via
-`REMINDERS_API_URL`). One-shot reminders live in
+(`src/bridge-api.ts`, 127.0.0.1, ephemeral port passed via `BRIDGE_API_URL`;
+`REMINDERS_API_URL` still accepted for compat):
+
+- `send_file({path, caption?, to?})` — delivers a file through the platform
+  transport (TG `sendDocument`/`sendPhoto`, Discord `channel.send` files).
+  `to` is a chat alias (`Telegram/Familia`) or omitted for the current
+  chat. Paths are allowlist-validated (agent cwd + uploads dir + tmpdir +
+  `tools.allowedPaths`), realpath-contained, capped at 45MB.
+- `list_aliases()` — safe alias listing, never raw platform ids.
+- `reminder({action,...})` / `cron({action,...})` — consolidated
+  action-discriminated tools replacing the old `reminder_*`/`cron_*` set.
+
+Every inbound user message is prefixed `[Platform/Chat] SenderName:`
+(DM: `[Telegram] Name:`; group: `[Telegram/Familia] Santi:`) via
+`src/identity.ts` — injected sources (cron/http/a2a/reminders) get no
+prefix. `src/aliases.ts` maps `Platform/Name` → chatId, fed on every user
+message and persisted to `.acp-connector/aliases.json`.
+
+One-shot reminders live in
 `.acp-connector/reminders.json`; entries are deleted on delivery —
 undeliverable entries (no agent session/chat id) are kept and retried.
 Every reminder carries `managed: "agent" | "operator"` (pre-field entries
 migrate to `"agent"` on load). Agent reminders deliver with source
 `'agent-reminder'` — remote content that never runs bridge commands;
 operator reminders (`/reminder add` chat command: list/add/remove) deliver
-with source `'reminder'` and keep operator authority. `reminder_*` tools
-can only mutate `managed: "agent"` entries; operator reminders are listed
-read-only. `cron_*` tools can only touch jobs persisted with
-`managed: "agent"`; operator jobs are listed read-only. Agent-created cron jobs are capped
+with source `'reminder'` and keep operator authority. `reminder`/`cron`
+tool mutations can only touch `managed: "agent"` entries/jobs; operator
+ones are listed read-only. Agent-created cron jobs are capped
 (50 concurrent) and at fire time their prompt is injected as
 `[Agent cron <name>] <prompt>` with source `'agent-cron'`: agent-scheduled
 prompts are remote content and never run bridge commands, even when they

@@ -48,6 +48,18 @@ export interface MediaConfig {
   uploadsDir?: string;
 }
 
+export interface ToolsConfig {
+  /**
+   * Extra directories the agent may send files from via the acp-tools
+   * `send_file` tool. The agent cwd, media uploads dir and OS tmpdir are
+   * always allowed — this extends the set. Paths are resolved against
+   * the bridge cwd.
+   */
+  allowedPaths?: string[];
+  /** Max file size in MB for `send_file` (default 45 — Telegram's ~50MB bot limit). */
+  maxFileSizeMb?: number;
+}
+
 export interface TranscriptionConfig {
   /** Transcribe voice notes to text before sending to the agent (default true). */
   enabled?: boolean;
@@ -158,6 +170,7 @@ export interface BridgeConfig {
   routines?: Routine[];
   http?: HttpConfig;
   media?: MediaConfig;
+  tools?: ToolsConfig;
   transcription?: TranscriptionConfig;
   a2a?: A2aConfig;
 }

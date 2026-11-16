@@ -1,5 +1,8 @@
+import { realpathSync, statSync } from 'node:fs';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
+import { isAbsolute, resolve, sep } from 'node:path';
+import type { AliasDirectory } from './aliases.js';
 import type { CronManager } from './cron.js';
 import { everyToCron } from './cron.js';
 import { log } from './logger.js';
@@ -8,15 +11,19 @@ import { formatFiresAt, needsExplicitTimezone, parseReminderTime } from './remin
 import { persistCronAndRoutines } from './routines.js';
 
 /**
- * Loopback HTTP API backing the `reminders-mcp` stdio server. The MCP
+ * Loopback HTTP API backing the `acp-tools` MCP stdio server. The MCP
  * server runs inside the agent process; this API is how its tools reach
- * the bridge's reminder store, cron manager and prompt queue.
+ * the bridge's reminder store, cron manager, chat alias directory and
+ * messaging transports.
  *
  * Bound to 127.0.0.1 on an ephemeral port, no auth — same trust model
  * as the A2A loopback endpoints (the agent is already fully trusted).
  */
 
 const MAX_BODY = 64 * 1024;
+/** Default cap for agent-sent files — Telegram bot uploads max ~50MB. */
+export const DEFAULT_MAX_FILE_BYTES = 45 * 1024 * 1024;
+const CAPTION_MAX = 1024;
 
 /**
  * Maximum number of concurrently persisted agent-created cron jobs.
@@ -61,7 +68,25 @@ function _str(v: unknown): string | undefined {
   return typeof v === 'string' && v.trim() ? v.trim() : undefined;
 }
 
-export interface RemindersApiOptions {
+/** How the API delivers agent-requested file sends to a platform chat. */
+export interface FileSendHandlers {
+  /**
+   * Resolve `to` (agent alias like `Telegram/Familia`, or the bracketed
+   * prompt form) to a platform chat. Undefined `to` = current chat.
+   */
+  resolve(
+    to: string | undefined
+  ): { platform: string; chatId: string | number; alias: string } | { error: string };
+  /** Deliver the file through the platform transport. */
+  send(
+    platform: string,
+    chatId: string | number,
+    filePath: string,
+    caption?: string
+  ): Promise<void>;
+}
+
+export interface BridgeApiOptions {
   reminders: ReminderManager;
   cronManager: CronManager;
   /**
@@ -70,18 +95,76 @@ export interface RemindersApiOptions {
    * are rejected rather than guessed against the host's system zone.
    */
   timezone?: string;
+  /** Chat alias directory powering list_aliases + send_file `to`. */
+  aliases?: AliasDirectory | null;
+  /** File delivery plumbing (alias → platform chat → transport). */
+  fileSend?: FileSendHandlers;
+  /**
+   * Directories the agent may send files from (realpath containment).
+   * Defaults to the process cwd when unset — bridge.ts always passes
+   * the configured set (agent cwd + uploads dir + tmpdir).
+   */
+  allowedPaths?: string[];
+  /** Max file size in bytes (default DEFAULT_MAX_FILE_BYTES). */
+  maxFileSizeBytes?: number;
 }
 
 /**
  * Shared handler — exported for tests so tools can be exercised without
  * spawning the MCP server.
  */
-export function createRemindersApiHandler({
+export function createBridgeApiHandler({
   reminders,
   cronManager,
   timezone,
-}: RemindersApiOptions) {
+  aliases,
+  fileSend,
+  allowedPaths,
+  maxFileSizeBytes = DEFAULT_MAX_FILE_BYTES,
+}: BridgeApiOptions) {
   const now = () => Date.now();
+
+  // Pre-resolve allowed roots once — realpath so symlink escapes fail.
+  const allowedRoots = (allowedPaths ?? [process.cwd()]).map((p) => {
+    try {
+      return realpathSync(resolve(p));
+    } catch {
+      return resolve(p);
+    }
+  });
+
+  const validateFilePath = (requested: string): { path: string } | { error: string } => {
+    if (!isAbsolute(requested) && !requested.startsWith('~')) {
+      // Relative paths resolve against cwd — still must land inside roots.
+    }
+    const expanded = requested.startsWith('~/')
+      ? resolve(process.env.HOME ?? '', requested.slice(2))
+      : resolve(requested);
+    let real: string;
+    try {
+      real = realpathSync(expanded);
+    } catch {
+      return { error: `file not found: ${requested}` };
+    }
+    let size: number;
+    try {
+      const st = statSync(real);
+      if (!st.isFile()) return { error: `not a regular file: ${requested}` };
+      size = st.size;
+    } catch {
+      return { error: `cannot stat: ${requested}` };
+    }
+    if (size > maxFileSizeBytes) {
+      return {
+        error: `file too large (${Math.ceil(size / 1024 / 1024)}MB > ${Math.floor(maxFileSizeBytes / 1024 / 1024)}MB limit)`,
+      };
+    }
+    const inside = allowedRoots.some((root) => real === root || real.startsWith(`${root}${sep}`));
+    if (!inside) {
+      return { error: `path is outside allowed directories: ${requested}` };
+    }
+    return { path: real };
+  };
 
   // Attach a human-readable local rendering (with GMT offset) so the agent
   // can confirm "alarm set for <time> (<zone>)" to the operator.
@@ -158,6 +241,31 @@ export function createRemindersApiHandler({
     const url = new URL(req.url ?? '/', 'http://localhost');
     const path = url.pathname;
     try {
+      // -------------------------------------------------------- messaging
+      if (path === '/aliases' && req.method === 'GET') {
+        _ok(res, { aliases: aliases?.list() ?? [] });
+        return;
+      }
+      if (path === '/file/send' && req.method === 'POST') {
+        if (!fileSend) return _err(res, 'file sending is not available on this bridge');
+        const body = await _readBody(req);
+        const requested = _str(body.path);
+        if (!requested) return _err(res, '"path" is required');
+        const validated = validateFilePath(requested);
+        if ('error' in validated) return _err(res, validated.error);
+        const filePath = validated.path;
+        const target = fileSend.resolve(_str(body.to));
+        if ('error' in target) return _err(res, target.error);
+        const caption = _str(body.caption)?.slice(0, CAPTION_MAX);
+        try {
+          await fileSend.send(target.platform, target.chatId, filePath, caption);
+        } catch (err) {
+          return _err(res, `send failed: ${(err as Error).message}`, 502);
+        }
+        log.info(`📎 sent ${filePath} → ${target.alias}`);
+        return _ok(res, { deliveredTo: target.alias });
+      }
+
       // ---------------------------------------------------------- reminders
       if (path === '/reminder/list' && req.method === 'GET') {
         _ok(res, { reminders: reminders.list().map(withLocal) });
@@ -276,7 +384,7 @@ export function createRemindersApiHandler({
       if ((err as Error).message === 'body too large') {
         return _err(res, 'body too large', 413);
       }
-      log.error(`reminders-api route failed: ${(err as Error).message}`);
+      log.error(`bridge-api route failed: ${(err as Error).message}`);
       _err(res, 'internal error', 500);
     }
   };
@@ -286,15 +394,15 @@ export function createRemindersApiHandler({
  * Start the loopback API. Returns the server and the port it bound to
  * (port 0 = ephemeral; read the real port from the returned value).
  */
-export async function startRemindersApi(
-  opts: RemindersApiOptions & { host?: string; port?: number }
+export async function startBridgeApi(
+  opts: BridgeApiOptions & { host?: string; port?: number }
 ): Promise<{ server: Server; port: number }> {
   const host = opts.host ?? '127.0.0.1';
   const port = opts.port ?? 0;
-  const handler = createRemindersApiHandler(opts);
+  const handler = createBridgeApiHandler(opts);
   const server = createServer((req, res) => {
     handler(req, res).catch((err) => {
-      log.error(`reminders-api: ${(err as Error).message}`);
+      log.error(`bridge-api: ${(err as Error).message}`);
       _err(res, 'internal error', 500);
     });
   });
@@ -303,6 +411,6 @@ export async function startRemindersApi(
     server.listen(port, host, () => resolve());
   });
   const bound = (server.address() as AddressInfo).port;
-  log.info(`⏰ reminders api listening on http://${host}:${bound}`);
+  log.info(`🌉 bridge api listening on http://${host}:${bound}`);
   return { server, port: bound };
 }

@@ -10,6 +10,8 @@ interface MockBot {
   answerCallbackQuery: MockFn;
   sendChatAction: MockFn;
   setMessageReaction: MockFn;
+  sendDocument: MockFn;
+  sendPhoto: MockFn;
   stopPolling: MockFn;
 }
 
@@ -21,6 +23,8 @@ const mockBot: MockBot = {
   answerCallbackQuery: vi.fn(async () => ({})),
   sendChatAction: vi.fn(async () => ({})),
   setMessageReaction: vi.fn(async () => true),
+  sendDocument: vi.fn(async () => ({ message_id: 2 })),
+  sendPhoto: vi.fn(async () => ({ message_id: 3 })),
   stopPolling: vi.fn(),
 };
 
@@ -32,6 +36,8 @@ vi.mock('node-telegram-bot-api', () => ({
     answerCallbackQuery = mockBot.answerCallbackQuery;
     sendChatAction = mockBot.sendChatAction;
     setMessageReaction = mockBot.setMessageReaction;
+    sendDocument = mockBot.sendDocument;
+    sendPhoto = mockBot.sendPhoto;
     stopPolling = mockBot.stopPolling;
   },
 }));
@@ -200,6 +206,62 @@ describe('BridgeBot', () => {
     await handler({ chat: { id: 123 }, text: 'hello agent' });
     await vi.advanceTimersByTimeAsync(1000);
     expect(acp.prompt).toHaveBeenCalledWith('hello agent');
+  });
+
+  it('prefixes DM prompts with [Telegram] SenderName:', async () => {
+    const { bot, acp } = createBot();
+    await bot.start();
+    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    await handler({
+      chat: { id: 123, type: 'private' },
+      from: { id: 42, first_name: 'Germán', last_name: 'Aliprandi' },
+      text: 'hello agent',
+    });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(acp.prompt).toHaveBeenCalledWith('[Telegram] Germán Aliprandi: hello agent');
+  });
+
+  it('prefixes group prompts with [Telegram/Chat] Sender: keeping sender vs destination', async () => {
+    const { bot, acp } = createBot({ allowedChatIds: [-100] });
+    await bot.start();
+    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    await handler({
+      chat: { id: -100, type: 'supergroup', title: 'Familia' },
+      from: { id: 7, first_name: 'Santi' },
+      text: 'pasame el resumen',
+    });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(acp.prompt).toHaveBeenCalledWith('[Telegram/Familia] Santi: pasame el resumen');
+  });
+
+  it('registers chat aliases from inbound messages', async () => {
+    const { AliasDirectory } = await import('../src/aliases.js');
+    const aliases = new AliasDirectory();
+    const { bot } = createBot({ aliases, allowedChatIds: [-100, 123] });
+    await bot.start();
+    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    await handler({
+      chat: { id: -100, type: 'supergroup', title: 'Familia' },
+      from: { id: 7, first_name: 'Santi' },
+      text: 'hi',
+    });
+    await vi.advanceTimersByTimeAsync(1000);
+    const group = aliases.resolve('Telegram/Familia');
+    expect(group.ok && group.entry.chatId).toBe('-100');
+    // sender name must not alias the group chat
+    expect(aliases.resolve('Telegram/Santi').ok).toBe(false);
+  });
+
+  it('sendFile delivers documents and photos to the given chat', async () => {
+    const { bot } = createBot();
+    await bot.sendFile(123, '/tmp/report.pdf', 'quarterly');
+    expect(mockBot.sendDocument).toHaveBeenCalledWith(
+      123,
+      '/tmp/report.pdf',
+      expect.objectContaining({ caption: 'quarterly' })
+    );
+    await bot.sendFile(123, '/tmp/pic.png');
+    expect(mockBot.sendPhoto).toHaveBeenCalledWith(123, '/tmp/pic.png', {});
   });
 
   it('streams agent_message_chunk and edits single message', async () => {

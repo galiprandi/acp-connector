@@ -13,8 +13,10 @@ import {
   type TextChannel,
 } from 'discord.js';
 import type { AcpClient } from './acp-client.js';
+import type { AliasDirectory } from './aliases.js';
 import type { PermissionResponse } from './base-bot.js';
 import { BaseBot } from './base-bot.js';
+import type { SenderInfo } from './identity.js';
 import { errorMessage, log } from './logger.js';
 import { fetchBuffer, type MediaHandler } from './media.js';
 
@@ -35,6 +37,7 @@ interface DiscordBotOpts {
   mediaHandler?: MediaHandler | null;
   onCommand?: ((text: string, chatId: number | string) => Promise<boolean>) | null;
   onPrompt?: ((text: string, chatId: number | string) => void) | null;
+  aliases?: AliasDirectory | null;
 }
 
 export class DiscordBot extends BaseBot {
@@ -61,6 +64,7 @@ export class DiscordBot extends BaseBot {
     mediaHandler = null,
     onCommand = null,
     onPrompt = null,
+    aliases = null,
   }: DiscordBotOpts) {
     super({
       acp,
@@ -74,6 +78,8 @@ export class DiscordBot extends BaseBot {
       mediaHandler,
       onCommand,
       onPrompt,
+      platformName: 'discord',
+      aliases,
     });
     this.token = token;
     this.allowedChannelIds = new Set(allowedChannelIds.map(String));
@@ -247,7 +253,30 @@ export class DiscordBot extends BaseBot {
     log.info(`👤 ${preview}${text.length > this.previewLength ? '…' : ''}`);
 
     const context = await this._replyContext(msg);
-    this._enqueueUserMessage(channelId, msg.id, `${context}${text}`);
+    this._enqueueUserMessage(
+      channelId,
+      msg.id,
+      `${context}${text}`,
+      undefined,
+      this._senderInfo(msg)
+    );
+  }
+
+  /**
+   * Sender/chat identity for the prompt prefix and alias directory.
+   * DMs: author display name doubles as chat name; guild channels: the
+   * channel name is the destination, msg.author is who spoke.
+   */
+  private _senderInfo(msg: Message): SenderInfo | undefined {
+    const name = msg.author.displayName || msg.author.username || '';
+    // No identifiable sender → no prefix, no alias.
+    if (!name) return undefined;
+    const isGroup = msg.channel.type !== ChannelType.DM;
+    const chatName =
+      isGroup && 'name' in msg.channel && typeof msg.channel.name === 'string'
+        ? msg.channel.name
+        : undefined;
+    return { name, isGroup, chatName };
   }
 
   private async _replyContext(msg: Message): Promise<string> {
@@ -288,7 +317,13 @@ export class DiscordBot extends BaseBot {
       const preview = caption ? `📷 ${caption.slice(0, 60)}` : `📷 ${msg.attachments.size} file(s)`;
       log.info(`👤 ${preview}`);
       const context = await this._replyContext(msg);
-      this._enqueueUserMessage(channelId, msg.id, `${context}${caption || '[📄 file]'}`, allBlocks);
+      this._enqueueUserMessage(
+        channelId,
+        msg.id,
+        `${context}${caption || '[📄 file]'}`,
+        allBlocks,
+        this._senderInfo(msg)
+      );
     } catch (err) {
       log.error('Discord media download failed:', errorMessage(err));
       const channel = this.client.channels.cache.get(channelId) as TextChannel;
@@ -323,7 +358,8 @@ export class DiscordBot extends BaseBot {
         channelId,
         msg.id,
         `${context}${caption || '[voice message]'}`,
-        allBlocks
+        allBlocks,
+        this._senderInfo(msg)
       );
     } catch (err) {
       log.error('Discord voice transcription failed:', errorMessage(err));
@@ -571,6 +607,19 @@ export class DiscordBot extends BaseBot {
         log.error(`Failed to notify channel ${channelId}:`, (err as Error).message);
       }
     }
+  }
+
+  protected async _sendPlatformFile(
+    channelId: string | number,
+    filePath: string,
+    caption?: string
+  ): Promise<void> {
+    const channel = this.client.channels.cache.get(String(channelId)) as TextChannel;
+    if (!channel) throw new Error(`Channel ${channelId} not found`);
+    await channel.send({
+      files: [filePath],
+      content: caption?.slice(0, DISCORD_MAX_LEN),
+    });
   }
 
   protected async _sendPlatformMessage(

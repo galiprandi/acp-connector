@@ -181,6 +181,34 @@ describe('DiscordBot', () => {
     expect(acp.prompt).toHaveBeenCalledWith('hello agent');
   });
 
+  it('prefixes guild messages with [Discord/Channel] Sender:', async () => {
+    const { bot, acp } = createBot();
+    await bot.start();
+    const handler = mockClient.on.mock.calls.find((c) => c[0] === 'messageCreate')[1] as (
+      msg: MockMessage
+    ) => Promise<void>;
+    await handler({
+      author: { bot: false, displayName: 'Santi', username: 'santi' },
+      channel: { id: '123', type: 0, name: 'general', send: mockChannel.send },
+      content: 'hola',
+    } as unknown as MockMessage);
+    expect(acp.prompt).toHaveBeenCalledWith('[Discord/general] Santi: hola');
+  });
+
+  it('prefixes DM messages with [Discord] Sender:', async () => {
+    const { bot, acp } = createBot();
+    await bot.start();
+    const handler = mockClient.on.mock.calls.find((c) => c[0] === 'messageCreate')[1] as (
+      msg: MockMessage
+    ) => Promise<void>;
+    await handler({
+      author: { bot: false, displayName: 'Germán', username: 'german' },
+      channel: { id: '123', type: 1, send: mockChannel.send },
+      content: 'hola',
+    } as unknown as MockMessage);
+    expect(acp.prompt).toHaveBeenCalledWith('[Discord] Germán: hola');
+  });
+
   it('handles /start and /help commands', async () => {
     const { bot, acp } = createBot();
     await bot.start();

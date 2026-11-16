@@ -1,12 +1,16 @@
 import type { ContentBlock } from '@agentclientprotocol/sdk';
 import TelegramBot from 'node-telegram-bot-api';
 import type { AcpClient } from './acp-client.js';
+import type { AliasDirectory } from './aliases.js';
 import type { PermissionResponse } from './base-bot.js';
 import { BaseBot } from './base-bot.js';
+import type { SenderInfo } from './identity.js';
 import { errorMessage, log } from './logger.js';
 import { fetchBuffer, type MediaHandler } from './media.js';
 
 const TG_MAX_LEN = 4096;
+const TG_CAPTION_MAX = 1024;
+const TG_IMAGE_EXTS = new Set(['jpg', 'jpeg', 'png', 'gif', 'webp']);
 
 export interface PlatformBot {
   start(): Promise<void>;
@@ -19,6 +23,12 @@ export interface PlatformBot {
     source?: 'cron' | 'agent-cron' | 'agent-reminder' | 'http' | 'routine' | 'a2a' | 'reminder'
   ): Promise<void>;
   sendMessage(chatId: number | string, text: string): Promise<void>;
+  /** Send a local file — used by the acp-tools send_file tool. */
+  sendFile?(chatId: number | string, filePath: string, caption?: string): Promise<void>;
+  /** Chat the agent is currently talking to (busy prompt, else last user chat). */
+  defaultChatTarget?(): { platform: string; chatId: string | number } | null;
+  /** Platform label ('telegram', 'discord') for alias routing. */
+  readonly platform?: string;
   notifyAgentExit(code: number | null): Promise<void>;
   hasActivePrompt(): boolean;
   setMediaHandler(handler: MediaHandler): void;
@@ -40,6 +50,7 @@ interface BridgeBotOpts {
   mediaHandler?: MediaHandler | null;
   onCommand?: ((text: string, chatId: number | string) => Promise<boolean>) | null;
   onPrompt?: ((text: string, chatId: number | string) => void) | null;
+  aliases?: AliasDirectory | null;
 }
 
 export class BridgeBot extends BaseBot {
@@ -64,6 +75,7 @@ export class BridgeBot extends BaseBot {
     mediaHandler = null,
     onCommand = null,
     onPrompt = null,
+    aliases = null,
   }: BridgeBotOpts) {
     super({
       acp,
@@ -77,6 +89,8 @@ export class BridgeBot extends BaseBot {
       mediaHandler,
       onCommand,
       onPrompt,
+      platformName: 'telegram',
+      aliases,
     });
     this.allowedChatIds = new Set(allowedChatIds);
     this.allowedUserIds = new Set(allowedUserIds);
@@ -260,7 +274,28 @@ export class BridgeBot extends BaseBot {
     const preview = text.slice(0, this.previewLength).replace(/\n/g, ' ');
     log.info(`👤 ${preview}${text.length > this.previewLength ? '…' : ''}`);
 
-    this._enqueueUserMessage(chatId, msg.message_id, `${this._replyContext(msg)}${text}`);
+    this._enqueueUserMessage(
+      chatId,
+      msg.message_id,
+      `${this._replyContext(msg)}${text}`,
+      undefined,
+      this._senderInfo(msg)
+    );
+  }
+
+  /**
+   * Sender/chat identity for the prompt prefix and alias directory.
+   * DMs: sender name doubles as chat name; groups: chat.title is the
+   * destination, msg.from is who spoke.
+   */
+  private _senderInfo(msg: TelegramBot.Message): SenderInfo | undefined {
+    const isGroup = msg.chat.type !== 'private';
+    const from = msg.from;
+    const fullName = [from?.first_name, from?.last_name].filter(Boolean).join(' ').trim();
+    const name = fullName || (from?.username ? `@${from.username}` : '');
+    // No identifiable sender (e.g. channel posts) → no prefix, no alias.
+    if (!name) return undefined;
+    return { name, isGroup, chatName: isGroup ? msg.chat.title : undefined };
   }
 
   private _replyContext(msg: TelegramBot.Message): string {
@@ -334,7 +369,8 @@ export class BridgeBot extends BaseBot {
         chatId,
         msg.message_id,
         `${this._replyContext(msg)}${caption || `[📄 file]`}`,
-        blocks
+        blocks,
+        this._senderInfo(msg)
       );
     } catch (err) {
       log.error('Media download failed:', errorMessage(err));
@@ -369,7 +405,8 @@ export class BridgeBot extends BaseBot {
         chatId,
         messageId,
         `${this._replyContext(msg)}${caption || '[voice message]'}`,
-        blocks
+        blocks,
+        this._senderInfo(msg)
       );
     } catch (err) {
       log.error('Voice transcription failed:', errorMessage(err));
@@ -597,6 +634,20 @@ export class BridgeBot extends BaseBot {
       } catch (err) {
         log.error(`Failed to notify chat ${chatId}:`, (err as Error).message);
       }
+    }
+  }
+
+  protected async _sendPlatformFile(
+    chatId: string | number,
+    filePath: string,
+    caption?: string
+  ): Promise<void> {
+    const ext = filePath.split('.').pop()?.toLowerCase() ?? '';
+    const opts = caption ? { caption: caption.slice(0, TG_CAPTION_MAX) } : {};
+    if (TG_IMAGE_EXTS.has(ext)) {
+      await this.bot.sendPhoto(chatId as number, filePath, opts);
+    } else {
+      await this.bot.sendDocument(chatId as number, filePath, opts);
     }
   }
 

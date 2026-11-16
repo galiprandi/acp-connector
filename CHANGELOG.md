@@ -5,6 +5,18 @@ All notable changes to acp-connector will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **`acp-tools` unified MCP server** (replaces `agent-reminders`): one MCP injected into `session/new` with four tools — `send_file` (deliver files to chats via Telegram/Discord transports), `list_aliases`, and consolidated `reminder`/`cron` action tools
+- **Sender identity in prompts**: every user message reaches the agent prefixed `[Platform/Chat] SenderName:` (e.g. `[Telegram] Germán: …`, `[Discord/Familia] Santi: …`) so it knows who is talking and which alias to reply to
+- **Chat alias directory** (`.acp-connector/aliases.json`): maps `Platform/Name` aliases to real chat ids, refreshed on every inbound message; `send_file`'s `to` accepts these aliases, defaulting to the current chat
+- **`send_file` path allowlist**: only agent cwd, media uploads dir, OS tmpdir and `tools.allowedPaths` are sendable (realpath-contained, 45MB cap, `tools.maxFileSizeMb` configurable)
+- Loopback API renamed `reminders-api` → `bridge-api` (`BRIDGE_API_URL` env; `REMINDERS_API_URL` still accepted)
+
+### Changed
+- **Breaking (agent-facing)**: `agent-reminders` MCP removed — tools are now `send_file`, `list_aliases`, `reminder({action})`, `cron({action})` on the `acp-tools` server. Agents pick up the new tools on next `session/new`/`session/load`
+
 ## [0.16.1] - 2026-11-14
 
 ### Fixed

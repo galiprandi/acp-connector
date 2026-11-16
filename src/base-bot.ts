@@ -5,7 +5,9 @@ import type {
   SessionConfigSelectOption,
 } from '@agentclientprotocol/sdk';
 import type { AcpClient } from './acp-client.js';
+import type { AliasDirectory } from './aliases.js';
 import type { PlatformBot } from './bot.js';
+import { identityPrefix, type SenderInfo } from './identity.js';
 import { log } from './logger.js';
 import type { MediaHandler } from './media.js';
 
@@ -31,6 +33,10 @@ export interface BaseBotOpts {
   httpCommandsAllowed?: boolean;
   /** Max chars for 👤/🤖 log previews (default 150). */
   logPreviewLength?: number;
+  /** Platform label used in identity prefixes and chat aliases ('telegram', 'discord'). */
+  platformName?: string;
+  /** Chat alias directory — fed on every inbound user message. */
+  aliases?: AliasDirectory | null;
 }
 
 export interface QueueItem {
@@ -44,6 +50,8 @@ export interface QueueItem {
   messageId?: string | number;
   /** True if a ⏳ reaction was added to messageId while queued. */
   queuedReaction?: boolean;
+  /** Sender/chat identity — prefixes the prompt so the agent knows who is talking. */
+  sender?: SenderInfo;
 }
 
 export interface PermissionResponse {
@@ -86,6 +94,10 @@ export abstract class BaseBot implements PlatformBot {
   protected typingTimer: NodeJS.Timeout | null;
   protected startedAt: number;
   protected previewLength: number;
+  protected platformName: string;
+  protected aliases: AliasDirectory | null;
+  /** Last chat that sent a user message — fallback target for agent file sends. */
+  protected lastUserChannelId: string | number | null;
 
   protected abstract readonly maxLen: number;
 
@@ -102,6 +114,8 @@ export abstract class BaseBot implements PlatformBot {
     onPrompt,
     httpCommandsAllowed = false,
     logPreviewLength,
+    platformName = 'unknown',
+    aliases = null,
   }: BaseBotOpts) {
     this.acp = acp;
     this.agentCmd = agentCmd;
@@ -127,6 +141,9 @@ export abstract class BaseBot implements PlatformBot {
     this.typingTimer = null;
     this.startedAt = Date.now();
     this.previewLength = Math.max(20, Math.floor(logPreviewLength ?? 150));
+    this.platformName = platformName;
+    this.aliases = aliases;
+    this.lastUserChannelId = null;
   }
 
   abstract start(): Promise<void>;
@@ -185,6 +202,41 @@ export abstract class BaseBot implements PlatformBot {
   protected abstract _editMessage(messageId: number | string, text: string): Promise<void>;
   protected abstract _sendOverflowChunk(chunk: string): Promise<void>;
   protected abstract _sendPlain(text: string, chatId?: string | number): Promise<void>;
+  /**
+   * Platform primitive: send a local file to a chat (document or media
+   * with preview depending on platform/type). Used by the acp-tools
+   * `send_file` tool — path validation happens in the bridge API.
+   */
+  protected abstract _sendPlatformFile(
+    chatId: string | number,
+    filePath: string,
+    caption?: string
+  ): Promise<void>;
+
+  /**
+   * Send a local file to a chat — entry point for the acp-tools
+   * `send_file` tool. Implemented per platform via _sendPlatformFile.
+   */
+  async sendFile(chatId: number | string, filePath: string, caption?: string): Promise<void> {
+    await this._sendPlatformFile(chatId, filePath, caption);
+  }
+
+  /** Platform label ('telegram', 'discord') — used for alias routing. */
+  get platform(): string {
+    return this.platformName;
+  }
+
+  /**
+   * Chat the agent is currently talking to: the busy prompt's channel,
+   * falling back to the last chat that sent a user message. Null when no
+   * user chat is known (e.g. only cron/http traffic so far).
+   */
+  defaultChatTarget(): { platform: string; chatId: string | number } | null {
+    const chatId = this.busy ? this.currentChannelId : this.lastUserChannelId;
+    if (chatId === null || chatId === undefined) return null;
+    return { platform: this.platformName, chatId };
+  }
+
   protected abstract _addQueuedReaction(
     channelId: string | number,
     messageId: string | number
@@ -640,9 +692,14 @@ export abstract class BaseBot implements PlatformBot {
     channelId: string | number,
     messageId: string | number,
     text: string,
-    blocks?: ContentBlock[]
+    blocks?: ContentBlock[],
+    sender?: SenderInfo
   ): void {
-    const item: QueueItem = { channelId, text, blocks, messageId };
+    if (sender) {
+      this.lastUserChannelId = channelId;
+      this.aliases?.register(this.platformName, channelId, sender);
+    }
+    const item: QueueItem = { channelId, text, blocks, messageId, sender };
     if (this.queue.length >= MAX_QUEUE) {
       log.warn(`prompt queue full (${MAX_QUEUE}), dropping user message`);
       void this.sendMessage(channelId, '⚠️ Queue is full — try again later.').catch(() => {});
@@ -679,9 +736,22 @@ export abstract class BaseBot implements PlatformBot {
 
     if (this.onPrompt) this.onPrompt(text, channelId);
 
+    // User messages carry sender identity: prepend `[Platform/Chat] Name:`
+    // so the agent knows who is talking and which alias to reply to.
+    // Injected sources (cron/http/a2a/reminders) have no sender — their
+    // prompts already carry a `[source]` label.
+    const promptPayload = item.sender
+      ? blocks
+        ? [
+            { type: 'text' as const, text: identityPrefix(this.platformName, item.sender) },
+            ...blocks,
+          ]
+        : `${identityPrefix(this.platformName, item.sender)}${text}`
+      : blocks || text;
+
     let errorMsg: string | undefined;
     try {
-      await this.acp.prompt(blocks || text);
+      await this.acp.prompt(promptPayload);
 
       // biome-ignore lint/suspicious/noExplicitAny: SDK update types are complex and dynamic
       let message: any = null;

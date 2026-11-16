@@ -223,8 +223,8 @@ vi.mock('../src/reminders.ts', () => ({
   systemTimezone: () => 'UTC',
   formatFiresAt: (iso: string) => iso,
 }));
-vi.mock('../src/reminders-api.ts', () => ({
-  startRemindersApi: vi.fn(async () => ({
+vi.mock('../src/bridge-api.ts', () => ({
+  startBridgeApi: vi.fn(async () => ({
     server: { close: vi.fn() },
     port: 7790,
   })),

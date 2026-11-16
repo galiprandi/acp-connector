@@ -1,12 +1,16 @@
+import { realpathSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { A2aServer, signBody } from './a2a.js';
 import { A2aManager } from './a2a-manager.js';
 import { AcpClient } from './acp-client.js';
 import { buildAgentCard } from './agent-card.js';
+import { AliasDirectory } from './aliases.js';
 import { BaseBot } from './base-bot.js';
 import type { PlatformBot } from './bot.js';
 import { BridgeBot } from './bot.js';
+import { startBridgeApi } from './bridge-api.js';
 import { type BridgeConfig, loadConfig } from './config.js';
 import { CronManager } from './cron.js';
 import { DiscordBot } from './discord.js';
@@ -17,7 +21,6 @@ import { LoopbackBot } from './loopback.js';
 import { MediaHandler } from './media.js';
 import { AuditLog, NetworkStore } from './network.js';
 import { ReminderManager } from './reminders.js';
-import { startRemindersApi } from './reminders-api.js';
 import { RoutineManager } from './routines.js';
 import { createTranscriber, deleteAfterTranscribe } from './transcriber.js';
 
@@ -93,12 +96,69 @@ export async function run(): Promise<void> {
     },
   });
 
-  // Loopback API backing the reminders MCP server (ephemeral port —
-  // the agent learns it via REMINDERS_API_URL in the mcpServers entry).
-  const remindersApi = await startRemindersApi({
+  // Chat alias directory: maps agent-facing aliases (`Telegram/Familia`)
+  // to real platform chat ids. Fed by every inbound user message and
+  // persisted so aliases survive restarts.
+  const aliasDir = new AliasDirectory(resolve(stateDir, 'aliases.json'));
+
+  // Loopback API backing the acp-tools MCP server (ephemeral port —
+  // the agent learns it via BRIDGE_API_URL in the mcpServers entry).
+  // `bots` is populated below; resolve/send run lazily at request time.
+  const uploadsDir = config.media?.uploadsDir || '/tmp/acp-connector-uploads';
+  const allowedFilePaths = [
+    ...new Set(
+      [
+        resolve(config.agentCwd ?? process.cwd()),
+        resolve(uploadsDir),
+        tmpdir(),
+        ...(config.tools?.allowedPaths ?? []).map((p) => resolve(p)),
+      ].map((p) => {
+        try {
+          return realpathSync(p);
+        } catch {
+          return p;
+        }
+      })
+    ),
+  ];
+  const bridgeApi = await startBridgeApi({
     reminders: reminderManager,
     cronManager,
     timezone: config.timezone,
+    aliases: aliasDir,
+    allowedPaths: allowedFilePaths,
+    maxFileSizeBytes: config.tools?.maxFileSizeMb
+      ? Math.floor(config.tools.maxFileSizeMb * 1024 * 1024)
+      : undefined,
+    fileSend: {
+      resolve: (to) => {
+        if (!to) {
+          // Current chat = the prompt being processed; fall back to the
+          // last chat that sent a user message.
+          for (const bot of bots) {
+            if (bot.hasActivePrompt()) {
+              const t = bot.defaultChatTarget?.();
+              if (t) return { platform: t.platform, chatId: t.chatId, alias: 'current chat' };
+            }
+          }
+          for (const bot of bots) {
+            const t = bot.defaultChatTarget?.();
+            if (t) return { platform: t.platform, chatId: t.chatId, alias: 'last user chat' };
+          }
+          return { error: 'no chat context — pass "to" with a chat alias' };
+        }
+        const r = aliasDir.resolve(to);
+        if (!r.ok) return { error: r.error };
+        return { platform: r.entry.platform, chatId: r.entry.chatId, alias: r.entry.alias };
+      },
+      send: async (platform, chatId, filePath, caption) => {
+        const bot = bots.find((b) => b.platform === platform);
+        if (!bot?.sendFile) {
+          throw new Error(`no messaging bot available for platform "${platform}"`);
+        }
+        await bot.sendFile(chatId, filePath, caption);
+      },
+    },
   });
 
   // A2A network MCP server: gives the agent list_remote_agents /
@@ -121,18 +181,18 @@ export async function run(): Promise<void> {
     });
   }
 
-  // Reminders/cron MCP server: always injected so the agent can schedule
-  // self-reminders and manage its own recurring jobs. Agents without MCP
-  // support simply never see these tools.
+  // Unified bridge-tools MCP server: send_file, list_aliases, reminder
+  // and cron tools. Always injected so the agent can message chats and
+  // schedule work. Agents without MCP support simply never see these.
   const isTs = import.meta.url.endsWith('.ts');
-  const remindersMcpScript = fileURLToPath(
-    new URL(`./reminders-mcp.${isTs ? 'ts' : 'js'}`, import.meta.url)
+  const acpToolsScript = fileURLToPath(
+    new URL(`./acp-tools.${isTs ? 'ts' : 'js'}`, import.meta.url)
   );
   a2aMcpServers.push({
-    name: 'agent-reminders',
+    name: 'acp-tools',
     command: isTs ? 'npx' : process.execPath,
-    args: isTs ? ['tsx', remindersMcpScript] : [remindersMcpScript],
-    env: [{ name: 'REMINDERS_API_URL', value: `http://127.0.0.1:${remindersApi.port}` }],
+    args: isTs ? ['tsx', acpToolsScript] : [acpToolsScript],
+    env: [{ name: 'BRIDGE_API_URL', value: `http://127.0.0.1:${bridgeApi.port}` }],
   });
 
   const acp = new AcpClient({
@@ -163,6 +223,7 @@ export async function run(): Promise<void> {
       streaming: config.streaming,
       echoInjectedPrompts: config.echoInjectedPrompts,
       logPreviewLength: config.logPreviewLength,
+      aliases: aliasDir,
     });
     bots.push(bot);
     primaryBot = bot;
@@ -181,6 +242,7 @@ export async function run(): Promise<void> {
       streaming: config.streaming,
       echoInjectedPrompts: config.echoInjectedPrompts,
       logPreviewLength: config.logPreviewLength,
+      aliases: aliasDir,
     });
     bots.push(bot);
     if (!primaryBot) primaryBot = bot;
@@ -483,7 +545,7 @@ export async function run(): Promise<void> {
     a2aDiscovery?.stop();
     a2aServer?.stop();
     httpServer.stop();
-    remindersApi.server.close();
+    bridgeApi.server.close();
     reminderManager.stop();
     cronManager.stop();
     for (const bot of bots) {

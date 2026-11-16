@@ -31,7 +31,8 @@ The bridge is intentionally thin. It doesn't implement its own agent loop, model
 **Key features:**
 - 🤝 **A2A agent network** — peer discovery (LAN broadcast, shared file, registry), double opt-in pairing, `message/send` + `message/stream` (SSE)
 - 🛠 **MCP tools for your agent** — `list_remote_agents` and `send_message` injected into the session so agents can discover and delegate on their own
-- ⏰ **Agent reminders** — the agent can schedule one-shot self-reminders (`reminder_*` tools) and manage its own recurring cron jobs (`cron_*` tools) — follow-ups, checks, "ping me if they replied" — persisted, late-delivery safe, human time strings. You get `/reminder` chat commands for your own one-shots
+- 🛠 **`acp-tools` MCP for your agent** — one unified MCP server injected into the session: `send_file`/`list_aliases` for delivering files to chats, plus `reminder`/`cron` tools for self-scheduled work
+- ⏰ **Agent reminders** — the agent can schedule one-shot self-reminders and manage its own recurring cron jobs — follow-ups, checks, "ping me if they replied" — persisted, late-delivery safe, human time strings. You get `/reminder` chat commands for your own one-shots
 - 🤖 Works with any ACP agent (Devin, Claude Code, Codex, OpenCode, pi, Antigravity)
 - 💬 Telegram and Discord as messaging interfaces with streaming responses
 - 🖥 Headless mode — run without any messaging platform (containers, test rigs)
@@ -213,6 +214,7 @@ See [`acp-connector.example.jsonc`](acp-connector.example.jsonc) for the full re
 | `routines` | `Routine[]` | no | `[]` | Named reusable prompts |
 | `http` | `HttpConfig` | no | off | HTTP server config (see below) |
 | `media` | `MediaConfig` | no | off | Media handling config (see below) |
+| `tools` | `ToolsConfig` | no | off | `acp-tools` MCP tuning: `allowedPaths` (extra dirs the agent may `send_file` from — agent cwd, uploads dir and tmpdir are always allowed) and `maxFileSizeMb` (default 45) |
 
 > **Backward compat:** `telegramToken` and `allowedChatIds` at the root level still work but are deprecated. Migrate to `platforms.telegram`.
 
@@ -273,25 +275,36 @@ Run from Telegram:
 | `name` | `string` | Unique routine name |
 | `prompt` | `string` | Prompt text |
 
-### Agent reminders & agent-managed cron (MCP tools)
+### `acp-tools` MCP — agent tools (messaging + scheduling)
 
-The bridge always injects an `agent-reminders` MCP server into `session/new`, giving the agent tools to schedule work for itself — no config needed. Agents without MCP support simply never see the tools (a one-line warning is logged at startup).
+The bridge always injects a single `acp-tools` MCP server into `session/new`, giving the agent bridge capabilities — no config needed. Agents without MCP support simply never see the tools (a one-line warning is logged at startup).
 
-**Reminders are one-shot.** When a reminder fires, its prompt is injected into the queue as `[Reminder <id>] <prompt>` and the entry is deleted. If the agent isn't connected when it fires, the entry is kept and retried — a late action beats a lost one. Reminders persist across restarts in `.acp-connector/reminders.json` (max 50 active; entries past `firesAt` by more than 7 days are discarded).
+#### Sender identity in prompts
 
-Every reminder is tagged `managed: "agent" | "operator"`. Agent-created reminders fire as remote content (source `agent-reminder`): their prompt **cannot run `/` bridge commands** even if it starts with one. Operator reminders created via `/reminder add` keep full operator authority. The agent API can list all reminders but `reminder_cancel`/`reminder_update` only touch `managed: "agent"` entries — operator reminders are read-only, same rule as cron. Entries written before `managed` existed are migrated as agent-owned on load.
+Every message you send reaches the agent prefixed with who is talking and where, so it always knows who to answer and which alias to reply to:
 
-Responses include `firesAt` (UTC ISO) and `firesAtLocal` — the fire time rendered in `timezone` with its GMT offset **and** IANA zone name (e.g. `Nov 12, 2026, 6:00 PM GMT-3 (America/Argentina/Buenos_Aires)`), so the agent can confirm the schedule to you and you can spot a wrong-zone setup at a glance.
+```
+[Telegram] Germán Aliprandi: mandame el reporte        ← DM
+[Telegram/Familia] Santi: pasame el resumen           ← group: bracket = chat, name = sender
+[Discord/general] Germán: revisá esto                 ← Discord channel
+```
+
+The bracketed label identifies the chat — its alias is `Platform/Name` (for groups the name is the channel title; for DMs it's the sender name shown after the bracket, e.g. `Telegram/Germán Aliprandi`). The agent copies it into `send_file`'s `to` parameter, or omits `to` to reply to the current chat. Aliases are tracked automatically in `.acp-connector/aliases.json` (refreshed on every message, so renames self-heal) and never expose raw platform ids.
+
+#### Tools
 
 | Tool | Purpose |
 |---|---|
-| `reminder_create({ prompt, in?, at? })` | Schedule a one-shot reminder. Exactly one of `in`/`at`. Accepts human strings (`"15m"`, `"2 hours"`, `"tomorrow 10am"`) and ISO datetimes. Pure durations are relative to now; absolute times without an explicit zone are parsed in `timezone` (required — unset rejects them) and stored in UTC |
-| `reminder_list()` | List pending reminders with id, firesAt, firesAtLocal and managed owner |
-| `reminder_cancel({ id })` | Cancel an agent-owned pending reminder (operator reminders are read-only) |
-| `reminder_update({ id, in?, at?, prompt? })` | Snooze/reschedule or reword an agent-owned reminder |
-| `cron_create({ every \| expr, prompt })` | Create a recurring job owned by the agent. `every` accepts `"30m"`, `"1h"`, `"1d"`, `"1w"` (even divisors); `expr` is a raw 5-field cron expression |
-| `cron_list()` | List all jobs — operator jobs are flagged `readOnly: true` |
-| `cron_update({ id, ... })` / `cron_delete({ id })` | Modify/delete only `managed: "agent"` jobs; operator jobs are read-only |
+| `send_file({ path, caption?, to? })` | Send a local file to a chat. `to` = chat alias (e.g. `"Telegram/Familia"`); omitted = the chat that sent the current prompt. Images go as photo previews, everything else as documents. **Path allowlist**: only files inside the agent cwd, the media uploads dir, the OS tmpdir or `tools.allowedPaths` can be sent — anything else (`.env`, tokens, SSH keys…) is rejected, and files are capped at 45MB (`tools.maxFileSizeMb`) |
+| `list_aliases()` | List known chat aliases (alias, platform, dm/group, name — never raw ids) for cross-chat delivery |
+| `reminder({ action, ... })` | One-shot self-reminders. `action`: `create` (`prompt` + `in`/`at`), `list`, `cancel`/`update` (`id`). Accepts human strings (`"15m"`, `"tomorrow 10am"`) and ISO datetimes; absolute times without a zone require `timezone` |
+| `cron({ action, ... })` | Recurring agent-owned jobs. `action`: `create` (`every`/`expr` + `prompt`), `list`, `update`/`delete` (`id`, `enabled`). `every` accepts `"30m"`, `"1h"`, `"1d"`, `"1w"`; `expr` is a raw 5-field cron |
+
+**Reminders are one-shot.** When a reminder fires, its prompt is injected into the queue as `[Reminder <id>] <prompt>` and the entry is deleted. If the agent isn't connected when it fires, the entry is kept and retried — a late action beats a lost one. Reminders persist across restarts in `.acp-connector/reminders.json` (max 50 active; entries past `firesAt` by more than 7 days are discarded).
+
+Every reminder is tagged `managed: "agent" | "operator"`. Agent-created reminders fire as remote content (source `agent-reminder`): their prompt **cannot run `/` bridge commands** even if it starts with one. Operator reminders created via `/reminder add` keep full operator authority. The agent API can list all reminders but `cancel`/`update` only touch `managed: "agent"` entries — operator reminders are read-only, same rule as cron. Entries written before `managed` existed are migrated as agent-owned on load.
+
+Responses include `firesAt` (UTC ISO) and `firesAtLocal` — the fire time rendered in `timezone` with its GMT offset **and** IANA zone name (e.g. `Nov 12, 2026, 6:00 PM GMT-3 (America/Argentina/Buenos_Aires)`), so the agent can confirm the schedule to you and you can spot a wrong-zone setup at a glance.
 
 Agent-created cron jobs are persisted to `acp-connector.jsonc` with `managed: "agent"` — they survive restarts and the agent can update/delete them later (capped at 50 active agent-created jobs). Jobs you write in the config or create via `/cron` chat commands are operator-owned: the agent can list them but cannot modify them.
 

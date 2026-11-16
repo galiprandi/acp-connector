@@ -113,6 +113,16 @@
   //   "uploadsDir": "/tmp/acp-connector-uploads"  // where received files are saved (default shown)
   // },
 
+  // Agent tools / acp-tools MCP (optional)
+  // The injected acp-tools MCP lets the agent send files back to chats
+  // (send_file) and manage reminders/cron. send_file is restricted to
+  // paths inside the agent cwd, the uploads dir, the OS tmpdir and any
+  // dirs listed here — anything else (.env, tokens, SSH keys) is rejected.
+  // "tools": {
+  //   "allowedPaths": ["/srv/shared-exports"],  // extra dirs the agent may send files from
+  //   "maxFileSizeMb": 45                        // per-file cap (Telegram bot limit ~50MB)
+  // },
+
   // Voice note transcription (optional, ON by default)
   // Transcribes Telegram voice notes and Discord voice messages to text
   // before they reach the agent (via the local audio-transcription package —

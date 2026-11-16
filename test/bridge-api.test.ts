@@ -29,7 +29,7 @@ vi.mock('../src/config.ts', async (importOriginal) => {
 
 const { CronManager } = await import('../src/cron.ts');
 const { ReminderManager } = await import('../src/reminders.ts');
-const { AGENT_CRON_CAP, startRemindersApi } = await import('../src/reminders-api.ts');
+const { AGENT_CRON_CAP, startBridgeApi } = await import('../src/bridge-api.ts');
 
 type MockFn = ReturnType<typeof vi.fn>;
 
@@ -68,7 +68,7 @@ beforeEach(async () => {
     enqueue: cronEnqueue,
     onLog: () => {},
   });
-  const { server, port } = await startRemindersApi({
+  const { server, port } = await startBridgeApi({
     reminders,
     cronManager,
     timezone: 'UTC',
@@ -105,7 +105,7 @@ describe('reminders api', () => {
   });
 
   it('rejects naive absolute times when timezone is not configured', async () => {
-    const { server, port } = await startRemindersApi({ reminders, cronManager });
+    const { server, port } = await startBridgeApi({ reminders, cronManager });
     const url = `http://127.0.0.1:${port}`;
     const post = (body: Record<string, unknown>) =>
       fetch(`${url}/reminder/create`, {
@@ -260,5 +260,142 @@ describe('cron api', () => {
 
     expect((await api('/cron/delete', { id: 'agent-old' })).json.ok).toBe(true);
     expect((await api('/cron/delete', { id: 'agent-old' })).status).toBe(404);
+  });
+});
+
+describe('messaging api', () => {
+  async function startMessagingApi(overrides: Record<string, unknown> = {}) {
+    const { AliasDirectory } = await import('../src/aliases.js');
+    const aliases = new AliasDirectory();
+    aliases.register('telegram', 123, { name: 'Germán Aliprandi', isGroup: false });
+    aliases.register('telegram', -100, {
+      name: 'Santi',
+      isGroup: true,
+      chatName: 'Familia',
+    });
+    const send = vi.fn(async () => {});
+    const resolveFn = vi.fn((to?: string) => {
+      if (!to) return { platform: 'telegram', chatId: 123, alias: 'current chat' };
+      const r = aliases.resolve(to);
+      return r.ok
+        ? { platform: r.entry.platform, chatId: r.entry.chatId, alias: r.entry.alias }
+        : { error: r.error };
+    });
+    const file = join(dir, 'report.txt');
+    const { writeFileSync } = await import('node:fs');
+    writeFileSync(file, 'quarterly report');
+    const { server, port } = await startBridgeApi({
+      reminders,
+      cronManager,
+      aliases,
+      allowedPaths: [dir],
+      fileSend: { resolve: resolveFn, send },
+      ...overrides,
+    });
+    return {
+      url: `http://127.0.0.1:${port}`,
+      server,
+      aliases,
+      send,
+      resolveFn,
+      file,
+    };
+  }
+
+  it('GET /aliases lists aliases without raw chat ids', async () => {
+    const { url, server } = await startMessagingApi();
+    try {
+      const res = await fetch(`${url}/aliases`);
+      const json = (await res.json()) as { aliases: Array<Record<string, unknown>> };
+      expect(json.aliases.map((a) => a.alias)).toEqual([
+        'Telegram/Familia',
+        'Telegram/Germán Aliprandi',
+      ]);
+      expect(json.aliases[0]).not.toHaveProperty('chatId');
+    } finally {
+      server.close();
+    }
+  });
+
+  it('POST /file/send defaults to the current chat and delivers the file', async () => {
+    const { url, server, send, file } = await startMessagingApi();
+    try {
+      const res = await fetch(`${url}/file/send`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: file, caption: 'here you go' }),
+      });
+      const json = (await res.json()) as Record<string, unknown>;
+      expect(json.ok).toBe(true);
+      expect(json.deliveredTo).toBe('current chat');
+      expect(send).toHaveBeenCalledWith('telegram', 123, expect.any(String), 'here you go');
+    } finally {
+      server.close();
+    }
+  });
+
+  it('POST /file/send resolves an explicit alias to its chat', async () => {
+    const { url, server, send, file } = await startMessagingApi();
+    try {
+      const res = await fetch(`${url}/file/send`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: file, to: 'Telegram/Familia' }),
+      });
+      const json = (await res.json()) as Record<string, unknown>;
+      expect(json.ok).toBe(true);
+      expect(json.deliveredTo).toBe('Telegram/Familia');
+      expect(send).toHaveBeenCalledWith('telegram', '-100', expect.any(String), undefined);
+    } finally {
+      server.close();
+    }
+  });
+
+  it('POST /file/send rejects unknown aliases and paths outside allowed dirs', async () => {
+    const { url, server, send, file } = await startMessagingApi();
+    try {
+      const badAlias = await fetch(`${url}/file/send`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: file, to: 'Telegram/Nadie' }),
+      });
+      expect(((await badAlias.json()) as { ok: boolean }).ok).toBe(false);
+
+      const outside = await fetch(`${url}/file/send`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: '/etc/hostname' }),
+      });
+      const outsideJson = (await outside.json()) as { ok: boolean; error: string };
+      expect(outsideJson.ok).toBe(false);
+      expect(outsideJson.error).toContain('outside allowed');
+
+      const missing = await fetch(`${url}/file/send`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: join(dir, 'nope.bin') }),
+      });
+      expect(((await missing.json()) as { ok: boolean }).ok).toBe(false);
+      expect(send).not.toHaveBeenCalled();
+    } finally {
+      server.close();
+    }
+  });
+
+  it('POST /file/send rejects files over the size cap', async () => {
+    const { url, server, send, file } = await startMessagingApi({ maxFileSizeBytes: 4 });
+    try {
+      const res = await fetch(`${url}/file/send`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: file }),
+      });
+      const json = (await res.json()) as { ok: boolean; error: string };
+      expect(json.ok).toBe(false);
+      expect(json.error).toContain('too large');
+      expect(send).not.toHaveBeenCalled();
+    } finally {
+      server.close();
+    }
   });
 });
