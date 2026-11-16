@@ -64,6 +64,8 @@ Then start the bridge:
 acp-connector
 ```
 
+Check the installed version with `acp-connector --version` (or `-v`).
+
 ### assistant-setup wizard (experimental)
 
 `assistant-setup` is a single-file binary (compiled with `bun build --compile`)
