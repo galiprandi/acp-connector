@@ -3,6 +3,7 @@ import type {
   SessionConfigOption,
   SessionConfigSelectGroup,
   SessionConfigSelectOption,
+  SessionInfo,
 } from '@agentclientprotocol/sdk';
 import type { AcpClient } from './acp-client.js';
 import type { AliasDirectory } from './aliases.js';
@@ -98,6 +99,8 @@ export abstract class BaseBot implements PlatformBot {
   protected aliases: AliasDirectory | null;
   /** Last chat that sent a user message — fallback target for agent file sends. */
   protected lastUserChannelId: string | number | null;
+  /** Last /sessions listing — lets /session <n> resolve numbers to ids. */
+  private lastSessionList: { sessions: SessionInfo[]; at: number } | null;
 
   protected abstract readonly maxLen: number;
 
@@ -144,6 +147,7 @@ export abstract class BaseBot implements PlatformBot {
     this.platformName = platformName;
     this.aliases = aliases;
     this.lastUserChannelId = null;
+    this.lastSessionList = null;
   }
 
   abstract start(): Promise<void>;
@@ -304,37 +308,86 @@ export abstract class BaseBot implements PlatformBot {
     return true;
   }
 
+  /** Cached /sessions list stays valid for index lookups for this long. */
+  private static readonly SESSION_LIST_TTL_MS = 10 * 60 * 1000;
+
   private async _handleListSessions(channelId: string | number): Promise<boolean> {
     try {
       const sessions = await this.acp.listSessions();
+      this.lastSessionList = { sessions, at: Date.now() };
       if (sessions.length === 0) {
         await this.sendMessage(channelId, 'No sessions available.');
         return true;
       }
-      const lines = sessions.map((s) => {
-        const title = s.title ? ` — ${s.title}` : '';
-        const updated = s.updatedAt ? ` (${s.updatedAt})` : '';
-        const marker = s.sessionId === this.acp.sessionId ? '▶' : ' ';
-        return `${marker} \`${s.sessionId}\`${title}${updated}`;
+      const lines = sessions.map((s, i) => {
+        const title = s.title?.trim() || s.sessionId.slice(0, 12);
+        const age = s.updatedAt ? ` — ${this._formatSessionAge(s.updatedAt)}` : '';
+        const marker = s.sessionId === this.acp.sessionId ? '▶ ' : '  ';
+        return `${marker}${i + 1}. ${title}${age}`;
       });
-      await this.sendMessage(channelId, `*Sessions:*\n${lines.join('\n')}`);
+      await this.sendMessage(
+        channelId,
+        `*Sessions:*\n${lines.join('\n')}\n\nSwitch with /session <n> or /session <id>.`
+      );
     } catch (err) {
       await this.sendMessage(channelId, `Cannot list sessions: ${(err as Error).message}`);
     }
     return true;
   }
 
+  /** Compact age label for a session's updatedAt ("2h ago", "3d ago", date). */
+  private _formatSessionAge(iso: string): string {
+    const then = Date.parse(iso);
+    if (Number.isNaN(then)) return '';
+    const mins = Math.floor((Date.now() - then) / 60000);
+    if (mins < 1) return 'just now';
+    if (mins < 60) return `${mins}m ago`;
+    const hours = Math.floor(mins / 60);
+    if (hours < 24) return `${hours}h ago`;
+    const days = Math.floor(hours / 24);
+    if (days < 7) return `${days}d ago`;
+    return iso.slice(0, 10);
+  }
+
+  /**
+   * Resolve a /session argument: a bare number indexes into the cached
+   * /sessions listing; anything else is treated as a literal session id
+   * (full or unique prefix handled by the agent).
+   */
+  private _resolveSessionArg(arg: string): { id: string } | { error: string } {
+    if (/^\d+$/.test(arg)) {
+      const cached = this.lastSessionList;
+      const fresh =
+        cached && Date.now() - cached.at < BaseBot.SESSION_LIST_TTL_MS ? cached.sessions : null;
+      if (!fresh) {
+        return { error: 'Run /sessions first to get a numbered list.' };
+      }
+      const idx = Number.parseInt(arg, 10) - 1;
+      const hit = fresh[idx];
+      if (!hit) {
+        return { error: `No session #${arg} — run /sessions to see ${fresh.length} entries.` };
+      }
+      return { id: hit.sessionId };
+    }
+    return { id: arg };
+  }
+
   private async _handleSwitchSession(channelId: string | number, arg: string): Promise<boolean> {
     if (!arg) {
-      await this.sendMessage(channelId, 'Usage: /session `<id>`');
+      await this.sendMessage(channelId, 'Usage: /session `<n>` or /session `<id>`');
       return true;
     }
     if (this.busy) {
       await this.sendMessage(channelId, 'Cannot switch session while busy. Use /stop first.');
       return true;
     }
+    const resolved = this._resolveSessionArg(arg);
+    if ('error' in resolved) {
+      await this.sendMessage(channelId, resolved.error);
+      return true;
+    }
     try {
-      const id = await this.acp.loadSession(arg);
+      const id = await this.acp.loadSession(resolved.id);
       await this.sendMessage(channelId, `🔄 Switched to session: \`${id}\``);
       log.info(`🔄 switched to session: ${id}`);
     } catch (err) {
@@ -478,7 +531,7 @@ export abstract class BaseBot implements PlatformBot {
     }
 
     const [configId, ...rest] = args;
-    const value = rest.join(' ').trim();
+    let value = rest.join(' ').trim();
 
     if (!configId) {
       const lines = options.map(
@@ -506,11 +559,24 @@ export abstract class BaseBot implements PlatformBot {
         return true;
       }
     } else {
-      const match = this._configSelectOptions(option).find((o) => o.value === value);
+      // Bare numbers index into the displayed option list — same flattened
+      // order as _formatConfigOptionDetail, so "pick 2" always matches.
+      const selectOpts = this._configSelectOptions(option);
+      if (/^\d+$/.test(value)) {
+        const idx = Number.parseInt(value, 10) - 1;
+        const hit = selectOpts[idx];
+        if (!hit) {
+          await this.sendMessage(
+            channelId,
+            `No option #${value} — run /config ${configId} to see ${selectOpts.length} entries.`
+          );
+          return true;
+        }
+        value = hit.value;
+      }
+      const match = selectOpts.find((o) => o.value === value);
       if (!match) {
-        const available = this._configSelectOptions(option)
-          .map((o) => o.value)
-          .join(', ');
+        const available = selectOpts.map((o) => o.value).join(', ');
         await this.sendMessage(channelId, `Unknown value \`${value}\`. Available: ${available}`);
         return true;
       }
@@ -547,12 +613,12 @@ export abstract class BaseBot implements PlatformBot {
     if (option.type === 'boolean') {
       return `${header}\nCurrent: \`${option.currentValue}\`. Use: /config ${option.id} true|false`;
     }
-    const lines = this._configSelectOptions(option).map((o) => {
-      const marker = o.value === option.currentValue ? '▶' : ' ';
+    const lines = this._configSelectOptions(option).map((o, i) => {
+      const marker = o.value === option.currentValue ? '▶ ' : '  ';
       const desc = o.description ? ` — ${o.description}` : '';
-      return `${marker} \`${o.value}\` (${o.name})${desc}`;
+      return `${marker}${i + 1}. ${o.name}${desc}`;
     });
-    return `${header}\n${lines.join('\n')}`;
+    return `${header}\n${lines.join('\n')}\n\nSet with /config ${option.id} <n> or <value>.`;
   }
 
   /**
@@ -565,12 +631,12 @@ export abstract class BaseBot implements PlatformBot {
       '  /stop — cancel the current task',
       '  /new — start a fresh session (clears context)',
       '  /sessions — list available sessions',
-      '  /session `<id>` — switch to an existing session',
+      '  /session `<n>` — switch to a session from /sessions (or `<id>`)',
       '  /delete `<id>` — delete a session',
       '  /mode — list available session modes',
       '  /mode `<id>` — switch session mode (e.g. /mode bypass)',
       '  /config — list session config options',
-      '  /config `<id> [value]` — show or set an option',
+      '  /config `<id> [n|value]` — show or set an option (number picks from the list)',
       '  /model `[value]` — show or set the model',
       '  /queue — list pending prompts',
       '  /queue cancel `<n>` — remove a pending prompt',

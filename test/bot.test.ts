@@ -614,9 +614,47 @@ describe('BridgeBot', () => {
     const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
     await handler({ chat: { id: 123 }, text: '/sessions' });
     expect(acp.listSessions).toHaveBeenCalled();
-    expect(mockBot.sendMessage).toHaveBeenCalledWith(123, expect.stringContaining('s1'), {
-      parse_mode: 'Markdown',
-    });
+    expect(mockBot.sendMessage).toHaveBeenCalledWith(
+      123,
+      '*Sessions:*\n  1. Session 1\n  2. s2\n\nSwitch with /session <n> or /session <id>.',
+      { parse_mode: 'Markdown' }
+    );
+  });
+
+  it('/session <n> resolves the number against the last /sessions list', async () => {
+    const { bot, acp } = createBot();
+    await bot.start();
+    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    await handler({ chat: { id: 123 }, text: '/sessions' });
+    await handler({ chat: { id: 123 }, text: '/session 2' });
+    expect(acp.loadSession).toHaveBeenCalledWith('s2');
+  });
+
+  it('/session <n> without a prior /sessions asks to list first', async () => {
+    const { bot, acp } = createBot();
+    await bot.start();
+    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    await handler({ chat: { id: 123 }, text: '/session 2' });
+    expect(acp.loadSession).not.toHaveBeenCalled();
+    expect(mockBot.sendMessage).toHaveBeenCalledWith(
+      123,
+      'Run /sessions first to get a numbered list.',
+      { parse_mode: 'Markdown' }
+    );
+  });
+
+  it('/session <n> out of range reports the list size', async () => {
+    const { bot, acp } = createBot();
+    await bot.start();
+    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    await handler({ chat: { id: 123 }, text: '/sessions' });
+    await handler({ chat: { id: 123 }, text: '/session 99' });
+    expect(acp.loadSession).not.toHaveBeenCalled();
+    expect(mockBot.sendMessage).toHaveBeenCalledWith(
+      123,
+      'No session #99 — run /sessions to see 2 entries.',
+      { parse_mode: 'Markdown' }
+    );
   });
 
   it('/sessions when not supported sends error', async () => {
@@ -648,9 +686,11 @@ describe('BridgeBot', () => {
     await bot.start();
     const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
     await handler({ chat: { id: 123 }, text: '/session' });
-    expect(mockBot.sendMessage).toHaveBeenCalledWith(123, 'Usage: /session `<id>`', {
-      parse_mode: 'Markdown',
-    });
+    expect(mockBot.sendMessage).toHaveBeenCalledWith(
+      123,
+      'Usage: /session `<n>` or /session `<id>`',
+      { parse_mode: 'Markdown' }
+    );
   });
 
   it('/session when busy refuses with message', async () => {
@@ -758,19 +798,45 @@ describe('BridgeBot', () => {
     });
   });
 
-  it('/config <id> lists the option values with current marker', async () => {
+  it('/config <id> lists the option values numbered with current marker', async () => {
     const { bot } = createBot();
     await bot.start();
     const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
     await handler({ chat: { id: 123 }, text: '/config model' });
     expect(mockBot.sendMessage).toHaveBeenCalledWith(
       123,
-      expect.stringContaining('▶ `model-a` (Model A)'),
+      '*`model`* (Model)\n▶ 1. Model A\n  2. Model B — Fast\n\nSet with /config model <n> or <value>.',
       { parse_mode: 'Markdown' }
     );
-    expect(mockBot.sendMessage).toHaveBeenCalledWith(123, expect.stringContaining('`model-b`'), {
-      parse_mode: 'Markdown',
-    });
+  });
+
+  it('/config <id> <n> sets the option by list index', async () => {
+    const { bot, acp } = createBot();
+    await bot.start();
+    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    await handler({ chat: { id: 123 }, text: '/config model 2' });
+    expect(acp.setConfigOption).toHaveBeenCalledWith('model', 'model-b');
+  });
+
+  it('/model <n> sets the model by list index', async () => {
+    const { bot, acp } = createBot();
+    await bot.start();
+    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    await handler({ chat: { id: 123 }, text: '/model 1' });
+    expect(acp.setConfigOption).toHaveBeenCalledWith('model', 'model-a');
+  });
+
+  it('/config <id> <n> out of range reports the list size', async () => {
+    const { bot, acp } = createBot();
+    await bot.start();
+    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    await handler({ chat: { id: 123 }, text: '/config model 9' });
+    expect(acp.setConfigOption).not.toHaveBeenCalled();
+    expect(mockBot.sendMessage).toHaveBeenCalledWith(
+      123,
+      'No option #9 — run /config model to see 2 entries.',
+      { parse_mode: 'Markdown' }
+    );
   });
 
   it('/config <id> <value> sets the option', async () => {
@@ -797,9 +863,11 @@ describe('BridgeBot', () => {
     await bot.start();
     const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
     await handler({ chat: { id: 123 }, text: '/model' });
-    expect(mockBot.sendMessage).toHaveBeenCalledWith(123, expect.stringContaining('`model-b`'), {
-      parse_mode: 'Markdown',
-    });
+    expect(mockBot.sendMessage).toHaveBeenCalledWith(
+      123,
+      expect.stringContaining('2. Model B — Fast'),
+      { parse_mode: 'Markdown' }
+    );
   });
 
   it('/config <unknown> sends available option ids', async () => {

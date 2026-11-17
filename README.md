@@ -612,13 +612,14 @@ The bridge intercepts these commands before forwarding to the agent:
 | Command | Description |
 |---|---|
 | `/new` | Start a fresh session (clears accumulated context) |
-| `/sessions` | List available sessions (requires agent `session/list` capability) |
-| `/session <id>` | Switch to an existing session (uses `session/resume` or `session/load`) |
+| `/sessions` | List available sessions as a numbered list — title + age (requires agent `session/list` capability) |
+| `/session <n>` | Switch to a session by its number in the last `/sessions` list (full `<id>` still works) |
 | `/delete <id>` | Delete a session (requires agent `session/delete` capability) |
 | `/mode` | List available session modes reported by the agent |
 | `/mode <id>` | Switch session mode (e.g. `/mode bypass` for Devin's auto-approve-all) |
 | `/config` | List session config options reported by the agent (model, thought level, etc.) |
-| `/config <id>` | Show the selectable values for an option |
+| `/config <id>` | Show the selectable values for an option, numbered |
+| `/config <id> <n>` | Set an option by picking a number from its list |
 | `/config <id> <value>` | Set an option via `session/set_config_option` (value ID, or `true`/`false` for boolean options) |
 | `/model [value]` | Shortcut for `/config model [value]` — e.g. `/model swe-2-high` |
 
