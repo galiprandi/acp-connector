@@ -37,9 +37,11 @@ ACP_MATRIX_AGENTS=devin,opencode pnpm test:matrix   # subset
 
 - Opt-in via `ACP_MATRIX=1` — never runs in plain `pnpm test`.
 - Agents that can't boot report as skipped; agents without LLM
-  credentials (e.g. `dsh acp` needs `DEEPSEEK_API_KEY`) run everything
-  except prompt round-trips — a `prompt=NO` boot line is expected, not a
-  failure.
+  credentials run everything except prompt round-trips — a `prompt=NO`
+  boot line is expected, not a failure. `dsh acp` prompts work when the
+  local `acp` profile routes via OpenRouter (`~/.dsh/profiles/acp/
+  cordis.patch.yml` → `acp.provider=openrouter` + `OPENROUTER_API_KEY`);
+  the stock `deepseek-official` route instead needs `DEEPSEEK_API_KEY`.
 - Capability differences are asserted per-agent (configOptions,
   availableModes, resume support) — the matrix verifies the *rules*, not
   identical output.

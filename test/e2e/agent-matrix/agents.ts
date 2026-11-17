@@ -8,7 +8,11 @@
  * - opencode acp: no availableModes; configOptions (model, effort, mode),
  *                 session/list+resume+close+fork
  * - dsh acp:      no modes; configOptions (model, reasoning_effort),
- *                 session/list; prompt needs DEEPSEEK_API_KEY (auto-skips)
+ *                 session/list; prompts route via OpenRouter — the local
+ *                 acp profile (~/.dsh/profiles/acp/cordis.patch.yml) sets
+ *                 provider=openrouter + OPENROUTER_API_KEY; without that
+ *                 patch the default deepseek-official route needs
+ *                 DEEPSEEK_API_KEY and prompt checks auto-skip
  * - agy-acp:      modes (default/accept-edits/plan) + configOptions
  *                 (mode, model, reasoningEffort), session/list+resume
  */

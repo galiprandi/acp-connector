@@ -14,8 +14,8 @@ import { type AgentRuntime, bootAgent, shutdownAgent } from './harness.js';
  *   ACP_MATRIX_AGENTS=devin,opencode pnpm test:matrix
  *
  * Agents that fail to boot are reported as skipped; agents whose LLM
- * credentials are missing (e.g. dsh without DEEPSEEK_API_KEY) run every
- * check except prompt round-trips.
+ * credentials are missing run every check except prompt round-trips
+ * (e.g. dsh acp without its OpenRouter/DeepSeek credential patch).
  */
 
 const RUN = process.env.ACP_MATRIX === '1' || process.env.ACP_MATRIX === 'true';
@@ -218,18 +218,40 @@ describe.skipIf(!RUN)('e2e agent matrix', () => {
       it(`${spec.id}: resume restores the stored sessionId`, async (ctx) => {
         const c = cell(spec.id);
         if (!c.rt) return ctx.skip();
+        // Ensure the session has real content: some agents (devin) only
+        // persist sessions that completed a turn — an empty session made
+        // by '/sessions new' is legitimately unresumable after restart.
+        if (c.rt.promptCapable) {
+          await c.rt.bot.prompt('Reply with exactly: RESUME_PROBE', 90_000);
+        }
         const stored = c.rt.acp.sessionId;
-        const acp2 = new AcpClient({ agentCmd: spec.agentCmd, agentCwd: cwd, sessionId: stored });
+        // Simulate a bridge restart: kill the old agent process before
+        // the new one resumes — some agents (devin) refuse to resume a
+        // session still open in another process, and flush the session
+        // record asynchronously after exit. NOTE: do NOT session/close
+        // first — devin removes closed sessions from the resumable set.
+        c.rt.acp.kill();
+        await new Promise((r) => setTimeout(r, 1500));
+        // 'yes'-resume agents get retries: the agent may still be
+        // flushing the closed session when the first resume arrives.
+        const attempts = spec.resume === 'yes' ? 3 : 1;
+        let acp2: AcpClient | null = null;
         try {
-          await acp2.start();
+          for (let i = 0; i < attempts; i++) {
+            acp2?.kill();
+            acp2 = new AcpClient({ agentCmd: spec.agentCmd, agentCwd: cwd, sessionId: stored });
+            await acp2.start();
+            if (spec.resume !== 'yes' || acp2.sessionId === stored) break;
+            await new Promise((r) => setTimeout(r, 3000));
+          }
           if (spec.resume === 'fallback') {
             // No resume support — must degrade to a fresh session, not crash.
-            expect(acp2.sessionId).toBeTruthy();
+            expect(acp2?.sessionId).toBeTruthy();
           } else {
-            expect(acp2.sessionId).toBe(stored);
+            expect(acp2?.sessionId).toBe(stored);
           }
         } finally {
-          acp2.kill();
+          acp2?.kill();
         }
       }, 120_000);
     }

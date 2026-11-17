@@ -231,7 +231,7 @@ When implementing or modifying ACP protocol features, **always test against both
 
 - **Devin** (`devin acp`): supports session modes (`bypass`, `accept-edits`, `smart`, `ask`, `plan`), session config options (`mode` + `model` via `session/set_config_option`), session list, session resume, session load, image content
 - **OpenCode** (`opencode acp`): does NOT support `session/set_mode` (rejects it), but DOES expose `configOptions` (mode + model) and supports `session/set_config_option` — prefers the generic config-option path over set_mode; also supports session list, session resume, session close, session fork, image content, HTTP/SSE MCP
-- **dsh** (`dsh acp`, DeepSeek Harness): no session modes; `configOptions` (`model`, `reasoning_effort`); session/list works; NO `session/resume`/`load` — resume attempts fall back to `session/new`; prompts need `DEEPSEEK_API_KEY`
+- **dsh** (`dsh acp`, DeepSeek Harness): no session modes; `configOptions` (`model`, `reasoning_effort`); session/list works; NO `session/resume`/`load` — resume attempts fall back to `session/new`; prompts route via the `acp` profile's configured provider — locally patched to OpenRouter (`~/.dsh/profiles/acp/cordis.patch.yml`), stock default `deepseek-official` needs `DEEPSEEK_API_KEY`
 - **agy** (`npx agy-acp`, Antigravity): session modes (`default`, `accept-edits`, `plan`) + `configOptions` (`mode`, `model`, `reasoningEffort`); session list/resume; also advertises agent-level `/mode`, `/model`, `/plan`, `/effort`, `/skills` commands
 - **Available commands**: Devin (~47: built-ins + skills) and OpenCode (~20) advertise `available_commands_update`; pi does not advertise commands — `/help` omits the section gracefully
 
@@ -245,7 +245,7 @@ This ensures features degrade gracefully when an agent doesn't support them. Non
 4. Only then bump version, tag, and release
 
 Available local ACP agents for validation: `devin acp`, `opencode acp`,
-`dsh acp` (DeepSeek Harness — needs `DEEPSEEK_API_KEY` for prompts),
+`dsh acp` (DeepSeek Harness — prompts need a working provider route: local OpenRouter patch or `DEEPSEEK_API_KEY`),
 `npx agy-acp` (antigravity has no native ACP mode in agy 1.3.x — the adapter
 wraps the binary), `npx pi-acp` (pi needs the adapter — plain `pi acp` doesn't
 exist in pi ≥1.0; not currently installed). Verified with live A2A delegation: devin orchestrating

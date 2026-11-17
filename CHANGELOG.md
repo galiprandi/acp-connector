@@ -26,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `config.cron[]`/`config.routines[]` are deprecated — migrated into `state.json` jobs on first boot
 - Prompt source labels: injected prompts now echo as `⏰ [job]`/`[agent-job]`, `🌐 [http]`, `🔁 [a2a]` (previously `[cron]`/`[routine]`/`[reminder]` variants)
 - `sessionId` persistence no longer rewrites `acp-connector.jsonc` — `persistSessionId`/`persistCronAndRoutines` removed; all writes go through `StateStore`
+- Agent matrix: `dsh acp` prompts run through its OpenRouter-routed `acp` profile (stock `deepseek-official` route still needs `DEEPSEEK_API_KEY`); session-restore check now simulates a real restart (old process killed before resume, prompt seeded so the session is persistable, retries while the agent flushes)
 
 ## [0.18.0] - 2026-11-16
 

@@ -227,10 +227,15 @@ export async function bootAgent(agentCmd: string, cwd: string): Promise<AgentRun
 
   let promptCapable = true;
   try {
-    const res = await bot.prompt('Reply with exactly: MATRIX_OK', 60_000);
+    // Generous timeout: free-tier routes (e.g. dsh→OpenRouter) can be slow.
+    const res = await bot.prompt('Reply with exactly: MATRIX_OK', 180_000);
     promptCapable = res.includes('MATRIX_OK');
   } catch {
     promptCapable = false;
+    // A timed-out probe can leave the agent turn running — cancel it so
+    // later checks don't observe a stale `busy` state.
+    await acp.cancel().catch(() => {});
+    await new Promise((r) => setTimeout(r, 1000));
   }
 
   const configOptionIds = (acp.configOptions ?? []).map((o) => o.id);
