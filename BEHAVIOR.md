@@ -193,7 +193,7 @@
 ## Module: AliasDirectory
 - keeps same-named chats on different platforms distinct
 - lists aliases without exposing raw chat ids
-- persists and reloads aliases across restarts
+- persists and reloads aliases across restarts via state.json
 - registers a DM alias from the sender name
 - registers a group alias from the chat title, not the sender
 - reports ambiguity when two chats share an alias
@@ -237,22 +237,19 @@
 - /config <id> lists the option values numbered with current marker
 - /config <unknown> sends available option ids
 - /config lists all config options with current values
+- /config mode <id> switches mode via set_mode
+- /config mode <n> switches mode by index
+- /config mode <unknown> sends available values
+- /config mode lists modes as a synthetic option
+- /config mode on error sends error message
+- /config mode when no modes available reports unknown option
+- /config model <n> sets the model by list index
+- /config model <value> sets the model
+- /config model without value lists model options
 - /config on error sends error message
-- /config with no config options sends message
-- /delete <id> deletes a session
-- /delete active session is rejected
-- /delete on error sends error message
-- /delete without arg shows usage
+- /config with no config options and no modes sends message
 - /help includes agent-advertised commands
 - /help omits agent section when agent reports no commands
-- /mode <id> switches mode
-- /mode <unknown> sends available modes
-- /mode lists available modes
-- /mode on error sends error message
-- /mode when no modes available sends message
-- /model <n> sets the model by list index
-- /model <value> is an alias for /config model <value>
-- /model without value lists model options
 - /new on error sends error message
 - /new when busy refuses with message
 - /new when idle creates new session
@@ -263,11 +260,16 @@
 - /session when busy refuses with message
 - /session without id sends usage
 - /sessions lists available sessions
+- /sessions rm <id> deletes a session
+- /sessions rm active session is rejected
+- /sessions rm on error sends error message
+- /sessions rm without arg shows usage
 - /sessions when not supported sends error
 - /stop clears the queue
 - /stop on cancel error sends error message
 - /stop when busy cancels the agent
 - /stop when idle responds nothing to stop
+- a real mode configOption wins over the synthetic one
 - allows permission callbacks from allowlisted users in groups
 - allows permission callbacks in private chats without allowlist
 - auto-approves permission when agentCmd includes dangerous
@@ -320,9 +322,9 @@
 - defaults to true when not specified
 - does not echo when echoInjectedPrompts is false
 - does not echo when no source is provided (direct user message)
-- echoes cron-sourced prompt with cron label
+- echoes a2a-sourced prompt with a2a label
 - echoes http-sourced prompt with http label
-- echoes routine-sourced prompt with routine label
+- echoes job-sourced prompt with job label
 - truncates long prompts in echo to 200 chars
 
 ## Module: queued reaction
@@ -338,10 +340,10 @@
 
 ## Module: /queue and /status
 - /queue cancel removes the item at position
-- /queue cancel with invalid index shows usage
 - /queue clear removes all pending prompts
 - /queue lists pending prompts
 - /queue on empty queue reports empty
+- /queue rm with invalid index shows usage
 - /status reports agent state, session, queue and uptime
 - reports message handler errors without rejecting
 - sendMessage prefers line boundaries when no paragraph break fits
@@ -351,27 +353,27 @@
 - sendMessage threads continuation chunks as replies to the first
 
 ## Module: command source isolation
+- agent-job content stays remote even when it mimics an operator command
 - never runs commands for a2a content, even with httpCommandsAllowed
-- never runs commands for agent-created cron content
+- never runs commands for agent-created job content
 - never runs commands for agent-created reminder content
 - runs commands for http prompts when httpCommandsAllowed is true
-- runs commands for operator reminder content
+- runs commands for operator job content
 - treats http prompts as agent input by default: no commands run, prompt reaches the agent
 
-## Module: reminders api
-- creates a reminder with "at" and rejects both in+at
-- creates a reminder with "in" and returns id + firesAt
-- keeps operator-managed reminders read-only for the agent
-- lists, updates and cancels reminders
+## Module: jobs api — create
+- creates cron jobs from "every" and "expr"
+- creates manual jobs that require a name
+- creates once jobs from "in" and "at"
+- rejects ambiguous or missing schedule sources
 - rejects naive absolute times when timezone is not configured
-- returns firesAtLocal with zone info in create/list/update
+- returns firesAtLocal and now in responses
 
-## Module: cron api
-- POST /cron/create with a "/" prompt is delivered prefixed, never dispatched as a bridge command
-- caps agent-created jobs at AGENT_CRON_CAP
-- creates agent-managed jobs from "every" and "expr"
+## Module: jobs api — list/update/delete/run/toggle
+- caps agent-created jobs
+- keeps operator jobs read-only for the agent
 - lists all jobs flagging operator-owned ones read-only
-- rejects unsupported intervals and missing schedule
+- run delivers the prompt and toggle flips enabled
 - updates and deletes only agent-managed jobs
 
 ## Module: messaging api
@@ -386,13 +388,13 @@
 - exits with error when ACP fails to start
 - exits with error when no config found
 - keeps a /prompt chatId present in the platform allowlist
-- preserves Discord Snowflake channel IDs for cron allowedChatIds
+- preserves Discord Snowflake channel IDs for job allowedChatIds
 - refuses to start when http is enabled on a non-loopback host without an auth token
 - routes permission to the bot with an active prompt (Discord), not the first bot (TG)
-- starts ACP, bot, cron, and HTTP
+- starts ACP, bot, jobs, and HTTP
 - starts when http runs on a non-loopback host with an auth token
 - warns but starts when http is enabled without a token on a loopback host
-- wires onCommand to routine manager
+- wires onCommand to the jobs handler
 - wires onPermission to bot
 
 ## Module: config edge cases
@@ -419,49 +421,12 @@
 - defaultConfigPath resolves to cwd
 - does not strip // inside strings
 - loads a simple config
-- persistSessionId does not throw on an invalid config
-- persistSessionId is a no-op when no config file exists
-- persistSessionId skips the write when the id is unchanged
-- persistSessionId writes sessionId and preserves other fields
 - returns null when no config file exists
 - saveConfig writes valid JSON
+- still loads a legacy sessionId field (migrated to state at boot)
 - strips block comments
 - strips line comments
 - strips trailing commas
-
-## Module: CronManager edge cases
-- add() after stop() starts the new job
-- add() rejects duplicate name and does not push a second job
-- multiple jobs with same schedule all start
-- remove() returns false for non-existent job
-- run() returns false for non-existent job
-- skips job with empty prompt
-- skips job with empty schedule
-- skips job with invalid cron expression
-- skips job with no chatId when allowedChatIds is empty
-- start() with empty jobs array is a no-op
-- stop() when no jobs running is a no-op
-- toggle() returns false for non-existent job
-
-## Module: CronManager
-- add() rejects duplicate name
-- add() starts a new job
-- fires agent-managed jobs with a delivery prefix and managed marker
-- fires job and enqueues prompt
-- list() returns all jobs
-- prefixes agent-managed jobs with a "/" prompt so it is never run as a bridge command
-- remove() returns false for unknown job
-- remove() stops and removes job
-- run() executes job immediately
-- run() returns false for unknown job
-- runs agent-managed jobs manually with the same prefix and marker
-- skips disabled jobs
-- skips invalid schedules
-- skips jobs with no chatId when allowedChatIds is empty
-- starts all valid jobs
-- stop() stops all tasks
-- toggle() pauses and activates
-- uses job chatId when provided
 
 ## Module: DiscordBot
 - /stop clears the queue
@@ -618,6 +583,54 @@
 - uses the chat title for groups
 - uses the sender name for DMs
 
+## Module: everyToCron
+- converts human intervals to cron
+- rejects non-divisor intervals
+
+## Module: parseWhenTime
+- parses ISO datetimes with explicit zone
+- parses relative durations
+- rejects naive absolute times without a timezone
+- resolves naive wall times in the configured timezone, not the host
+- returns null for past times
+
+## Module: formatFiresAt
+- flags UTC fallback when no timezone is set
+- renders with the configured timezone and offset
+
+## Module: JobManager CRUD
+- creates and lists jobs of every trigger kind
+- enforces unique names and the agent cap
+- persists jobs through state.json
+- rejects invalid creates
+- resolves jobs by id or name
+- toggle pauses and resumes scheduling
+- update changes prompt, name and trigger
+
+## Module: JobManager firing
+- delivers an agent job as remote content with a prefix
+- delivers an operator job verbatim with source "job"
+- drops once jobs older than the TTL on start
+- falls back to the first allowed chat when the job has none
+- keeps due jobs when delivery is impossible and retries later
+- manual jobs never auto-fire
+- run() delivers immediately without touching the schedule
+- stop() is safe to call twice and clears scheduled work
+
+## Module: /jobs command
+- accepts explicit offsets without a timezone
+- adds a named manual job: /jobs add as deploy manual <prompt>
+- adds a raw cron job: /jobs add 0 9 * * 1-5 standup
+- adds a relative one-shot job: /jobs add in 20m <prompt>
+- adds an interval job: /jobs add every 1h <prompt>
+- ignores non-/jobs commands
+- lists jobs with numbers and kind icons
+- rejects manual without a name and unparseable schedules
+- requires a fresh /jobs list for numeric refs
+- resolves naive absolute times only with a configured timezone
+- runs jobs by number (cached list) and by name
+- toggles and removes jobs by ref
+
 ## Module: logger
 - debug level prints everything
 - defaults to info level (log + warn + error, no debug)
@@ -661,8 +674,8 @@
 
 ## Module: NetworkStore persistence
 - creates an empty state when the file does not exist
-- persists peers to disk
-- rejects an unsupported schemaVersion
+- persists peers inside state.json
+- rejects an unsupported network schemaVersion
 - reloads state across instances
 - writes state files and their directory with owner-only permissions
 
@@ -704,81 +717,7 @@
 - verifyPeerSignature rejects tampered bodies and foreign peers
 
 ## Module: audit log
-- appends JSONL entries to audit.log next to network.json
-
-## Module: ReminderManager
-- cancels reminders by id and reschedules via update
-- delivers due reminders as [Reminder <id>] <prompt> and deletes them
-- delivers past-due reminders on start (boot flush), oldest first
-- discards entries older than 7 days past firesAt on start
-- keeps undeliverable due reminders and retries on the next flush
-- migrates pre-managed store entries as agent-owned
-- persists created reminders to the store file
-- rejects reminders in the past and above the cap
-- restarts with persisted reminders and re-schedules them
-- tags reminders with their owner and delivers it to the queue
-- writes the reminders store with owner-only permissions
-
-## Module: parseReminderTime
-- honors explicit zones in "in" strings
-- parses chrono relative strings
-- parses duration shorthands relative to now
-- rejects naive absolute times when no timezone is configured
-- resolves non-duration "in" strings in the operator timezone
-
-## Module: needsExplicitTimezone
-- does not flag durations or explicit zones
-- flags naive absolute times in both modes
-
-## Module: parseReminderTime absolute
-- parses explicit-zone ISO datetimes as absolute
-- parses naive wall times in the given timezone
-- rejects unparseable or non-future "in" values
-- resolves "tomorrow" against the operator timezone
-
-## Module: RoutineManager edge cases
-- /cron add with 4-token schedule fails (needs 5)
-- /cron add with multi-word prompt works
-- /cron add with no prompt (only 5 tokens) fails
-- /cron add with no schedule (empty) fails
-- /cron remove with empty name shows usage
-- /cron run with empty name shows usage
-- /cron toggle with empty name shows usage
-- /routine add with duplicate name rejects
-- /routine add with no name shows usage
-- /routine add with no prompt shows usage
-- /routine remove with empty name shows usage
-- /run with empty name shows usage
-- _persist does nothing when loadConfig returns null
-
-## Module: RoutineManager
-- /cron add creates job and persists
-- /cron list shows all jobs
-- /cron remove stops job and persists
-- /cron run executes job immediately
-- /cron toggle toggles and persists
-- /cron with no subcommand shows help
-- /routine add creates and persists
-- /routine add rejects duplicate name
-- /routine list shows all routines
-- /routine list shows empty message when no routines
-- /routine remove deletes and persists
-- /routine remove with unknown name returns error
-- /routine with no subcommand shows help
-- /run executes routine by name
-- /run with no args shows usage
-- /run with unknown name returns error
-- adds a duration reminder and confirms with local time + zone
-- adds an absolute reminder using config.timezone
-- does not let a partial chrono match steal prompt words
-- lists empty and populated reminders with owner badges
-- rejects input with no parseable time
-- rejects naive absolute times without config.timezone
-- removes reminders by id
-- returns false for non-command text
-- returns false for unknown command
-- says unavailable without a reminder manager
-- shows help for bare /reminder
+- appends JSONL entries to audit.log next to state.json
 
 ## Module: parseWhichOutput
 - handles multi-line `where` output (Windows)
@@ -815,6 +754,24 @@
 - throws on unsupported platforms
 - win32: runs the schtasks command
 
+## Module: StateStore
+- creates a fresh versioned state when the file does not exist
+- ignores a non-object state file
+- persists sections atomically and reloads them
+- renames a corrupt state file to .corrupt and starts fresh
+- supports namespaced update()
+- writes the file with owner-only permissions
+
+## Module: migrateLegacyState
+- does not clobber existing state sections
+- imports aliases.json and renames it .migrated
+- imports config.cron as cron jobs and config.routines as manual jobs
+- imports config.sessionId into state
+- imports network.json into the network section
+- imports pending reminders as once jobs
+- is a no-op when there is nothing to migrate
+- is idempotent — second run changes nothing
+
 ## Module: MediaHandler.processVoiceNote
 - canTranscribe is false without a transcriber
 - deletes the file and rethrows when transcription fails
@@ -834,7 +791,7 @@
 ## Module: e2e: acp-tools MCP via fake agent
 - injects acp-tools and serves list_aliases through tools/call
 - send_file enforces the path allowlist then fails cleanly with no chat
-- serves consolidated reminder actions (create + list)
+- serves unified jobs actions (create + list)
 
 ## Module: e2e: two real bridges with fake agents
 - agent-side delegation: fake agent calls /a2a/delegate to a peer

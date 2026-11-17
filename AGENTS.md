@@ -199,6 +199,18 @@ entirely. Legacy `config.sessionId` migrates into state on first boot.
 - **Config is truth**: user config in `acp-connector.jsonc`; runtime state in `.acp-connector/state.json`
 - **Serialized queue**: one prompt at a time, no concurrent prompts (cap 100)
 
+## Testing
+
+- `pnpm test` — unit + fake-agent e2e (always on, must stay green)
+- `pnpm test:matrix` — **real-agent matrix** (`test/e2e/agent-matrix/`):
+  boots `devin acp`, `opencode acp`, `dsh acp`, `npx agy-acp` and runs the
+  real command surface (`/sessions`, `/config`, `/queue`, `/jobs`,
+  `/time`, `/status`, `/help`, prompts, resume). Opt-in via `ACP_MATRIX=1`;
+  agents without credentials run everything except prompt round-trips.
+  **Mandatory before every release** — see
+  `.devin/skills/release-testing/SKILL.md` for the full pre-release
+  checklist (unit + e2e + matrix + targeted smoke).
+
 ## BEHAVIOR.md (auto-generated)
 
 `BEHAVIOR.md` is generated from test results — never edit it by hand.
@@ -219,20 +231,24 @@ When implementing or modifying ACP protocol features, **always test against both
 
 - **Devin** (`devin acp`): supports session modes (`bypass`, `accept-edits`, `smart`, `ask`, `plan`), session config options (`mode` + `model` via `session/set_config_option`), session list, session resume, session load, image content
 - **OpenCode** (`opencode acp`): does NOT support `session/set_mode` (rejects it), but DOES expose `configOptions` (mode + model) and supports `session/set_config_option` — prefers the generic config-option path over set_mode; also supports session list, session resume, session close, session fork, image content, HTTP/SSE MCP
+- **dsh** (`dsh acp`, DeepSeek Harness): no session modes; `configOptions` (`model`, `reasoning_effort`); session/list works; NO `session/resume`/`load` — resume attempts fall back to `session/new`; prompts need `DEEPSEEK_API_KEY`
+- **agy** (`npx agy-acp`, Antigravity): session modes (`default`, `accept-edits`, `plan`) + `configOptions` (`mode`, `model`, `reasoningEffort`); session list/resume; also advertises agent-level `/mode`, `/model`, `/plan`, `/effort`, `/skills` commands
 - **Available commands**: Devin (~47: built-ins + skills) and OpenCode (~20) advertise `available_commands_update`; pi does not advertise commands — `/help` omits the section gracefully
 
 This ensures features degrade gracefully when an agent doesn't support them. Non-fatal errors (e.g. unsupported session mode) should log a warning and continue, not crash the bridge.
 
-**Regression policy (critical):** this is a published npm package consumed by real deployments (Telegram/Discord bots). Never ship a regression. Before every release:
+**Regression policy (critical):** this is a published npm package consumed by real deployments (Telegram/Discord bots). Never ship a regression. Before every release, run the full checklist in `.devin/skills/release-testing/SKILL.md`:
 
 1. Full suite green (`pnpm test`) + lint + typecheck — zero tolerance, no skipped tests
-2. Real-agent smoke test: run `AcpClient` (via tsx script) against `devin acp`, `opencode acp`, `pi acp`, and `antigravity` when available — verify session/new, prompt, and any feature touched (e.g. configOptions, restart, exit handling). Mandatory flows: `session/new` (fresh), `session/load`/`session/resume` (existing sessionId — this is where 0.11.0 regressed: missing `mcpServers` rejected by devin acp), `session/prompt`, and any touched feature
-3. Only then bump version, tag, and release
+2. `pnpm test:matrix` — the real-agent matrix (devin/opencode/dsh/agy) covering the command surface, prompts and resume
+3. Targeted `AcpClient` smoke for surface the matrix doesn't cover (MCP tools, A2A, media, permissions) — mandatory flows: `session/new` (fresh), `session/load`/`session/resume` (existing sessionId — this is where 0.11.0 regressed: missing `mcpServers` rejected by devin acp), `session/prompt`, and any touched feature
+4. Only then bump version, tag, and release
 
 Available local ACP agents for validation: `devin acp`, `opencode acp`,
-`npx pi-acp` (pi needs the adapter — plain `pi acp` doesn't exist in pi ≥1.0),
+`dsh acp` (DeepSeek Harness — needs `DEEPSEEK_API_KEY` for prompts),
 `npx agy-acp` (antigravity has no native ACP mode in agy 1.3.x — the adapter
-wraps the binary). Verified with live A2A delegation: devin orchestrating
+wraps the binary), `npx pi-acp` (pi needs the adapter — plain `pi acp` doesn't
+exist in pi ≥1.0; not currently installed). Verified with live A2A delegation: devin orchestrating
 opencode, pi-acp and agy-acp peers.
 
 ### Procedure

@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`/config` absorbs `/mode` and `/model`**: one settings surface for all session options; agents exposing modes only via `session/set_mode` get a synthetic `mode` option (a real `mode` config option always wins)
 - **`jobs` MCP tool**: single agent-facing tool (`create`/`list`/`update`/`delete`/`run`/`toggle`) replacing `reminder`+`cron`; supports `manual:true`+`name` for operator-triggered jobs; responses include `firesAtLocal` and `now` for timezone-safe scheduling
 - **Telegram command menu**: `setMyCommands` registers `/stop /sessions /config /queue /jobs /time /status /help` so typing `/` shows descriptions
+- **Real-agent test matrix** (`pnpm test:matrix`): e2e suite that boots `devin acp`, `opencode acp`, `dsh acp` and `npx agy-acp` and exercises the real command surface — sessions, config/mode resolution, queue, jobs lifecycle, clocks, help, prompt round-trips and session resume — with per-agent capability assertions. Opt-in via `ACP_MATRIX=1`; mandatory before releases (see `.devin/skills/release-testing`)
 
 ### Removed
 - **Breaking**: `/new`, `/session`, `/delete`, `/mode`, `/model`, `/run`, `/cron`, `/routine`, `/reminder` chat commands — use `/sessions`, `/config`, `/jobs` (see migration notes above)

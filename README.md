@@ -949,7 +949,8 @@ See [AGENTS.md](AGENTS.md) for development setup, commit conventions, and releas
 
 - **Commits**: [Conventional Commits](https://www.conventionalcommits.org/) enforced by commitlint
 - **Linting**: [Biome](https://biomejs.dev/)
-- **Tests**: [Vitest](https://vitest.dev/) — `pnpm test` (536 tests)
+- **Tests**: [Vitest](https://vitest.dev/) — `pnpm test` (unit + fake-agent e2e), `pnpm test:matrix` (real-agent matrix)
+- **Real-agent matrix**: `ACP_MATRIX=1 pnpm test:matrix` boots `devin acp`, `opencode acp`, `dsh acp` and `npx agy-acp` and runs the actual `/sessions`, `/config`, `/jobs`, `/time`, `/status`, `/help` command surface plus prompt round-trips and session resume against each — capability differences are asserted per agent. Filter with `ACP_MATRIX_AGENTS=devin,opencode`. See `.devin/skills/release-testing/SKILL.md` for the mandatory pre-release checklist
 - **PRs**: CI runs lint + tests + commitlint on every PR
 
 ***
