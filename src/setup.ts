@@ -1,6 +1,6 @@
 import { createInterface, type Interface } from 'node:readline';
 import { type BridgeConfig, type PlatformsConfig, saveConfig } from './config.js';
-import { systemTimezone } from './reminders.js';
+import { systemTimezone } from './jobs.js';
 
 function ask(rl: Interface, prompt: string): Promise<string> {
   return new Promise((resolve) => rl.question(prompt, (answer) => resolve(answer.trim())));
@@ -149,8 +149,6 @@ export async function setup(): Promise<void> {
     showThoughts,
     streaming: true,
     logLevel: 'info',
-    cron: [],
-    routines: [],
   };
 
   saveConfig(config);
@@ -160,8 +158,8 @@ export async function setup(): Promise<void> {
   console.log('  npx acp-connector');
   console.log('\nThen send a message to your bot.');
   console.log('\nTips:');
-  console.log('  • /cron add 0 9 * * * do the daily briefing');
-  console.log('  • /routine add briefing summarize my day');
-  console.log('  • /run briefing');
+  console.log('  • /jobs add `in 20m check the oven`');
+  console.log('  • /jobs add `every 1h summarize my day`');
+  console.log('  • /time — host, configured and UTC clocks');
   console.log('\nFull docs: https://github.com/galiprandi/acp-connector#readme');
 }

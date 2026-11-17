@@ -7,8 +7,9 @@ import type {
 } from '@agentclientprotocol/sdk';
 import type { AcpClient } from './acp-client.js';
 import type { AliasDirectory } from './aliases.js';
-import type { PlatformBot } from './bot.js';
+import type { PlatformBot, PromptSource } from './bot.js';
 import { identityPrefix, type SenderInfo } from './identity.js';
+import { systemTimezone } from './jobs.js';
 import { log } from './logger.js';
 import type { MediaHandler } from './media.js';
 
@@ -27,7 +28,7 @@ export interface BaseBotOpts {
   onCommand: ((text: string, chatId: number | string) => Promise<boolean>) | null;
   onPrompt: ((text: string, chatId: number | string) => void) | null;
   /**
-   * Allow `/commands` (e.g. /a2a, /mode, /cron) to be run by prompts with
+   * Allow `/commands` (e.g. /a2a, /sessions, /jobs) to be run by prompts with
    * source 'http' (POST /prompt). Default false: prompt text sent over
    * HTTP is agent input, never bridge administration.
    */
@@ -38,6 +39,8 @@ export interface BaseBotOpts {
   platformName?: string;
   /** Chat alias directory — fed on every inbound user message. */
   aliases?: AliasDirectory | null;
+  /** `config.timezone` — used by /time and job schedule rendering. */
+  timezone?: string;
 }
 
 export interface QueueItem {
@@ -97,6 +100,7 @@ export abstract class BaseBot implements PlatformBot {
   protected previewLength: number;
   protected platformName: string;
   protected aliases: AliasDirectory | null;
+  protected timezone?: string;
   /** Last chat that sent a user message — fallback target for agent file sends. */
   protected lastUserChannelId: string | number | null;
   /** Last /sessions listing — lets /session <n> resolve numbers to ids. */
@@ -119,6 +123,7 @@ export abstract class BaseBot implements PlatformBot {
     logPreviewLength,
     platformName = 'unknown',
     aliases = null,
+    timezone,
   }: BaseBotOpts) {
     this.acp = acp;
     this.agentCmd = agentCmd;
@@ -146,6 +151,7 @@ export abstract class BaseBot implements PlatformBot {
     this.previewLength = Math.max(20, Math.floor(logPreviewLength ?? 150));
     this.platformName = platformName;
     this.aliases = aliases;
+    this.timezone = timezone;
     this.lastUserChannelId = null;
     this.lastSessionList = null;
   }
@@ -256,9 +262,13 @@ export abstract class BaseBot implements PlatformBot {
   ): Promise<boolean>;
 
   /**
-   * Handle session management commands: /new, /sessions, /session <id>, /mode, /mode <id>.
+   * Handle bridge commands. Noun-first grammar:
+   *   /sessions [new|<n>|<id>|rm <ref>]  — session lifecycle
+   *   /config [<id> [n|value]]           — session settings (absorbs /mode, /model)
+   *   /queue [rm <n>|clear]              — pending prompt queue
+   *   /time                              — host/config/UTC clocks
+   *   /status                            — agent state summary
    * Returns true if the command was handled, false otherwise.
-   * Uses sendMessage() so it works without an active prompt.
    */
   protected async _handleSessionCommand(
     text: string,
@@ -270,27 +280,33 @@ export abstract class BaseBot implements PlatformBot {
     const arg = parts.slice(1).join(' ').trim();
 
     switch (cmd) {
-      case 'new':
-        return this._handleNewSession(channelId);
       case 'sessions':
-        return this._handleListSessions(channelId);
-      case 'session':
-        return this._handleSwitchSession(channelId, arg);
-      case 'delete':
-        return this._handleDeleteSession(channelId, arg);
-      case 'mode':
-        return this._handleModeCommand(channelId, arg);
+        return this._handleSessionsCommand(channelId, arg);
       case 'config':
         return this._handleConfigCommand(channelId, parts.slice(1));
-      case 'model':
-        return this._handleConfigCommand(channelId, ['model', ...parts.slice(1)]);
       case 'queue':
         return this._handleQueueCommand(channelId, arg);
+      case 'time':
+        return this._handleTimeCommand(channelId);
       case 'status':
         return this._handleStatusCommand(channelId);
       default:
         return false;
     }
+  }
+
+  private async _handleSessionsCommand(channelId: string | number, arg: string): Promise<boolean> {
+    if (!arg) return this._handleListSessions(channelId);
+    const [sub, ...rest] = arg.split(/\s+/);
+    const restStr = rest.join(' ').trim();
+
+    if (sub === 'new') return this._handleNewSession(channelId);
+    if (sub === 'rm' || sub === 'delete' || sub === 'remove') {
+      return this._handleDeleteSession(channelId, restStr);
+    }
+    // `/sessions <n|id>` — numeric indexes the cached /sessions list,
+    // anything else is a literal session id (full or unique prefix).
+    return this._handleSwitchSession(channelId, arg);
   }
 
   private async _handleNewSession(channelId: string | number): Promise<boolean> {
@@ -327,7 +343,7 @@ export abstract class BaseBot implements PlatformBot {
       });
       await this.sendMessage(
         channelId,
-        `*Sessions:*\n${lines.join('\n')}\n\nSwitch with /session <n> or /session <id>.`
+        `*Sessions:*\n${lines.join('\n')}\n\nSwitch with /sessions <n> or /sessions <id>.`
       );
     } catch (err) {
       await this.sendMessage(channelId, `Cannot list sessions: ${(err as Error).message}`);
@@ -374,7 +390,7 @@ export abstract class BaseBot implements PlatformBot {
 
   private async _handleSwitchSession(channelId: string | number, arg: string): Promise<boolean> {
     if (!arg) {
-      await this.sendMessage(channelId, 'Usage: /session `<n>` or /session `<id>`');
+      await this.sendMessage(channelId, 'Usage: /sessions `<n>` or /sessions `<id>`');
       return true;
     }
     if (this.busy) {
@@ -398,17 +414,30 @@ export abstract class BaseBot implements PlatformBot {
 
   private async _handleDeleteSession(channelId: string | number, arg: string): Promise<boolean> {
     if (!arg) {
-      await this.sendMessage(channelId, 'Usage: /delete `<id>`');
+      await this.sendMessage(channelId, 'Usage: /sessions rm `<id>`');
       return true;
     }
-    if (arg === this.acp.sessionId) {
-      await this.sendMessage(channelId, 'Cannot delete the active session. Use /new first.');
+    // Numeric refs resolve against the cached /sessions list too.
+    let target = arg;
+    if (/^\d+$/.test(arg)) {
+      const resolved = this._resolveSessionArg(arg);
+      if ('error' in resolved) {
+        await this.sendMessage(channelId, resolved.error);
+        return true;
+      }
+      target = resolved.id;
+    }
+    if (target === this.acp.sessionId) {
+      await this.sendMessage(
+        channelId,
+        'Cannot delete the active session. Use /sessions new first.'
+      );
       return true;
     }
     try {
-      await this.acp.deleteSession(arg);
-      await this.sendMessage(channelId, `🗑 Deleted session: \`${arg}\``);
-      log.info(`🗑 deleted session: ${arg}`);
+      await this.acp.deleteSession(target);
+      await this.sendMessage(channelId, `🗑 Deleted session: \`${target}\``);
+      log.info(`🗑 deleted session: ${target}`);
     } catch (err) {
       await this.sendMessage(channelId, `Failed to delete session: ${(err as Error).message}`);
     }
@@ -433,10 +462,10 @@ export abstract class BaseBot implements PlatformBot {
       return true;
     }
 
-    if (sub === 'cancel') {
+    if (sub === 'rm' || sub === 'cancel') {
       const idx = parseInt(arg.split(/\s+/)[1] ?? '', 10);
       if (Number.isNaN(idx) || idx < 1 || idx > this.queue.length) {
-        await this.sendMessage(channelId, 'Usage: /queue cancel `<position>`');
+        await this.sendMessage(channelId, 'Usage: /queue rm `<position>`');
         return true;
       }
       const [removed] = this.queue.splice(idx - 1, 1);
@@ -463,6 +492,38 @@ export abstract class BaseBot implements PlatformBot {
     return true;
   }
 
+  /**
+   * /time — the three clocks that matter for scheduling: the bridge
+   * host's system zone, the operator's configured timezone, and UTC.
+   * The agent has no clock of its own — this is the authoritative
+   * reference the operator (and the agent, via job confirmations)
+   * can check against.
+   */
+  private async _handleTimeCommand(channelId: string | number): Promise<boolean> {
+    const now = new Date();
+    const fmt = (tz: string) =>
+      new Intl.DateTimeFormat('en-US', {
+        timeZone: tz,
+        weekday: 'short',
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        timeZoneName: 'shortOffset',
+      }).format(now);
+    const hostTz = systemTimezone();
+    const lines = [
+      `🕐 Host:   ${fmt(hostTz)} — ${hostTz}`,
+      this.timezone
+        ? `⚙️ Config: ${fmt(this.timezone)} — ${this.timezone}`
+        : '⚙️ Config: (no timezone set — naive times are rejected)',
+      `🌐 UTC:    ${fmt('UTC')}`,
+    ];
+    await this.sendMessage(channelId, lines.join('\n'));
+    return true;
+  }
+
   private async _handleStatusCommand(channelId: string | number): Promise<boolean> {
     const uptimeMs = Date.now() - this.startedAt;
     const mins = Math.floor(uptimeMs / 60000);
@@ -482,50 +543,44 @@ export abstract class BaseBot implements PlatformBot {
     return true;
   }
 
-  private async _handleModeCommand(channelId: string | number, arg: string): Promise<boolean> {
+  /**
+   * Session modes surfaced as a synthetic config option so /config is the
+   * single settings surface — agents that expose `mode` via
+   * session/set_mode (not configOptions) still get a numbered picker.
+   * Returns null when modes exist but a real `mode` configOption already
+   * covers them (the real option wins).
+   */
+  private _modeAsConfigOption(): SessionConfigOption | null {
     const modes = this.acp.modes;
-    if (!modes?.availableModes || modes.availableModes.length === 0) {
-      await this.sendMessage(channelId, 'No session modes available.');
-      return true;
-    }
-
-    if (!arg) {
-      const lines = modes.availableModes.map((m) => {
-        const marker = m.id === modes.currentModeId ? '▶' : ' ';
-        const desc = m.description ? ` — ${m.description}` : '';
-        return `${marker} \`${m.id}\` (${m.name})${desc}`;
-      });
-      await this.sendMessage(channelId, `*Modes:*\n${lines.join('\n')}`);
-      return true;
-    }
-
-    const mode = modes.availableModes.find((m) => m.id === arg);
-    if (!mode) {
-      const available = modes.availableModes.map((m) => m.id).join(', ');
-      await this.sendMessage(channelId, `Unknown mode \`${arg}\`. Available: ${available}`);
-      return true;
-    }
-
-    try {
-      await this.acp.setSessionMode(arg);
-      await this.sendMessage(channelId, `🔧 Mode set to: \`${arg}\` (${mode.name})`);
-      log.info(`🔧 mode set to: ${arg}`);
-    } catch (err) {
-      await this.sendMessage(channelId, `Failed to set mode: ${(err as Error).message}`);
-    }
-    return true;
+    if (!modes?.availableModes || modes.availableModes.length === 0) return null;
+    if (this.acp.configOptions?.some((o) => o.id === 'mode')) return null;
+    return {
+      id: 'mode',
+      name: 'Mode',
+      type: 'select',
+      currentValue: modes.currentModeId,
+      options: modes.availableModes.map((m) => ({
+        value: m.id,
+        name: m.name,
+        description: m.description,
+      })),
+    } as SessionConfigOption;
   }
 
   /**
    * Handle the /config command: generic session config options per ACP
-   * `session/set_config_option`. `/model` is an alias for `/config model`.
+   * `session/set_config_option`. `/config mode` falls back to session
+   * modes (set_mode) when the agent doesn't expose mode as a config
+   * option — /model is just /config model.
    *   /config                — list all options with current values
    *   /config <id>           — list the option's selectable values
-   *   /config <id> <value>   — set the option value (value ID, or true/false)
+   *   /config <id> <value>   — set the option value (number picks from list)
    */
   private async _handleConfigCommand(channelId: string | number, args: string[]): Promise<boolean> {
-    const options = this.acp.configOptions;
-    if (!options || options.length === 0) {
+    const realOptions = this.acp.configOptions ?? [];
+    const syntheticMode = this._modeAsConfigOption();
+    const options = [...realOptions, ...(syntheticMode ? [syntheticMode] : [])];
+    if (options.length === 0) {
       await this.sendMessage(channelId, 'No config options reported by the agent.');
       return true;
     }
@@ -583,7 +638,13 @@ export abstract class BaseBot implements PlatformBot {
     }
 
     try {
-      await this.acp.setConfigOption(configId, value);
+      // Synthetic `mode` option routes to session/set_mode; real config
+      // options go through session/set_config_option.
+      if (option === syntheticMode) {
+        await this.acp.setSessionMode(value);
+      } else {
+        await this.acp.setConfigOption(configId, value);
+      }
       await this.sendMessage(channelId, `⚙️ \`${configId}\` set to: \`${value}\``);
       log.info(`⚙️ config ${configId} set to: ${value}`);
     } catch (err) {
@@ -623,41 +684,22 @@ export abstract class BaseBot implements PlatformBot {
 
   /**
    * Static bridge-command lines shared by the /help output of every
-   * platform — session commands, then cron, routine and reminder groups.
-   * Agent-advertised commands are appended separately by each platform.
+   * platform. Agent-advertised commands are appended separately.
    */
   protected _bridgeCommandHelpLines(): string[] {
     return [
       '  /stop — cancel the current task',
-      '  /new — start a fresh session (clears context)',
-      '  /sessions — list available sessions',
-      '  /session `<n>` — switch to a session from /sessions (or `<id>`)',
-      '  /delete `<id>` — delete a session',
-      '  /mode — list available session modes',
-      '  /mode `<id>` — switch session mode (e.g. /mode bypass)',
-      '  /config — list session config options',
-      '  /config `<id> [n|value]` — show or set an option (number picks from the list)',
-      '  /model `[value]` — show or set the model',
-      '  /queue — list pending prompts',
-      '  /queue cancel `<n>` — remove a pending prompt',
-      '  /queue clear — remove all pending prompts',
+      '  /sessions — list sessions (numbered)',
+      '  /sessions new — start a fresh session',
+      '  /sessions `<n|id>` — switch session · /sessions rm `<id>` — delete',
+      '  /config — list session options (model, mode, …)',
+      '  /config `<id> [n|value]` — show or set an option',
+      '  /queue — list pending prompts · /queue rm `<n>` · /queue clear',
+      '  /jobs — list scheduled/manual jobs',
+      '  /jobs add `[as <name>] <when> <prompt>` — `in 20m` · `every 1h` · date · cron · `manual`',
+      '  /jobs run|toggle|rm `<n|name>` — manage a job',
+      '  /time — host/config/UTC clocks',
       '  /status — agent state, session, queue and uptime',
-      '',
-      '  /cron list — list scheduled jobs',
-      '  /cron add `<schedule> <prompt>` — add a job',
-      '  /cron remove `<name>` — remove a job',
-      '  /cron toggle `<name>` — pause/activate',
-      '  /cron run `<name>` — run now',
-      '',
-      '  /routine list — list routines',
-      '  /routine add `<name> <prompt>` — add a routine',
-      '  /routine remove `<name>` — remove a routine',
-      '',
-      '  /reminder list — list scheduled reminders',
-      '  /reminder add `<when> <prompt>` — one-shot reminder (e.g. in 20 minutes check the oven)',
-      '  /reminder remove `<id>` — cancel a reminder',
-      '',
-      '  /run `<name>` — run a routine',
     ];
   }
 
@@ -705,20 +747,18 @@ export abstract class BaseBot implements PlatformBot {
     chatId?: number | string,
     blocks?: ContentBlock[],
     onComplete?: (response: string, error?: string) => void,
-    source?: 'cron' | 'agent-cron' | 'agent-reminder' | 'http' | 'routine' | 'a2a' | 'reminder',
+    source?: PromptSource,
     onChunk?: (chunk: string) => void
   ): Promise<void> {
     if (!chatId) return;
     // Commands are processed for user messages and first-class operator
-    // entry points (cron, routine, operator reminders) — and for http only
-    // when the operator opts in via `http.commands`. A2A-injected prompts,
-    // default http prompts, and agent-created cron/reminder prompts are
-    // remote content: agent input, not bridge administration.
+    // entry points (jobs, http when opted in) — agent-job prompts, a2a
+    // prompts and non-opted http prompts are remote content: agent input,
+    // not bridge administration.
     const isRemoteContent =
       source === 'a2a' ||
       (source === 'http' && !this.httpCommandsAllowed) ||
-      source === 'agent-cron' ||
-      source === 'agent-reminder';
+      source === 'agent-job';
     if (!isRemoteContent && (await this._handleBuiltinCommand(text, chatId))) return;
     if (!isRemoteContent && text.startsWith('/') && this.onCommand) {
       const handled = await this.onCommand(text, chatId);
@@ -726,14 +766,7 @@ export abstract class BaseBot implements PlatformBot {
     }
     if (this.echoInjectedPrompts && source) {
       const icon =
-        source === 'cron' ||
-        source === 'agent-cron' ||
-        source === 'reminder' ||
-        source === 'agent-reminder'
-          ? '⏰'
-          : source === 'http'
-            ? '🌐'
-            : '🔁';
+        source === 'job' || source === 'agent-job' ? '⏰' : source === 'http' ? '🌐' : '🔁';
       const label = `[${source}]`;
       const preview = text.slice(0, 200).replace(/\n/g, ' ');
       const suffix = text.length > 200 ? '…' : '';

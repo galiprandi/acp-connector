@@ -9,9 +9,9 @@ export interface CronJob {
   chatId?: number | string;
   enabled?: boolean;
   /**
-   * Who owns this job: "agent" jobs were created via the cron_* MCP tools
-   * and can be updated/deleted by the agent; operator jobs (config file,
-   * /cron chat commands) are read-only for the agent.
+   * Who owns this job: "agent" jobs were created via the `jobs` MCP tool
+   * and can be updated/deleted by the agent; operator jobs (created via
+   * `/jobs` chat commands) are read-only for the agent.
    */
   managed?: 'agent' | 'operator';
 }
@@ -29,7 +29,7 @@ export interface HttpConfig {
     token?: string;
   };
   /**
-   * Allow `/commands` (e.g. /a2a, /mode, /cron) to be run via POST /prompt.
+   * Allow `/commands` (e.g. /a2a, /sessions, /jobs) to be run via POST /prompt.
    * Default false: prompt text sent over HTTP is agent input, never bridge
    * administration.
    */
@@ -147,12 +147,16 @@ export interface BridgeConfig {
   /** @deprecated use platforms.telegram.allowedChatIds */
   allowedChatIds?: number[];
   platforms?: PlatformsConfig;
+  /**
+   * @deprecated Moved to state.json (`state.sessionId`) — auto-managed
+   * when `restoreLastSession` is on. Still honored once at migration.
+   */
   sessionId?: string;
   /**
-   * When true (default), the bridge writes the active sessionId back to
-   * this config on every session change (/new, /session, restart), so the
-   * next startup resumes the last session via session/resume|load.
-   * Set false to keep sessionId purely manual.
+   * When true (default), the bridge keeps the active sessionId in
+   * state.json on every session change (/sessions new, /sessions <n>,
+   * restart), so the next startup resumes the last session via
+   * session/resume|load. Set false for manual control.
    */
   restoreLastSession?: boolean;
   sessionMode?: string;
@@ -166,14 +170,16 @@ export interface BridgeConfig {
   /** Max chars of chat/agent previews written to the log (default 150). */
   logPreviewLength?: number;
   /**
-   * IANA timezone used to parse absolute reminder times without an
+   * IANA timezone used to parse absolute job times without an
    * explicit zone (e.g. "America/Argentina/Tucuman"). Required for
    * naive absolute times — unset means they are rejected rather than
    * guessed against the host's system zone. Written automatically by
    * `acp-connector setup`.
    */
   timezone?: string;
+  /** @deprecated Migrated into state.json jobs on first boot. */
   cron?: CronJob[];
+  /** @deprecated Migrated into state.json jobs (kind "manual") on first boot. */
   routines?: Routine[];
   http?: HttpConfig;
   media?: MediaConfig;
@@ -307,24 +313,5 @@ export function saveConfig(config: BridgeConfig, path: string = defaultConfigPat
     chmodSync(path, 0o600);
   } catch {
     // best-effort: tighten pre-existing files; creation mode covers new ones
-  }
-}
-
-/**
- * Persist the active ACP session id back to acp-connector.jsonc so the
- * next startup can resume it (restoreLastSession). Reloads the config
- * from disk first — same pattern as persistCronAndRoutines — so runtime
- * writes never clobber fields another writer just changed. Non-fatal:
- * persistence failure must not break session management.
- */
-export function persistSessionId(sessionId: string, path: string = defaultConfigPath): void {
-  try {
-    const config = loadConfig(path);
-    if (!config) return;
-    if (config.sessionId === sessionId) return;
-    config.sessionId = sessionId;
-    saveConfig(config, path);
-  } catch (err) {
-    log.warn(`⚠️ Could not persist sessionId to config: ${(err as Error).message}`);
   }
 }

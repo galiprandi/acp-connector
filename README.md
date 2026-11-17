@@ -31,12 +31,12 @@ The bridge is intentionally thin. It doesn't implement its own agent loop, model
 **Key features:**
 - 🤝 **A2A agent network** — peer discovery (LAN broadcast, shared file, registry), double opt-in pairing, `message/send` + `message/stream` (SSE)
 - 🛠 **MCP tools for your agent** — `list_remote_agents` and `send_message` injected into the session so agents can discover and delegate on their own
-- 🛠 **`acp-tools` MCP for your agent** — one unified MCP server injected into the session: `send_file`/`list_aliases` for delivering files to chats, plus `reminder`/`cron` tools for self-scheduled work
-- ⏰ **Agent reminders** — the agent can schedule one-shot self-reminders and manage its own recurring cron jobs — follow-ups, checks, "ping me if they replied" — persisted, late-delivery safe, human time strings. You get `/reminder` chat commands for your own one-shots
+- 🛠 **`acp-tools` MCP for your agent** — one unified MCP server injected into the session: `send_file`/`list_aliases` for delivering files to chats, plus a `jobs` tool for self-scheduled work
+- ⏰ **Unified jobs** — one-shot reminders, recurring schedules and named manual jobs in a single `/jobs` surface — for you via chat commands, for the agent via the `jobs` MCP tool. Persisted, late-delivery safe, human time strings
 - 🤖 Works with any ACP agent (Devin, Claude Code, Codex, OpenCode, pi, Antigravity)
 - 💬 Telegram and Discord as messaging interfaces with streaming responses
 - 🖥 Headless mode — run without any messaging platform (containers, test rigs)
-- ⏰ Cron scheduler and named routines for recurring prompts
+- ⏰ Job scheduler — one-shots, recurring schedules and manual triggers
 - 🌐 Optional HTTP API — `/prompt` with webhook callbacks, bearer auth
 - 🔐 Bearer token auth, rate limiting, body size limits
 - 🧠 Agent thoughts forwarding (optional)
@@ -142,7 +142,7 @@ Send a message to your bot on Telegram. Your agent will respond. That's it.
 - [Installation](#-installation)
 - [Quick start](#-quick-start)
 - [How it works](#-how-it-works)
-- [Configuration](#-configuration) — cron, routines, HTTP API, agent reminders
+- [Configuration](#-configuration) — jobs, HTTP API, agent tools
 - [A2A agent network](#-a2a-agent-network-experimental) — peer discovery, pairing, delegation
 - [Chat commands](#-chat-commands)
 - [Supported agents](#-supported-agents)
@@ -201,82 +201,41 @@ See [`acp-connector.example.jsonc`](acp-connector.example.jsonc) for the full re
 | `platforms` | `Platforms` | yes | — | Platform configs (Telegram and/or Discord) |
 | `platforms.telegram` | `object` | no | — | `{ token, allowedChatIds, allowedUserIds? }` — Telegram config |
 | `platforms.discord` | `object` | no | — | `{ token, allowedChannelIds, allowedUserIds? }` — Discord config |
-| `sessionId` | `string` | no | — | ACP session ID to load/resume. Auto-managed when `restoreLastSession` is on (default) — the bridge writes the active id here on every session change |
-| `restoreLastSession` | `boolean` | no | `true` | Resume the last session on startup. The bridge keeps `sessionId` in sync automatically; set `false` for manual control |
+| `restoreLastSession` | `boolean` | no | `true` | Resume the last session on startup. The bridge keeps the active session id in `.acp-connector/state.json` automatically; set `false` for manual control |
 | `sessionMode` | `string` | no | — | Initial session mode (e.g. `"bypass"` for Devin's auto-approve-all) |
 | `sessionConfigPath` | `string` | no | — | Path to MCP/session config JSONC |
 | `showThoughts` | `boolean` | no | `false` | Forward agent thoughts to chat |
 | `showTools` | `boolean` | no | `true` | Show tool calls (e.g. "Read file", "Run tests") in chat. Set to `false` when only the final answer matters |
 | `showPlan` | `boolean` | no | `true` | Show agent plan/checklist in chat |
 | `streaming` | `boolean` | no | `true` | Stream responses with live message edits |
-| `echoInjectedPrompts` | `boolean` | no | `true` | Echo prompts injected via cron, HTTP, routines or reminders into the chat with a source label (`⏰ [cron]`/`[agent-cron]`/`[reminder]`/`[agent-reminder]`, `🌐 [http]`, `🔁 [routine]`) so you can see what triggered the agent's response |
+| `echoInjectedPrompts` | `boolean` | no | `true` | Echo prompts injected via jobs, HTTP or A2A into the chat with a source label (`⏰ [job]`/`[agent-job]`, `🌐 [http]`, `🔁 [a2a]`) so you can see what triggered the agent's response |
 | `logLevel` | `string` | no | `"info"` | Bridge log verbosity: `"error"` (errors only) \| `"warn"` \| `"info"` \| `"debug"`. Does not affect the agent subprocess's own stderr output |
 | `logPreviewLength` | `number` | no | `150` | Max characters of `👤`/`🤖` chat previews written to the log (min `20`; longer text is cut with `…`) |
-| `timezone` | `string` | no | — | IANA timezone for absolute reminder times without an explicit zone (`"mañana 18hs"`, `"tomorrow 10am"`, `at` values) — e.g. `"America/Argentina/Tucuman"`. **Required for those**: unset means they're rejected rather than guessed against the host's zone. Pure durations (`"30m"`, `"in 45 minutes"`) and explicit zones (`Z`, `±HH:MM`) don't need it. Written automatically by `acp-connector setup` |
-| `cron` | `CronJob[]` | no | `[]` | Scheduled jobs (see below) |
-| `routines` | `Routine[]` | no | `[]` | Named reusable prompts |
+| `timezone` | `string` | no | — | IANA timezone for absolute job times without an explicit zone (`"mañana 18hs"`, `"tomorrow 10am"`, `at` values) — e.g. `"America/Argentina/Tucuman"`. **Required for those**: unset means they're rejected rather than guessed against the host's zone. Pure durations (`"30m"`, `"in 45 minutes"`) and explicit zones (`Z`, `±HH:MM`) don't need it. Written automatically by `acp-connector setup` |
+| `cron` | `CronJob[]` | no | — | **Deprecated** — migrated into `state.json` jobs on first boot |
+| `routines` | `Routine[]` | no | — | **Deprecated** — migrated into `state.json` jobs (manual) on first boot |
+| `sessionId` | `string` | no | — | **Deprecated** — migrated into `state.json` on first boot |
 | `http` | `HttpConfig` | no | off | HTTP server config (see below) |
 | `media` | `MediaConfig` | no | off | Media handling config (see below) |
 | `tools` | `ToolsConfig` | no | off | `acp-tools` MCP tuning: `allowedPaths` (extra dirs the agent may `send_file` from — agent cwd, uploads dir and tmpdir are always allowed) and `maxFileSizeMb` (default 45) |
 
 > **Backward compat:** `telegramToken` and `allowedChatIds` at the root level still work but are deprecated. Migrate to `platforms.telegram`.
 
-### Cron jobs
+### Jobs
 
-Schedule prompts to run automatically. Configure in `acp-connector.jsonc` or manage via Telegram commands.
+Everything that fires a prompt later — one-shot reminders, recurring schedules, manual triggers — lives in a single job list inside `.acp-connector/state.json`. There is no config-side job list anymore: jobs are created and managed at runtime.
 
-```jsonc
-{
-  "cron": [
-    {
-      "name": "daily-briefing",
-      "schedule": "0 9 * * *",
-      "prompt": "summarize today's calendar and unread emails",
-      "chatId": 123456789
-    }
-  ]
-}
-```
+A job is `{ prompt, trigger, name?, enabled, managed }` where `trigger` is one of:
 
-Or from Telegram:
+| Trigger | Fires |
+|---|---|
+| `{ kind: "once", at }` | Once at an absolute time (ISO) |
+| `{ kind: "cron", expr }` | Recurring 5-field cron expression |
+| `{ kind: "manual" }` | Never on its own — triggered by name via `/jobs run` or the agent |
 
-```
-/cron add 0 9 * * * summarize today's calendar and unread emails
-```
+You create and manage them with `/jobs` chat commands (see [Chat commands](#-chat-commands)); the agent manages its own via the `jobs` MCP tool. `managed: "agent"` jobs are capped (50) and fire as remote content — see [acp-tools](#acp-tools-mcp--agent-tools-messaging--scheduling).
 
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `name` | `string` | yes | Unique job name |
-| `schedule` | `string` | yes | Cron expression (e.g. `"0 9 * * *"`) |
-| `prompt` | `string` | yes | Prompt to send to the agent |
-| `chatId` | `number` | no | Chat to send the response to (default: first allowed) |
-| `enabled` | `boolean` | no | `true` (set `false` to pause) |
-
-All changes persist to `acp-connector.jsonc` automatically.
-
-### Routines
-
-Named reusable prompts. Define them in config or create via Telegram.
-
-```jsonc
-{
-  "routines": [
-    { "name": "briefing", "prompt": "summarize today's calendar and unread emails" },
-    { "name": "review", "prompt": "review the latest PRs on my repos" }
-  ]
-}
-```
-
-Run from Telegram:
-
-```
-/run briefing
-```
-
-| Field | Type | Description |
-|---|---|---|
-| `name` | `string` | Unique routine name |
-| `prompt` | `string` | Prompt text |
+On first boot after upgrading, legacy state migrates automatically: `config.cron[]` → cron jobs, `config.routines[]` → manual jobs, `reminders.json` → once jobs, `aliases.json`/`network.json`/`config.sessionId` → their `state.json` sections. Legacy files are renamed `*.migrated` (never deleted) and the migrated config fields are stripped from `acp-connector.jsonc`.
 
 ### `acp-tools` MCP — agent tools (messaging + scheduling)
 
@@ -292,7 +251,7 @@ Every message you send reaches the agent prefixed with who is talking and where,
 [Discord/general] Germán: revisá esto                 ← Discord channel
 ```
 
-The bracketed label identifies the chat — its alias is `Platform/Name` (for groups the name is the channel title; for DMs it's the sender name shown after the bracket, e.g. `Telegram/Germán Aliprandi`). The agent copies it into `send_file`'s `to` parameter, or omits `to` to reply to the current chat. Aliases are tracked automatically in `.acp-connector/aliases.json` (refreshed on every message, so renames self-heal) and never expose raw platform ids.
+The bracketed label identifies the chat — its alias is `Platform/Name` (for groups the name is the channel title; for DMs it's the sender name shown after the bracket, e.g. `Telegram/Germán Aliprandi`). The agent copies it into `send_file`'s `to` parameter, or omits `to` to reply to the current chat. Aliases are tracked automatically in `.acp-connector/state.json` (refreshed on every message, so renames self-heal) and never expose raw platform ids.
 
 #### Tools
 
@@ -300,30 +259,13 @@ The bracketed label identifies the chat — its alias is `Platform/Name` (for gr
 |---|---|
 | `send_file({ path, caption?, to? })` | Send a local file to a chat. `to` = chat alias (e.g. `"Telegram/Familia"`); omitted = the chat that sent the current prompt. Images go as photo previews, everything else as documents. **Path allowlist**: only files inside the agent cwd, the media uploads dir, the OS tmpdir or `tools.allowedPaths` can be sent — anything else (`.env`, tokens, SSH keys…) is rejected, and files are capped at 45MB (`tools.maxFileSizeMb`) |
 | `list_aliases()` | List known chat aliases (alias, platform, dm/group, name — never raw ids) for cross-chat delivery |
-| `reminder({ action, ... })` | One-shot self-reminders. `action`: `create` (`prompt` + `in`/`at`), `list`, `cancel`/`update` (`id`). Accepts human strings (`"15m"`, `"tomorrow 10am"`) and ISO datetimes; absolute times without a zone require `timezone` |
-| `cron({ action, ... })` | Recurring agent-owned jobs. `action`: `create` (`every`/`expr` + `prompt`), `list`, `update`/`delete` (`id`, `enabled`). `every` accepts `"30m"`, `"1h"`, `"1d"`, `"1w"`; `expr` is a raw 5-field cron |
+| `jobs({ action, ... })` | All scheduled work in one tool. `action`: `create` (`prompt` + one schedule source: `in`/`at` for once, `every`/`expr` for recurring, `manual:true`+`name` for manual), `list`, `update`/`delete`/`run`/`toggle` (`id`, `enabled`). Accepts human strings (`"15m"`, `"tomorrow 10am"`, `"1h"`) and ISO datetimes; absolute times without a zone require `timezone`. `manual:true` jobs need a `name` — the operator fires them with `/jobs run <name>` |
 
-**Reminders are one-shot.** When a reminder fires, its prompt is injected into the queue as `[Reminder <id>] <prompt>` and the entry is deleted. If the agent isn't connected when it fires, the entry is kept and retried — a late action beats a lost one. Reminders persist across restarts in `.acp-connector/reminders.json` (max 50 active; entries past `firesAt` by more than 7 days are discarded).
+**Jobs are one model.** A once job fires once and is deleted on delivery; recurring jobs fire on their cron expression; manual jobs only fire when triggered. If the agent isn't connected when a job fires, the entry is kept and retried — a late action beats a lost one. Jobs persist across restarts in `.acp-connector/state.json` (agent-created jobs capped at 50; once jobs past `firesAt` by more than 7 days are discarded).
 
-Every reminder is tagged `managed: "agent" | "operator"`. Agent-created reminders fire as remote content (source `agent-reminder`): their prompt **cannot run `/` bridge commands** even if it starts with one. Operator reminders created via `/reminder add` keep full operator authority. The agent API can list all reminders but `cancel`/`update` only touch `managed: "agent"` entries — operator reminders are read-only, same rule as cron. Entries written before `managed` existed are migrated as agent-owned on load.
+Every job is tagged `managed: "agent" | "operator"`. Agent-created jobs fire as remote content (source `agent-job`): their prompt **cannot run `/` bridge commands** even if it starts with one. Operator jobs created via `/jobs` chat commands keep full operator authority. The agent API can list all jobs but `update`/`delete`/`run`/`toggle` only touch `managed: "agent"` entries — operator jobs are read-only to the agent.
 
-Responses include `firesAt` (UTC ISO) and `firesAtLocal` — the fire time rendered in `timezone` with its GMT offset **and** IANA zone name (e.g. `Nov 12, 2026, 6:00 PM GMT-3 (America/Argentina/Buenos_Aires)`), so the agent can confirm the schedule to you and you can spot a wrong-zone setup at a glance.
-
-Agent-created cron jobs are persisted to `acp-connector.jsonc` with `managed: "agent"` — they survive restarts and the agent can update/delete them later (capped at 50 active agent-created jobs). Jobs you write in the config or create via `/cron` chat commands are operator-owned: the agent can list them but cannot modify them.
-
-**Agent-created cron prompts are agent input, not bridge administration.** When an agent-managed job fires, its prompt is injected as `[Agent cron <id>] <prompt>` and cannot run `/` bridge commands (`/a2a`, `/mode`, `/cron`…) even if the prompt starts with one — agent reminders get the same guard. Operator jobs fire verbatim, unchanged.
-
-### Operator reminders (`/reminder`)
-
-You can also schedule one-shot reminders yourself from the chat — symmetric to `/cron`:
-
-| Command | Purpose |
-|---|---|
-| `/reminder list` | List pending reminders with id, owner (`👤` operator / `🤖` agent), local time + zone, and prompt |
-| `/reminder add `<when> <prompt>`` | Schedule a reminder — e.g. `/reminder add in 20 minutes check the oven` or `/reminder add tomorrow 18hs call mom`. The "when" comes first; absolute times resolve in `timezone` (or an explicit `±HH:MM`/`Z` offset) |
-| `/reminder remove `<id>`` | Cancel a reminder (`rm`/`cancel` aliases) |
-
-Operator reminders are stored in the same `.acp-connector/reminders.json` and confirmed with the local time + GMT offset + IANA zone, so a wrong-zone schedule is visible immediately. Unlike agent reminders they keep operator authority: a prompt starting with `/` can run bridge commands, exactly like `/cron` jobs.
+Responses include `firesAt` (UTC ISO), `firesAtLocal` — the fire time rendered in `timezone` with its GMT offset **and** IANA zone name (e.g. `Nov 12, 2026, 6:00 PM GMT-3 (America/Argentina/Buenos_Aires)`) — and `now`, the current time in the same format, so the agent can resolve "tomorrow 18hs"-style requests without guessing your clock.
 
 ### HTTP API
 
@@ -351,7 +293,7 @@ Optional. Enable in config:
 | `host` | `string` | `"127.0.0.1"` | Bind address (use `"0.0.0.0"` for LAN access) |
 | `port` | `number` | `7780` | Port to listen on |
 | `auth.token` | `string` | `null` | Bearer token for auth (**required** for non-loopback hosts — the server refuses to start with an external `host` and no token) |
-| `commands` | `boolean` | `false` | Allow `/commands` (e.g. `/a2a`, `/mode`, `/cron`) to be run via `POST /prompt` — default `false`: prompt text sent over HTTP is agent input, never bridge administration |
+| `commands` | `boolean` | `false` | Allow `/commands` (e.g. `/a2a`, `/sessions`, `/jobs`) to be run via `POST /prompt` — default `false`: prompt text sent over HTTP is agent input, never bridge administration |
 | `callbackAllow` | `string[]` | `[]` | Hostnames accepted as `callbackUrl` targets besides public ones (loopback/private hosts are rejected by default) |
 | `forwardHeaders` | `boolean` | `false` | Forward request headers to agent (`Authorization` always stripped) |
 | `maxBodySize` | `number` | `1048576` | Max body size in bytes (1MB) |
@@ -387,7 +329,7 @@ curl -X POST "http://localhost:7780/prompt?origin=outlook&from=boss" \
 
 The agent receives: `[origin=outlook, from=boss] {"from": "boss@company.com", "subject": "URGENT"}`
 
-> `POST /prompt` sends **agent input**. To run bridge commands (`/a2a`, `/mode`, ...) over HTTP set `http.commands: true` in the config. A `chatId` in the body is only honored when it is in the platform `allowedChatIds`.
+> `POST /prompt` sends **agent input**. To run bridge commands (`/a2a`, `/sessions`, ...) over HTTP set `http.commands: true` in the config. A `chatId` in the body is only honored when it is in the platform `allowedChatIds`.
 
 With auth:
 
@@ -506,7 +448,7 @@ per-pairing secret delivered once inside the approve → confirm POST — see
 [Peer authentication](#peer-authentication).
 
 Same owner does **not** imply auto-approval. Pending requests persist in
-`.acp-connector/network.json` and are re-announced on startup until resolved
+`.acp-connector/state.json` and are re-announced on startup until resolved
 (approve / reject / ignore / revoke — `ignored` is silent, `rejected` is explicit).
 
 **Inbound security:**
@@ -520,7 +462,7 @@ Same owner does **not** imply auto-approval. Pending requests persist in
   in front — plain insecure tunnels are not supported
 - **Remote content never triggers bridge commands**: A2A-injected text that
   starts with `/` is treated as agent input, not as a command. Commands work
-  on every operator entry point (Telegram, Discord, `/prompt`, cron, routines)
+  on every operator entry point (Telegram, Discord, `/prompt`, `/jobs`)
 - Task-id dedup prevents retries re-executing side effects; delegation-chain
   metadata + a depth limit prevent A→B→A loops
 - Approved peers' cards are refreshed periodically from their well-known URI —
@@ -532,7 +474,7 @@ Same owner does **not** imply auto-approval. Pending requests persist in
 ### Peer authentication
 
 Peer ids are public (they appear in agent cards, `/a2a/peers`, mDNS and
-`network.json`), so the id header alone is not a secret. When a peer is
+`state.json`), so the id header alone is not a secret. When a peer is
 approved (`/a2a approve`), the bridge issues a **random per-pairing secret**,
 stores it in its peer record, and delivers it once inside the approve →
 confirm POST. Both sides then sign A2A traffic with the same key:
@@ -586,8 +528,12 @@ auto-approved (no human in the loop — use only on trusted environments).
 
 ### Files
 
-- `.acp-connector/network.json` — runtime network state (gitignored): peers,
-  statuses, last-seen, seen task ids. Config is intent; this file is reality.
+- `.acp-connector/state.json` — **all** runtime state (gitignored, `0600`):
+  active session id, chat aliases, jobs, A2A peers/statuses, seen task ids.
+  Config is intent; this file is reality. On first boot after upgrading,
+  legacy `aliases.json`/`reminders.json`/`network.json` and the config's
+  `cron`/`routines`/`sessionId` fields migrate into it automatically
+  (legacy files become `*.migrated`).
 
 ***
 
@@ -603,27 +549,33 @@ The bridge intercepts these commands before forwarding to the agent:
 |---|---|
 | `/stop` | Cancel the current task (sends `session/cancel` to the agent) |
 | `/queue` | List pending prompts waiting in the queue |
-| `/queue cancel <n>` | Remove the pending prompt at position `n` |
+| `/queue rm <n>` | Remove the pending prompt at position `n` |
 | `/queue clear` | Remove all pending prompts |
 | `/status` | Show agent state (busy/idle), session ID, mode, queue length and uptime |
+| `/time` | Show the three clocks: host system zone, configured `timezone`, and UTC |
 
-### Session management
+### Sessions
 
 | Command | Description |
 |---|---|
-| `/new` | Start a fresh session (clears accumulated context) |
 | `/sessions` | List available sessions as a numbered list — title + age (requires agent `session/list` capability) |
-| `/session <n>` | Switch to a session by its number in the last `/sessions` list (full `<id>` still works) |
-| `/delete <id>` | Delete a session (requires agent `session/delete` capability) |
-| `/mode` | List available session modes reported by the agent |
-| `/mode <id>` | Switch session mode (e.g. `/mode bypass` for Devin's auto-approve-all) |
-| `/config` | List session config options reported by the agent (model, thought level, etc.) |
+| `/sessions new` | Start a fresh session (clears accumulated context) |
+| `/sessions <n>` | Switch to a session by its number in the last `/sessions` list |
+| `/sessions <id>` | Switch to a session by literal id (full or unique prefix) |
+| `/sessions rm <n\|id>` | Delete a session (requires agent `session/delete` capability) |
+
+### Config
+
+| Command | Description |
+|---|---|
+| `/config` | List session config options reported by the agent (model, mode, thought level, etc.) |
 | `/config <id>` | Show the selectable values for an option, numbered |
 | `/config <id> <n>` | Set an option by picking a number from its list |
 | `/config <id> <value>` | Set an option via `session/set_config_option` (value ID, or `true`/`false` for boolean options) |
-| `/model [value]` | Shortcut for `/config model [value]` — e.g. `/model swe-2-high` |
 
-`/new` and `/session` are refused while the agent is busy — use `/stop` first. `/sessions` gracefully degrades with an error message if the agent doesn't support `session/list`. `/delete` cannot delete the active session (use `/new` first). `/mode` reports "No session modes available" if the agent doesn't expose modes. `/config` reports "No config options reported by the agent" if the agent doesn't expose `configOptions`.
+`/config` is the single settings surface: agents that expose session modes only via `session/set_mode` (not as a config option) get a synthetic `mode` option automatically — a real `mode` config option always wins. There are no separate `/mode` or `/model` commands.
+
+`/sessions new` and `/sessions <n|id>` are refused while the agent is busy — use `/stop` first. `/sessions` gracefully degrades with an error message if the agent doesn't support `session/list`. `/sessions rm` cannot delete the active session (use `/sessions new` first). `/config` reports "No config options reported by the agent" if the agent exposes neither `configOptions` nor modes.
 
 `/help` is dynamic: besides the built-in commands it lists the slash commands the agent advertises via `available_commands_update` under an *Agent commands* section (Devin and OpenCode advertise theirs; agents that report none, like pi, simply omit the section). Typing an agent command forwards it to the agent as a prompt.
 
@@ -640,29 +592,37 @@ Set `sessionMode` in the config to apply a mode automatically when a session is 
 
 This calls `session/set_mode` after `session/new`, `session/load`, or `session/resume`. The mode ID is agent-specific — Devin supports `accept-edits`, `smart`, `ask`, `plan`, and `bypass`. Other agents may expose different modes.
 
-### Cron management
+### Jobs
+
+All scheduled and manual prompts — one namespace for what used to be cron, routines and reminders:
 
 | Command | Description |
 |---|---|
-| `/cron list` | List all cron jobs |
-| `/cron add <schedule> <prompt>` | Add a new cron job |
-| `/cron remove <name>` | Remove a cron job |
-| `/cron toggle <name>` | Pause/activate a job |
-| `/cron run <name>` | Run a job immediately |
+| `/jobs` | List all jobs — numbered, with type (⏰ once / 🔁 cron / ⚡ manual), owner (🤖 agent) and fire time |
+| `/jobs add [as <name>] <when> <prompt>` | Create a job |
+| `/jobs run <n\|name>` | Run a job now (manual jobs require this) |
+| `/jobs <n\|name>` | Bare reference also runs the job (picker UX) |
+| `/jobs toggle <n\|name>` | Pause/resume a job |
+| `/jobs rm <n\|name>` | Delete a job (`delete`/`remove` aliases) |
 
-### Routine management
+`<when>` accepts:
 
-| Command | Description |
-|---|---|
-| `/routine list` | List all routines |
-| `/routine add <name> <prompt>` | Add a reusable prompt |
-| `/routine remove <name>` | Remove a routine |
+| Form | Example | Creates |
+|---|---|---|
+| `in <dur>` / `in <n> <unit>` | `in 20m`, `in 2 hours` | once job |
+| `every <dur>` | `every 1h`, `every 30m` | recurring (compiled to cron) |
+| natural/absolute | `friday 9am`, `2026-11-20 18:00`, `tomorrow 18hs` | once job (needs `timezone` or explicit offset) |
+| 5-field cron | `0 9 * * 1-5` | recurring |
+| `manual` | `as briefing manual summarize my day` | manual job — **requires `as <name>`** |
+
+`as <name>` optionally prefixes any job type so you can reference it by name later. Numeric refs (`/jobs run 2`) resolve against the last `/jobs` listing (10-minute cache); names work anytime. Absolute times without an explicit zone resolve in `config.timezone` — check `/time` if you're unsure which clock you're on.
+
+Operator jobs fire verbatim with operator authority. Agent-created jobs (🤖) are capped at 50 and fire as remote content — their prompts never run bridge commands.
 
 ### Execution
 
 | Command | Description |
 |---|---|
-| `/run <name>` | Execute a routine by name |
 | `/start` | Show welcome message with command list |
 | `/help` | Show welcome message with command list |
 
@@ -897,14 +857,14 @@ v0.13.0 is a security release — see the [CHANGELOG migration table](CHANGELOG.
 - **A2A peer auth** — `a2a.secure: true` makes HMAC peer signatures mandatory (**default on**; set `a2a.secure: false` only for mixed-version meshes during migration). Details: [Peer authentication](#peer-authentication).
 - **HTTP API** — non-loopback `http.host` requires `http.auth.token` (refuses to start otherwise); `http.commands: true` allows `/` bridge commands via `POST /prompt` (default: agent input only); `http.callbackAllow` whitelists internal `callbackUrl` hosts.
 - **Group permissions** — `platforms.*.allowedUserIds` gates who can approve agent permissions / reconnect inside groups (private chats and DMs always allowed).
-- **Agent cron** — agent-created jobs are remote content: `/`-prompts never run bridge commands.
+- **Agent jobs** — agent-created jobs are remote content: `/`-prompts never run bridge commands.
 - **Audit backlog** — full findings and statuses live in [`docs/security-audit-2026-10-21.md`](docs/security-audit-2026-10-21.md); remediation plans in [`plans/`](plans/README.md).
 
 ### Defense-in-depth hardening
 
 Non-breaking hardening on top of the trust-model fixes:
 
-- **File permissions** — `acp-connector.jsonc`, `.acp-connector/*` state (`network.json`, `reminders.json`, `audit.log`, `instances.json`) and media uploads are written `0600` inside `0700` directories; pre-existing loose permissions are tightened on the next write. Upload filenames sanitize the extension to a safe charset and are created with `O_EXCL`, so a pre-planted symlink is never followed.
+- **File permissions** — `acp-connector.jsonc`, `.acp-connector/*` state (`state.json`, `audit.log`, `instances.json`) and media uploads are written `0600` inside `0700` directories; pre-existing loose permissions are tightened on the next write. Upload filenames sanitize the extension to a safe charset and are created with `O_EXCL`, so a pre-planted symlink is never followed.
 - **Resource caps** — the prompt queue holds at most 100 items (chat messages and injected sources alike; excess is dropped with a warning), A2A request bodies are capped at 1 MiB (`413`), and pending A2A join requests are capped at 100.
 - **Permission buttons** — `perm_*` buttons are bound to the message that carried the request; stale buttons from older prompts can no longer resolve the current permission request.
 - **Error hygiene** — internal failures return a generic `internal error` to HTTP/A2A clients (details stay in logs and the audit trail), and HTTP bearer auth uses a constant-time comparison.
@@ -915,11 +875,11 @@ Non-breaking hardening on top of the trust-model fixes:
 
 ## 💾 Session persistence
 
-By default (`restoreLastSession: true`) the bridge **automatically resumes your last session across restarts**: every time the active session changes — startup, `/new`, `/session <id>` — the bridge writes the session id back to `sessionId` in `acp-connector.jsonc`, and on the next start it calls `session/resume` or `session/load` (depending on agent capabilities).
+By default (`restoreLastSession: true`) the bridge **automatically resumes your last session across restarts**: every time the active session changes — startup, `/sessions new`, `/sessions <n|id>`, agent restart — the bridge writes the session id to `state.sessionId` in `.acp-connector/state.json`, and on the next start it calls `session/resume` or `session/load` (depending on agent capabilities).
 
-If the stored session can't be resumed (deleted, expired, or the agent doesn't support resume/load), the bridge logs a warning and starts a fresh session — it never fails to boot because of this.
+If the stored session can't be resumed (deleted, expired, or the agent doesn't support resume/load — or doesn't support resume at all), the bridge logs a warning and starts a fresh session — it never fails to boot because of this.
 
-Set `"restoreLastSession": false` to opt out: `sessionId` then stays purely manual — pin a specific session by writing it yourself, or omit it to always start fresh.
+Set `"restoreLastSession": false` to opt out: nothing is persisted and every start creates a fresh session. (The deprecated `sessionId` config field is honored once during migration, then stripped.)
 
 ```jsonc
 {

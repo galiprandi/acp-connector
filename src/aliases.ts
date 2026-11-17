@@ -1,16 +1,14 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
-import { dirname } from 'node:path';
 import type { SenderInfo } from './identity.js';
 import { aliasDisplayName, platformLabel } from './identity.js';
-import { log } from './logger.js';
+import type { StateStore } from './state.js';
 
 /**
  * Maps agent-facing chat aliases (`Telegram/Familia`,
  * `Discord/Germán Aliprandi`) to real platform chat ids.
  *
  * Fed by every inbound user message — self-healing on renames. Persisted
- * to `.acp-connector/aliases.json` (0600) so aliases survive restarts;
- * the in-memory map is the runtime source of truth.
+ * in `.acp-connector/state.json` via StateStore so aliases survive
+ * restarts; the in-memory map is the runtime source of truth.
  *
  * Raw platform ids are never exposed through the API — only aliases,
  * platform, kind and display name.
@@ -29,15 +27,6 @@ export interface AliasEntry {
 
 export type ResolveResult = { ok: true; entry: AliasEntry } | { ok: false; error: string };
 
-interface StoredEntry {
-  alias: string;
-  platform: string;
-  chatId: string;
-  kind: 'dm' | 'group';
-  name: string;
-  lastSeen: number;
-}
-
 const norm = (s: string) => s.trim().toLowerCase();
 
 export class AliasDirectory {
@@ -45,16 +34,16 @@ export class AliasDirectory {
   private byChat = new Map<string, AliasEntry>();
   /** normalized alias → chatIds (multiple chats can share a display name). */
   private byAlias = new Map<string, Set<string>>();
-  private storePath: string | null;
+  private store: StateStore | null;
 
-  constructor(storePath?: string) {
-    this.storePath = storePath ?? null;
-    if (this.storePath && existsSync(this.storePath)) {
-      try {
-        const raw = JSON.parse(readFileSync(this.storePath, 'utf8')) as StoredEntry[];
-        for (const e of raw) this._upsert(e);
-      } catch (err) {
-        log.warn(`aliases: could not load ${this.storePath}: ${(err as Error).message}`);
+  constructor(store?: StateStore | null) {
+    this.store = store ?? null;
+    const raw = this.store?.get('aliases');
+    if (Array.isArray(raw)) {
+      for (const e of raw as AliasEntry[]) {
+        if (e && typeof e.alias === 'string' && typeof e.chatId === 'string') {
+          this._upsert(e);
+        }
       }
     }
   }
@@ -131,17 +120,6 @@ export class AliasDirectory {
   }
 
   private _persist(): void {
-    if (!this.storePath) return;
-    try {
-      mkdirSync(dirname(this.storePath), { recursive: true });
-      const tmp = `${this.storePath}.tmp`;
-      writeFileSync(tmp, `${JSON.stringify([...this.byChat.values()], null, 2)}\n`, {
-        encoding: 'utf8',
-        mode: 0o600,
-      });
-      renameSync(tmp, this.storePath);
-    } catch (err) {
-      log.warn(`aliases: could not persist ${this.storePath}: ${(err as Error).message}`);
-    }
+    this.store?.set('aliases', [...this.byChat.values()]);
   }
 }

@@ -1,44 +1,20 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { CronJob } from '../src/cron';
-
-const mockTask: { stop: vi.Mock } = { stop: vi.fn() };
-const mockValidate: vi.Mock = vi.fn(() => true);
-const mockSchedule: vi.Mock = vi.fn(() => mockTask);
-
-vi.mock('node-cron', () => ({
-  default: {
-    validate: mockValidate,
-    schedule: mockSchedule,
-  },
-}));
-
-const savedCron: CronJob[][] = [];
-vi.mock('../src/config.ts', async (importOriginal) => {
-  const mod = await importOriginal<typeof import('../src/config.ts')>();
-  return {
-    ...mod,
-    loadConfig: () => ({ agentCmd: 'x', cron: [] }),
-    saveConfig: (config: { cron?: CronJob[] }) => {
-      savedCron.push(config.cron ?? []);
-    },
-  };
-});
-
-const { CronManager } = await import('../src/cron.ts');
-const { ReminderManager } = await import('../src/reminders.ts');
-const { AGENT_CRON_CAP, startBridgeApi } = await import('../src/bridge-api.ts');
+import { startBridgeApi } from '../src/bridge-api.js';
+import { JobManager, MAX_AGENT_JOBS } from '../src/jobs.js';
+import { StateStore } from '../src/state.js';
 
 type MockFn = ReturnType<typeof vi.fn>;
 
 let dir: string;
+let statePath: string;
+let store: StateStore;
 let baseUrl: string;
 let close: () => void;
-let reminders: InstanceType<typeof ReminderManager>;
-let cronManager: InstanceType<typeof CronManager>;
-let cronEnqueue: MockFn = vi.fn();
+let jobs: JobManager;
+let enqueue: MockFn;
 
 async function api(path: string, body?: Record<string, unknown>, method?: string) {
   const res = await fetch(`${baseUrl}${path}`, {
@@ -50,65 +26,95 @@ async function api(path: string, body?: Record<string, unknown>, method?: string
 }
 
 beforeEach(async () => {
-  savedCron.length = 0;
-  dir = mkdtempSync(join(tmpdir(), 'acp-rapi-'));
-  reminders = new ReminderManager({
-    storePath: join(dir, 'reminders.json'),
-    canDeliver: () => false,
-    deliver: vi.fn(),
-    onLog: () => {},
-  });
-  cronEnqueue = vi.fn();
-  cronManager = new CronManager({
-    jobs: [
-      { name: 'op-job', schedule: '0 9 * * *', prompt: 'operator owned' },
-      { name: 'agent-old', schedule: '0 8 * * *', prompt: 'agent owned', managed: 'agent' },
-    ],
+  dir = mkdtempSync(join(tmpdir(), 'acp-bapi-'));
+  statePath = join(dir, 'state.json');
+  store = StateStore.load(statePath);
+  enqueue = vi.fn();
+  jobs = new JobManager({
+    store,
     allowedChatIds: [1],
-    enqueue: cronEnqueue,
-    onLog: () => {},
-  });
-  const { server, port } = await startBridgeApi({
-    reminders,
-    cronManager,
+    enqueue,
+    sendMessage: vi.fn(async () => {}),
     timezone: 'UTC',
   });
+  // Seed one operator job (read-only for the agent) and one agent job.
+  jobs.create({
+    prompt: 'operator owned',
+    trigger: { kind: 'cron', expr: '0 9 * * *' },
+    name: 'op-job',
+    managed: 'operator',
+  });
+  jobs.create({
+    prompt: 'agent owned',
+    trigger: { kind: 'cron', expr: '0 8 * * *' },
+    name: 'agent-old',
+    managed: 'agent',
+  });
+  const { server, port } = await startBridgeApi({ jobs, timezone: 'UTC' });
   baseUrl = `http://127.0.0.1:${port}`;
   close = () => server.close();
 });
 
 afterEach(() => {
   close();
-  reminders.stop();
+  jobs.stop();
   rmSync(dir, { recursive: true, force: true });
 });
 
-describe('reminders api', () => {
-  it('creates a reminder with "in" and returns id + firesAt', async () => {
-    const { json } = await api('/reminder/create', { prompt: 'check reply', in: '30m' });
-    expect(json.ok).toBe(true);
-    const r = json.reminder as { id: string; firesAt: string };
-    expect(r.id).toBeTruthy();
-    expect(Date.parse(r.firesAt)).toBeGreaterThan(Date.now());
+describe('jobs api — create', () => {
+  it('creates once jobs from "in" and "at"', async () => {
+    const a = await api('/jobs/create', { prompt: 'check reply', in: '30m' });
+    expect(a.json.ok).toBe(true);
+    const job = a.json.job as { trigger: { kind: string; at?: string }; managed: string };
+    expect(job.trigger.kind).toBe('once');
+    expect(Date.parse(job.trigger.at ?? '')).toBeGreaterThan(Date.now());
+    expect(job.managed).toBe('agent');
+
+    const b = await api('/jobs/create', { prompt: 'x', at: '2030-01-01T10:00:00Z' });
+    expect(b.json.ok).toBe(true);
   });
 
-  it('creates a reminder with "at" and rejects both in+at', async () => {
-    const ok = await api('/reminder/create', {
-      prompt: 'x',
-      at: '2030-01-01T10:00:00Z',
+  it('rejects ambiguous or missing schedule sources', async () => {
+    expect((await api('/jobs/create', { prompt: 'x' })).json.ok).toBe(false);
+    expect((await api('/jobs/create', { prompt: 'x', in: '1h', at: 'tomorrow' })).json.ok).toBe(
+      false
+    );
+    expect(
+      (await api('/jobs/create', { prompt: 'x', every: '1h', expr: '* * * * *' })).json.ok
+    ).toBe(false);
+    expect((await api('/jobs/create', { prompt: 'x', every: '1h', manual: true })).json.ok).toBe(
+      false
+    );
+  });
+
+  it('creates cron jobs from "every" and "expr"', async () => {
+    const a = await api('/jobs/create', { every: '30m', prompt: 'tick' });
+    expect(a.json.ok).toBe(true);
+    expect((a.json.job as { trigger: { expr: string } }).trigger.expr).toBe('*/30 * * * *');
+
+    const b = await api('/jobs/create', { expr: '0 7 * * 1-5', prompt: 'weekdays' });
+    expect(b.json.ok).toBe(true);
+
+    expect((await api('/jobs/create', { every: '45m', prompt: 'x' })).json.ok).toBe(false);
+    expect((await api('/jobs/create', { expr: 'bad', prompt: 'x' })).json.ok).toBe(false);
+  });
+
+  it('creates manual jobs that require a name', async () => {
+    const ok = await api('/jobs/create', {
+      prompt: 'run deploy checklist',
+      manual: true,
+      name: 'deploy',
     });
     expect(ok.json.ok).toBe(true);
-    const bad = await api('/reminder/create', { prompt: 'x', in: '1h', at: 'tomorrow' });
+    const bad = await api('/jobs/create', { prompt: 'x', manual: true });
     expect(bad.json.ok).toBe(false);
-    const missing = await api('/reminder/create', { prompt: 'x' });
-    expect(missing.json.ok).toBe(false);
   });
 
   it('rejects naive absolute times when timezone is not configured', async () => {
-    const { server, port } = await startBridgeApi({ reminders, cronManager });
+    const { server, port } = await startBridgeApi({ jobs });
     const url = `http://127.0.0.1:${port}`;
     const post = (body: Record<string, unknown>) =>
-      fetch(`${url}/reminder/create`, {
+      fetch(`${url}/jobs/create`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
@@ -120,153 +126,108 @@ describe('reminders api', () => {
       const naive = await post({ prompt: 'x', at: 'tomorrow 10am' });
       expect(naive.json.ok).toBe(false);
       expect(String(naive.json.error)).toContain('timezone');
-      const naiveIn = await post({ prompt: 'x', in: 'mañana 18hs' });
-      expect(naiveIn.json.ok).toBe(false);
       // durations and explicit zones never need a configured timezone
       expect((await post({ prompt: 'x', in: '30m' })).json.ok).toBe(true);
-      expect((await post({ prompt: 'x', in: 'in 45 minutes' })).json.ok).toBe(true);
       expect((await post({ prompt: 'x', at: '2030-01-01T10:00:00Z' })).json.ok).toBe(true);
     } finally {
       server.close();
     }
   });
 
-  it('keeps operator-managed reminders read-only for the agent', async () => {
-    const op = reminders.create('operator task', Date.now() + 60_000, 'operator');
-    const cancel = await api('/reminder/cancel', { id: op.id });
-    expect(cancel.status).toBe(400);
-    expect(String(cancel.json.error)).toContain('operator-managed');
-    const update = await api('/reminder/update', { id: op.id, prompt: 'hijack' });
-    expect(update.status).toBe(400);
-    expect(reminders.list().find((r) => r.id === op.id)?.prompt).toBe('operator task');
-    const list = await api('/reminder/list');
-    const items = list.json.reminders as Array<{ id: string; managed?: string }>;
-    expect(items.find((r) => r.id === op.id)?.managed).toBe('operator');
-  });
-
-  it('returns firesAtLocal with zone info in create/list/update', async () => {
-    const { json } = await api('/reminder/create', { prompt: 'x', in: '1h' });
-    const r = json.reminder as { firesAtLocal?: string };
-    expect(r.firesAtLocal).toContain('GMT');
-    expect(r.firesAtLocal).toContain('UTC');
-    const list = await api('/reminder/list');
-    const items = list.json.reminders as Array<{ firesAtLocal?: string }>;
-    expect(items[0].firesAtLocal).toContain('GMT');
-  });
-
-  it('lists, updates and cancels reminders', async () => {
-    const created = await api('/reminder/create', { prompt: 'a', in: '1h' });
-    const id = (created.json.reminder as { id: string }).id;
-
-    const list = await api('/reminder/list');
-    expect((list.json.reminders as unknown[]).length).toBe(1);
-
-    const updated = await api('/reminder/update', { id, in: '2h', prompt: 'b' });
-    const r = updated.json.reminder as { prompt: string; firesAt: string };
-    expect(r.prompt).toBe('b');
-
-    expect((await api('/reminder/cancel', { id })).json.ok).toBe(true);
-    expect((await api('/reminder/cancel', { id })).status).toBe(404);
-    expect((await api('/reminder/update', { id: 'nope', in: '1h' })).status).toBe(404);
+  it('returns firesAtLocal and now in responses', async () => {
+    const { json } = await api('/jobs/create', { prompt: 'x', in: '1h' });
+    const job = json.job as { firesAtLocal?: string };
+    expect(job.firesAtLocal).toContain('GMT');
+    const list = await api('/jobs/list');
+    expect(list.json.now).toBeTruthy();
+    const items = list.json.jobs as Array<{ firesAtLocal?: string }>;
+    expect(items.some((j) => j.firesAtLocal?.includes('GMT'))).toBe(true);
   });
 });
 
-describe('cron api', () => {
-  it('creates agent-managed jobs from "every" and "expr"', async () => {
-    const a = await api('/cron/create', { every: '30m', prompt: 'tick' });
-    expect(a.json.ok).toBe(true);
-    expect((a.json.cron as { schedule: string }).schedule).toBe('*/30 * * * *');
-
-    const b = await api('/cron/create', { expr: '0 7 * * 1-5', prompt: 'weekdays' });
-    expect(b.json.ok).toBe(true);
-
-    // persisted as managed: "agent" (inspect the latest save)
-    const last = savedCron.at(-1) ?? [];
-    expect(last.filter((j) => j.managed === 'agent').length).toBe(3);
-    expect(last.find((j) => j.name === 'op-job')?.managed).toBeUndefined();
-  });
-
-  it('rejects unsupported intervals and missing schedule', async () => {
-    expect((await api('/cron/create', { every: '45m', prompt: 'x' })).json.ok).toBe(false);
-    expect((await api('/cron/create', { prompt: 'x' })).json.ok).toBe(false);
-    expect(
-      (await api('/cron/create', { every: '1h', expr: '* * * * *', prompt: 'x' })).json.ok
-    ).toBe(false);
-  });
-
-  it('caps agent-created jobs at AGENT_CRON_CAP', async () => {
-    // fixture already holds 1 agent job ("agent-old"); fill up to the cap
-    for (let i = 0; i < AGENT_CRON_CAP - 1; i++) {
-      cronManager.add({
-        name: `agent-fill-${i}`,
-        schedule: '0 0 * * *',
-        prompt: 'x',
-        managed: 'agent',
-      });
-    }
-
-    const full = await api('/cron/create', { every: '1h', prompt: 'one too many' });
-    expect(full.status).toBe(400);
-    expect(full.json.error).toBe(`agent cron job cap reached (${AGENT_CRON_CAP})`);
-
-    // freeing a slot lets creation succeed again
-    cronManager.remove('agent-fill-0');
-    const ok = await api('/cron/create', { every: '1h', prompt: 'fits now' });
-    expect(ok.json.ok).toBe(true);
-  });
-
-  it('POST /cron/create with a "/" prompt is delivered prefixed, never dispatched as a bridge command', async () => {
-    const created = await api('/cron/create', { every: '1h', prompt: '/a2a approve x' });
-    expect(created.json.ok).toBe(true);
-
-    // invoke the (mocked) schedule callback for the job just created
-    const callback = mockSchedule.mock.calls.at(-1)?.[1] as () => void;
-    callback();
-
-    expect(cronEnqueue).toHaveBeenCalledTimes(1);
-    const [text, chatId, managed] = cronEnqueue.mock.calls[0] as unknown as [
-      string,
-      number,
-      boolean,
-    ];
-    // a leading "/" is never reachable: the delivery prefix comes first
-    expect(text.startsWith('[Agent cron agent-')).toBe(true);
-    expect(text.endsWith('/a2a approve x')).toBe(true);
-    expect(chatId).toBe(1);
-    expect(managed).toBe(true);
-  });
-
+describe('jobs api — list/update/delete/run/toggle', () => {
   it('lists all jobs flagging operator-owned ones read-only', async () => {
-    const { json } = await api('/cron/list');
-    const jobs = json.crons as Array<{ id: string; managed: string; readOnly: boolean }>;
-    const op = jobs.find((j) => j.id === 'op-job');
-    const agent = jobs.find((j) => j.id === 'agent-old');
+    const { json } = await api('/jobs/list');
+    const list = json.jobs as Array<{
+      id: string;
+      name?: string;
+      managed: string;
+      readOnly: boolean;
+    }>;
+    const op = list.find((j) => j.name === 'op-job');
+    const agent = list.find((j) => j.name === 'agent-old');
     expect(op?.managed).toBe('operator');
     expect(op?.readOnly).toBe(true);
     expect(agent?.managed).toBe('agent');
     expect(agent?.readOnly).toBe(false);
   });
 
+  it('keeps operator jobs read-only for the agent', async () => {
+    expect((await api('/jobs/update', { id: 'op-job', every: '1h' })).status).toBe(400);
+    expect((await api('/jobs/delete', { id: 'op-job' })).status).toBe(400);
+    expect((await api('/jobs/run', { id: 'op-job' })).status).toBe(400);
+    expect((await api('/jobs/toggle', { id: 'op-job' })).status).toBe(400);
+  });
+
   it('updates and deletes only agent-managed jobs', async () => {
-    // operator job is read-only
-    expect((await api('/cron/update', { id: 'op-job', every: '1h' })).status).toBe(400);
-    expect((await api('/cron/delete', { id: 'op-job' })).status).toBe(400);
-
-    const upd = await api('/cron/update', { id: 'agent-old', every: '2h', enabled: false });
+    const upd = await api('/jobs/update', { id: 'agent-old', every: '2h', enabled: false });
     expect(upd.json.ok).toBe(true);
-    const cron = upd.json.cron as { schedule: string; enabled: boolean };
-    expect(cron.schedule).toBe('0 */2 * * *');
-    expect(cron.enabled).toBe(false);
+    const job = upd.json.job as { trigger: { expr: string }; enabled: boolean };
+    expect(job.trigger.expr).toBe('0 */2 * * *');
+    expect(job.enabled).toBe(false);
 
-    expect((await api('/cron/delete', { id: 'agent-old' })).json.ok).toBe(true);
-    expect((await api('/cron/delete', { id: 'agent-old' })).status).toBe(404);
+    // prompt-only update keeps the trigger
+    const upd2 = await api('/jobs/update', { id: 'agent-old', prompt: 'new prompt' });
+    expect((upd2.json.job as { prompt: string }).prompt).toBe('new prompt');
+
+    expect((await api('/jobs/delete', { id: 'agent-old' })).json.ok).toBe(true);
+    expect((await api('/jobs/delete', { id: 'agent-old' })).status).toBe(404);
+    expect((await api('/jobs/update', { id: 'nope', prompt: 'x' })).status).toBe(404);
+  });
+
+  it('run delivers the prompt and toggle flips enabled', async () => {
+    const created = await api('/jobs/create', {
+      prompt: 'fire me',
+      manual: true,
+      name: 'manual-job',
+    });
+    const id = (created.json.job as { id: string }).id;
+
+    expect((await api('/jobs/run', { id })).json.ok).toBe(true);
+    // agent job fires as remote content with the [Agent job …] prefix
+    expect(enqueue).toHaveBeenCalledWith(
+      expect.stringContaining('[Agent job manual-job]'),
+      1,
+      'agent-job'
+    );
+
+    const tog = await api('/jobs/toggle', { id });
+    expect(tog.json.enabled).toBe(false);
+  });
+
+  it('caps agent-created jobs', async () => {
+    for (let i = 0; i < MAX_AGENT_JOBS - 1; i++) {
+      jobs.create({
+        prompt: `fill ${i}`,
+        trigger: { kind: 'manual' },
+        name: `fill-${i}`,
+        managed: 'agent',
+      });
+    }
+    const full = await api('/jobs/create', { every: '1h', prompt: 'one too many' });
+    expect(full.status).toBe(400);
+    expect(String(full.json.error)).toContain('cap reached');
+
+    jobs.remove('agent-old'); // free a slot
+    const ok = await api('/jobs/create', { every: '1h', prompt: 'fits now' });
+    expect(ok.json.ok).toBe(true);
   });
 });
 
 describe('messaging api', () => {
   async function startMessagingApi(overrides: Record<string, unknown> = {}) {
     const { AliasDirectory } = await import('../src/aliases.js');
-    const aliases = new AliasDirectory();
+    const aliases = new AliasDirectory(store);
     aliases.register('telegram', 123, { name: 'Germán Aliprandi', isGroup: false });
     aliases.register('telegram', -100, {
       name: 'Santi',
@@ -282,11 +243,9 @@ describe('messaging api', () => {
         : { error: r.error };
     });
     const file = join(dir, 'report.txt');
-    const { writeFileSync } = await import('node:fs');
     writeFileSync(file, 'quarterly report');
     const { server, port } = await startBridgeApi({
-      reminders,
-      cronManager,
+      jobs,
       aliases,
       allowedPaths: [dir],
       fileSend: { resolve: resolveFn, send },

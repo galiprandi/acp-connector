@@ -11,17 +11,16 @@ import { BaseBot } from './base-bot.js';
 import type { PlatformBot } from './bot.js';
 import { BridgeBot } from './bot.js';
 import { startBridgeApi } from './bridge-api.js';
-import { type BridgeConfig, loadConfig, persistSessionId } from './config.js';
-import { CronManager } from './cron.js';
+import { type BridgeConfig, loadConfig } from './config.js';
 import { DiscordBot } from './discord.js';
 import { DiscoveryService } from './discovery.js';
 import { HttpServer, isLoopbackHost } from './http.js';
+import { JobManager } from './jobs.js';
 import { log, setLogLevel } from './logger.js';
 import { LoopbackBot } from './loopback.js';
 import { MediaHandler } from './media.js';
 import { AuditLog, NetworkStore } from './network.js';
-import { ReminderManager } from './reminders.js';
-import { RoutineManager } from './routines.js';
+import { migrateLegacyState, StateStore } from './state.js';
 import { createTranscriber, deleteAfterTranscribe } from './transcriber.js';
 
 function printBanner(): void {
@@ -59,47 +58,43 @@ export async function run(): Promise<void> {
   const bots: PlatformBot[] = [];
   let primaryBot: PlatformBot | null = null;
 
-  // Use first bot's allowed IDs for cron/reminders (legacy: assumes
+  // Unified runtime state: .acp-connector/state.json holds the session
+  // id, chat aliases, scheduled jobs and A2A network peers. Legacy
+  // per-feature files (aliases.json, reminders.json, network.json) and
+  // config.cron/routines/sessionId are migrated on first boot.
+  const stateDir = resolve(config.agentCwd ?? process.cwd(), '.acp-connector');
+  const store = StateStore.load(resolve(stateDir, 'state.json'));
+  migrateLegacyState(store, stateDir, config);
+
+  // Use first bot's allowed IDs for job delivery (legacy: assumes
   // single platform). Discord channel IDs are strings (Snowflakes
   // exceed JS safe integer range).
-  const cronAllowedIds: Array<number | string> = tg?.allowedChatIds || dc?.allowedChannelIds || [];
-
-  const cronManager = new CronManager({
-    jobs: config.cron || [],
-    allowedChatIds: cronAllowedIds,
-    enqueue: (text, chatId, managed) => {
-      // Enqueue to all bots — each will process if chatId matches.
-      // Agent-created jobs (managed) are their own source, treated as
-      // remote content by the command gate.
-      for (const bot of bots) {
-        bot.enqueuePrompt(text, chatId, undefined, undefined, managed ? 'agent-cron' : 'cron');
-      }
-    },
-  });
-
-  // Agent self-reminders: persisted next to the jsonc, delivered through
-  // the same serialized queue as cron. Undeliverable entries (no agent
-  // session yet, no chat id) are kept and retried — late beats lost.
-  const stateDir = resolve(config.agentCwd ?? process.cwd(), '.acp-connector');
-  const reminderManager = new ReminderManager({
-    storePath: resolve(stateDir, 'reminders.json'),
-    canDeliver: () => !!acp?.session && cronAllowedIds.length > 0,
-    // Agent-owned reminders are remote content (source 'agent-reminder'):
-    // at fire time their prompt can never run bridge commands. Operator
-    // reminders ('/reminder add') keep source 'reminder' and full
-    // operator authority, same as cron.
-    deliver: (text, managed) => {
-      const source = managed === 'operator' ? 'reminder' : 'agent-reminder';
-      for (const bot of bots) {
-        bot.enqueuePrompt(text, cronAllowedIds[0], undefined, undefined, source);
-      }
-    },
-  });
+  const jobAllowedIds: Array<number | string> = tg?.allowedChatIds || dc?.allowedChannelIds || [];
 
   // Chat alias directory: maps agent-facing aliases (`Telegram/Familia`)
-  // to real platform chat ids. Fed by every inbound user message and
-  // persisted so aliases survive restarts.
-  const aliasDir = new AliasDirectory(resolve(stateDir, 'aliases.json'));
+  // to real platform chat ids. Fed by every inbound user message.
+  const aliasDir = new AliasDirectory(store);
+
+  // Scheduled jobs: one-shot, recurring (cron) and manual — the unified
+  // replacement for reminders + cron + routines. Agent-owned jobs fire
+  // as remote content ('agent-job'); operator jobs keep authority.
+  const jobManager = new JobManager({
+    store,
+    allowedChatIds: jobAllowedIds,
+    timezone: config.timezone,
+    canDeliver: () => !!acp?.session && jobAllowedIds.length > 0,
+    enqueue: (text, chatId, source) => {
+      // Enqueue to all bots — each will process if chatId matches.
+      for (const bot of bots) {
+        bot.enqueuePrompt(text, chatId, undefined, undefined, source);
+      }
+    },
+    sendMessage: async (chatId, text) => {
+      for (const bot of bots) {
+        await bot.sendMessage(chatId, text);
+      }
+    },
+  });
 
   // Loopback API backing the acp-tools MCP server (ephemeral port —
   // the agent learns it via BRIDGE_API_URL in the mcpServers entry).
@@ -122,8 +117,7 @@ export async function run(): Promise<void> {
     ),
   ];
   const bridgeApi = await startBridgeApi({
-    reminders: reminderManager,
-    cronManager,
+    jobs: jobManager,
     timezone: config.timezone,
     aliases: aliasDir,
     allowedPaths: allowedFilePaths,
@@ -199,14 +193,14 @@ export async function run(): Promise<void> {
     agentCmd: config.agentCmd,
     agentCwd: config.agentCwd,
     sessionConfigPath: config.sessionConfigPath,
-    sessionId: config.sessionId,
+    sessionId: store.get('sessionId'),
     sessionMode: config.sessionMode,
     mcpServers: a2aMcpServers,
-    // restoreLastSession (default on): keep config.sessionId in sync with
-    // the active session so the next startup resumes it. /new and
-    // /session <id> flow through here too.
+    // restoreLastSession (default on): keep state.sessionId in sync with
+    // the active session so the next startup resumes it. Session changes
+    // (/sessions new, /sessions <n>, restart) flow through here too.
     onSessionIdChange: (id) => {
-      if (config.restoreLastSession !== false) persistSessionId(id);
+      if (config.restoreLastSession !== false) store.set('sessionId', id);
     },
   });
 
@@ -230,6 +224,7 @@ export async function run(): Promise<void> {
       echoInjectedPrompts: config.echoInjectedPrompts,
       logPreviewLength: config.logPreviewLength,
       aliases: aliasDir,
+      timezone: config.timezone,
     });
     bots.push(bot);
     primaryBot = bot;
@@ -249,6 +244,7 @@ export async function run(): Promise<void> {
       echoInjectedPrompts: config.echoInjectedPrompts,
       logPreviewLength: config.logPreviewLength,
       aliases: aliasDir,
+      timezone: config.timezone,
     });
     bots.push(bot);
     if (!primaryBot) primaryBot = bot;
@@ -261,31 +257,13 @@ export async function run(): Promise<void> {
     primaryBot = loopback;
   }
 
-  const routineManager = new RoutineManager({
-    routines: config.routines || [],
-    cronManager,
-    reminderManager,
-    timezone: config.timezone,
-    enqueue: (text, chatId) => {
-      for (const bot of bots) {
-        bot.enqueuePrompt(text, chatId, undefined, undefined, 'routine');
-      }
-    },
-    sendMessage: async (chatId, text) => {
-      // Send to all bots — each will deliver if it can
-      for (const bot of bots) {
-        await bot.sendMessage(chatId, text);
-      }
-    },
-  });
-
   // A2A manager: pairing + /a2a commands (created early for command wiring)
   let a2aManager: A2aManager | null = null;
   let a2aNetwork: NetworkStore | null = null;
   let a2aAudit: AuditLog | null = null;
   let a2aSyncTimer: ReturnType<typeof setInterval> | null = null;
   if (config.a2a?.enabled) {
-    a2aNetwork = new NetworkStore(resolve(stateDir, 'network.json'));
+    a2aNetwork = new NetworkStore(store);
     a2aAudit = new AuditLog(resolve(stateDir, 'audit.log'));
     const ownerChatIds: Array<number | string> = [
       ...(tg?.allowedChatIds ?? []),
@@ -346,7 +324,7 @@ export async function run(): Promise<void> {
   for (const bot of bots) {
     if (bot instanceof BaseBot) bot.httpCommandsAllowed = httpCommandsAllowed;
     bot.setCommandHandler((text, chatId) =>
-      routineManager.handleCommand(text, chatId as number).then(async (handled) => {
+      jobManager.handleCommand(text, chatId).then(async (handled) => {
         if (handled) return true;
         return a2aManager ? a2aManager.handleCommand(text, chatId) : false;
       })
@@ -423,6 +401,7 @@ export async function run(): Promise<void> {
     return { outcome: { outcome: 'cancelled' } };
   };
 
+  const hadStoredSession = !!store.get('sessionId');
   try {
     await acp.start();
   } catch (err) {
@@ -430,14 +409,14 @@ export async function run(): Promise<void> {
     process.exit(1);
   }
 
-  // Start scheduling/delivering reminders now that a session exists;
-  // past-due entries flush through flushDue inside start().
-  reminderManager.start();
+  // Start scheduling/delivering jobs now that a session exists;
+  // past-due once jobs flush through flushDue inside start().
+  jobManager.start();
 
   // Graceful degradation: an agent without MCP support ignores the
   // injected servers — warn once so the silence is diagnosable.
   if (!acp.agentCapabilities?.mcpCapabilities) {
-    log.warn('⚠️ Agent did not report MCP capabilities — reminder/cron tools may be unavailable');
+    log.warn('⚠️ Agent did not report MCP capabilities — jobs tools may be unavailable');
   }
 
   // Create media handler now that we know agent capabilities
@@ -458,7 +437,6 @@ export async function run(): Promise<void> {
     await bot.start();
   }
 
-  cronManager.start();
   await httpServer.start();
 
   // A2A network layer: agent card + JSON-RPC endpoint for peer agents
@@ -519,7 +497,7 @@ export async function run(): Promise<void> {
 
   const mode = acp.modes?.currentModeId || 'default';
   log.info('');
-  log.info(`  🆔  Session:  ${acp.sessionId}${config.sessionId ? ' (restored)' : ''}`);
+  log.info(`  🆔  Session:  ${acp.sessionId}${hadStoredSession ? ' (restored)' : ''}`);
   log.info(`  ⚙️  Mode:     ${mode}`);
   if (tg) {
     log.info(`  💬  TG Chats:    ${tg.allowedChatIds.join(', ') || 'none (setup mode)'}`);
@@ -552,8 +530,7 @@ export async function run(): Promise<void> {
     a2aServer?.stop();
     httpServer.stop();
     bridgeApi.server.close();
-    reminderManager.stop();
-    cronManager.stop();
+    jobManager.stop();
     for (const bot of bots) {
       bot.stop();
     }

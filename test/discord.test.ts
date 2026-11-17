@@ -633,7 +633,7 @@ describe('DiscordBot', () => {
     const handler = mockClient.on.mock.calls.find((c) => c[0] === 'messageCreate')[1] as (
       msg: MockMessage
     ) => Promise<void>;
-    await handler(makeMessage('123', '/model'));
+    await handler(makeMessage('123', '/sessions'));
     const report = mockChannel.send.mock.calls.find(
       (c) => typeof c[0] === 'string' && c[0].includes('⚠️')
     );

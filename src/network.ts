@@ -1,14 +1,7 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
-import {
-  appendFileSync,
-  chmodSync,
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  renameSync,
-  writeFileSync,
-} from 'node:fs';
+import { appendFileSync, chmodSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { StateStore } from './state.js';
 
 export const NETWORK_SCHEMA_VERSION = 1;
 export const DEFAULT_MAX_DELEGATION_DEPTH = 3;
@@ -48,37 +41,27 @@ const MAX_SEEN_TASK_IDS = 10_000;
 
 /**
  * Runtime network state for the A2A layer: known peers, their trust
- * status, and already-processed task ids. Persisted to a JSON file owned
- * by the bridge — never edited by hand, never committed.
+ * status, and already-processed task ids. Persisted inside
+ * `.acp-connector/state.json` via StateStore — never edited by hand,
+ * never committed.
  */
 export class NetworkStore {
   private state: NetworkState;
+  private store: StateStore | null;
 
-  constructor(private filePath: string) {
-    if (existsSync(filePath)) {
-      let raw: string;
-      let parsed: NetworkState;
-      try {
-        raw = readFileSync(filePath, 'utf8');
-        parsed = JSON.parse(raw) as NetworkState;
-      } catch {
-        // Corrupt runtime state must not kill the bridge: back it up and
-        // start fresh — peers can be re-approved, a dead bridge cannot.
-        renameSync(filePath, `${filePath}.corrupt`);
-        this.state = {
-          schemaVersion: NETWORK_SCHEMA_VERSION,
-          role: 'peer',
-          peers: [],
-          seenTaskIds: [],
-        };
-        return;
-      }
-      if (parsed.schemaVersion !== NETWORK_SCHEMA_VERSION) {
+  constructor(store?: StateStore | string | null) {
+    // Accepts a StateStore (production) or a file path (tests/legacy) —
+    // a path is wrapped in its own StateStore so persistence semantics
+    // stay identical either way.
+    this.store = store instanceof StateStore ? store : store ? StateStore.load(store) : null;
+    const persisted = this.store?.get('network') as NetworkState | undefined;
+    if (persisted && typeof persisted === 'object' && Array.isArray(persisted.peers)) {
+      if (persisted.schemaVersion !== NETWORK_SCHEMA_VERSION) {
         throw new Error(
-          `Unsupported network.json schemaVersion ${parsed.schemaVersion} (expected ${NETWORK_SCHEMA_VERSION})`
+          `Unsupported state.network schemaVersion ${persisted.schemaVersion} (expected ${NETWORK_SCHEMA_VERSION})`
         );
       }
-      this.state = parsed;
+      this.state = persisted;
     } else {
       this.state = {
         schemaVersion: NETWORK_SCHEMA_VERSION,
@@ -90,17 +73,7 @@ export class NetworkStore {
   }
 
   save(): void {
-    mkdirSync(dirname(this.filePath), { recursive: true, mode: 0o700 });
-    writeFileSync(this.filePath, `${JSON.stringify(this.state, null, 2)}\n`, {
-      encoding: 'utf8',
-      mode: 0o600,
-    });
-    try {
-      chmodSync(this.filePath, 0o600);
-      chmodSync(dirname(this.filePath), 0o700);
-    } catch {
-      // best-effort: tighten pre-existing files; creation mode covers new ones
-    }
+    this.store?.set('network', this.state);
   }
 
   get role(): NetworkRole {

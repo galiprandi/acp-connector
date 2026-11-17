@@ -26,7 +26,7 @@ Thin bridge connecting messaging platforms to any ACP-compatible coding agent vi
 
 All commits MUST follow [Conventional Commits](https://www.conventionalcommits.org/):
 
-**Every feature or behavior change MUST include updated documentation** (README.md, AGENTS.md, example config). No exceptions.
+**Docs sync is mandatory**: every feature/behavior/command/API change MUST update `README.md`, `AGENTS.md`, `acp-connector.example.jsonc`, `CHANGELOG.md` **and the operator skills** (`.devin/skills/` and any `~/skills/acp-connector*` references) in the same commit — no exceptions, no follow-ups.
 
 **All test text MUST be in English** — test descriptions (`describe`/`it`), string literals, assertions, and comments. User-facing bot messages must also be in English so tests can match them cleanly.
 
@@ -84,12 +84,13 @@ src/
 │                    voice-note transcription via processVoiceNote
 ├── transcriber.ts — voice transcription seam: wraps the audio-transcription package (sherpa-onnx
 │                    Parakeet, lazy runtime+model install into shared user cache)
-├── cron.ts        — scheduled prompt injection
-├── routines.ts    — named prompts + /cron, /routine, /run commands
-├── reminders.ts   — one-shot agent reminders: JSON store, setTimeout scheduler, chrono parsing
+├── state.ts       — StateStore: .acp-connector/state.json (versioned, atomic, 0600)
+│                    + one-shot migration from legacy per-feature files/config fields
+├── jobs.ts        — JobManager: unified once/cron/manual jobs + /jobs command,
+│                    human-time parsing (chrono), every→cron compiler
 ├── bridge-api.ts   — loopback HTTP API backing the acp-tools MCP server
-├── acp-tools.ts    — unified MCP stdio server: send_file, list_aliases, reminder, cron tools
-├── aliases.ts      — chat alias directory (Platform/Name → chatId), persisted in .acp-connector/aliases.json
+├── acp-tools.ts    — unified MCP stdio server: send_file, list_aliases, jobs tools
+├── aliases.ts      — chat alias directory (Platform/Name → chatId), persisted in state.json
 ├── identity.ts     — sender identity: [Platform/Chat] Name: prompt prefix + alias naming
 ├── http.ts        — optional HTTP API (/health, /prompt)
 ├── a2a.ts         — A2A server: agent card, JSON-RPC message/send, join/confirm, registry
@@ -97,7 +98,7 @@ src/
 ├── a2a-mcp.ts     — MCP stdio server: list_remote_agents + send_message tools for the agent
 ├── agent-card.ts  — AgentCard builder from a2a.card config
 ├── discovery.ts   — peer discovery: shared instances file, mDNS, static registry
-├── network.ts     — .acp-connector/network.json: peers, statuses, task dedup
+├── network.ts     — A2A peers/statuses/task dedup, persisted in state.json
 ├── loopback.ts    — headless PlatformBot (no TG/Discord): drives queue + auto-approves
 ├── config.ts      — JSONC config loader/saver, platforms support
 └── setup.ts       — interactive setup wizard (Telegram + Discord)
@@ -105,7 +106,7 @@ src/
 
 ### Data flow
 
-1. Input sources (Telegram, Discord, cron, HTTP) enqueue prompts via `bot.enqueuePrompt()`
+1. Input sources (Telegram, Discord, jobs, HTTP) enqueue prompts via `bot.enqueuePrompt()`
 2. Queue is processed one at a time (ACP `session/prompt` is blocking)
 3. Agent responses stream back via `session.nextUpdate()`
 4. `bot._handleUpdate()` batches chunks and edits a single Telegram message
@@ -118,7 +119,7 @@ accepts `message/send` from approved peers into the prompt queue, and gives the
 agent `list_remote_agents`/`send_message` MCP tools (injected via `session/new`
 `mcpServers` — agents without MCP support don't see them). Invariant: **remote
 A2A content never triggers bridge commands** — only operator entry points
-(Telegram/Discord chats, /prompt, cron, routines) can run `/a2a`. Delegation
+(Telegram/Discord chats, /prompt, operator jobs) can run `/a2a`. Delegation
 chains (`a2a.delegationChain`) propagate across agent-initiated delegations;
 loops and chains ≥ maxDepth (3) are rejected. Hardening caps: prompt queue 100,
 A2A bodies 1 MiB, pending joins 100.
@@ -136,49 +137,66 @@ The bridge always injects a single `acp-tools` MCP server in `session/new`
   chat. Paths are allowlist-validated (agent cwd + uploads dir + tmpdir +
   `tools.allowedPaths`), realpath-contained, capped at 45MB.
 - `list_aliases()` — safe alias listing, never raw platform ids.
-- `reminder({action,...})` / `cron({action,...})` — consolidated
-  action-discriminated tools replacing the old `reminder_*`/`cron_*` set.
+- `jobs({action,...})` — one tool for all scheduled work: `create`
+  (`in`/`at`/`every`/`expr`/`manual`+`name`), `list`, `update`, `delete`,
+  `run`, `toggle`. Replaces the old `reminder`/`cron` tools.
 
 Every inbound user message is prefixed `[Platform/Chat] SenderName:`
 (DM: `[Telegram] Name:`; group: `[Telegram/Familia] Santi:`) via
-`src/identity.ts` — injected sources (cron/http/a2a/reminders) get no
+`src/identity.ts` — injected sources (job/http/a2a) get no
 prefix. `src/aliases.ts` maps `Platform/Name` → chatId, fed on every user
-message and persisted to `.acp-connector/aliases.json`.
+message and persisted to `state.json` (`state.aliases`).
 
-One-shot reminders live in
-`.acp-connector/reminders.json`; entries are deleted on delivery —
-undeliverable entries (no agent session/chat id) are kept and retried.
-Every reminder carries `managed: "agent" | "operator"` (pre-field entries
-migrate to `"agent"` on load). Agent reminders deliver with source
-`'agent-reminder'` — remote content that never runs bridge commands;
-operator reminders (`/reminder add` chat command: list/add/remove) deliver
-with source `'reminder'` and keep operator authority. `reminder`/`cron`
-tool mutations can only touch `managed: "agent"` entries/jobs; operator
-ones are listed read-only. Agent-created cron jobs are capped
-(50 concurrent) and at fire time their prompt is injected as
-`[Agent cron <name>] <prompt>` with source `'agent-cron'`: agent-scheduled
-prompts are remote content and never run bridge commands, even when they
-start with `/`. Absolute reminder times without an explicit zone require
-`config.timezone` — unset rejects them rather than guessing the host zone.
+All scheduled work is a **job** in `state.json` (`state.jobs`): trigger
+`{kind:"once",at}` | `{kind:"cron",expr}` | `{kind:"manual"}`, plus
+`managed: "agent" | "operator"`. Once jobs are deleted on delivery —
+undeliverable ones (no agent session/chat id) are kept and retried.
+Agent jobs deliver with source `'agent-job'` — remote content that never
+runs bridge commands; operator jobs (`/jobs` chat commands) deliver with
+source `'job'` and keep operator authority. `jobs` tool mutations can
+only touch `managed: "agent"` entries; operator jobs are listed
+read-only. Agent-created jobs are capped (50) and manual jobs require a
+`name` (that's how the operator triggers them). Absolute times without an
+explicit zone require `config.timezone` — unset rejects them rather than
+guessing the host zone. Job responses include `firesAtLocal` and `now`
+rendered in `timezone` so the agent can resolve naive datetimes.
 Agents without MCP capabilities get a
 one-line warning at startup and no tools.
 
+### Unified state + command surface
+
+`.acp-connector/state.json` (versioned, atomic writes, `0600`) holds ALL
+runtime state: `sessionId`, `aliases`, `jobs`, `network`. Legacy files
+(`aliases.json`, `reminders.json`, `network.json`) and config fields
+(`cron[]`, `routines[]`, `sessionId`) migrate on first boot — legacy
+files become `*.migrated`, config fields are stripped. No new
+per-feature state files.
+
+Operator commands are noun-first namespaces: `/sessions`, `/config`,
+`/queue`, `/jobs`, `/time`, `/status`, `/stop` (sole alias), `/help`.
+`/mode`+`/model` merged into `/config` (synthetic `mode` option when the
+agent exposes modes via `session/set_mode` only); `/cron`+`/routine`+
+`/reminder`+`/run` merged into `/jobs`; `/new`+`/session`+`/delete`
+merged into `/sessions`. Telegram registers `setMyCommands` for the `/`
+menu.
+
 ### Session restore (default on)
 
-`restoreLastSession` (default `true`) keeps `config.sessionId` in sync with
-the active session: `AcpClient.onSessionIdChange` fires on every session
-assignment (start, `/new`, `/session <id>`, `restart()`) and the bridge
-persists it via `persistSessionId()` (config.ts — reloads the file first,
-same pattern as `persistCronAndRoutines`). Next startup resumes via
+`restoreLastSession` (default `true`) keeps `state.sessionId` in
+`state.json` in sync with the active session: `AcpClient.onSessionIdChange`
+fires on every session assignment (start, `/sessions new`,
+`/sessions <n|id>`, `restart()`) and the bridge persists it via
+`store.set('sessionId', id)`. Next startup resumes via
 `session/resume`/`session/load`; agents without either capability, or a
 resume that fails, fall back to `session/new` with a warning — never a
-boot failure. `restoreLastSession: false` leaves `sessionId` manual-only.
+boot failure. `restoreLastSession: false` leaves session persistence off
+entirely. Legacy `config.sessionId` migrates into state on first boot.
 
 ### Key principles
 
 - **Thin bridge**: no agent loop, no model provider, no tool ecosystem
 - **Agent-agnostic**: no hardcoded agent references anywhere
-- **Config is truth**: all state in `acp-connector.jsonc`, persisted by routines
+- **Config is truth**: user config in `acp-connector.jsonc`; runtime state in `.acp-connector/state.json`
 - **Serialized queue**: one prompt at a time, no concurrent prompts (cap 100)
 
 ## BEHAVIOR.md (auto-generated)

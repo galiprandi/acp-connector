@@ -1,6 +1,6 @@
 import type { ContentBlock } from '@agentclientprotocol/sdk';
 import type { AcpClient } from './acp-client.js';
-import type { PlatformBot } from './bot.js';
+import type { PlatformBot, PromptSource } from './bot.js';
 import { log } from './logger.js';
 import type { MediaHandler } from './media.js';
 
@@ -38,11 +38,10 @@ export class LoopbackBot implements PlatformBot {
     _chatId?: number | string,
     blocks?: ContentBlock[],
     onComplete?: (response: string, error?: string) => void,
-    source?: 'cron' | 'agent-cron' | 'agent-reminder' | 'http' | 'routine' | 'a2a' | 'reminder',
+    source?: PromptSource,
     onChunk?: (chunk: string) => void
   ): Promise<void> {
-    const isRemoteContent =
-      source === 'a2a' || source === 'agent-cron' || source === 'agent-reminder';
+    const isRemoteContent = source === 'a2a' || source === 'agent-job';
     if (!isRemoteContent && text.startsWith('/') && this.onCommand) {
       const handled = await this.onCommand(text, 'loopback');
       if (handled) return;

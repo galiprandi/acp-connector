@@ -1,13 +1,7 @@
 import { existsSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import {
-  type BridgeConfig,
-  defaultConfigPath,
-  loadConfig,
-  persistSessionId,
-  saveConfig,
-} from '../src/config.ts';
+import { type BridgeConfig, defaultConfigPath, loadConfig, saveConfig } from '../src/config.ts';
 
 const tmpConfigPath: string = resolve(process.cwd(), 'acp-connector.jsonc');
 
@@ -98,31 +92,9 @@ describe('config', () => {
     expect(defaultConfigPath).toBe(resolve(process.cwd(), 'acp-connector.jsonc'));
   });
 
-  it('persistSessionId writes sessionId and preserves other fields', () => {
-    writeFileSync(tmpConfigPath, JSON.stringify(validConfig));
-    persistSessionId('sess-123');
+  it('still loads a legacy sessionId field (migrated to state at boot)', () => {
+    writeFileSync(tmpConfigPath, JSON.stringify({ ...validConfig, sessionId: 'legacy-id' }));
     const cfg = loadConfig();
-    expect(cfg?.sessionId).toBe('sess-123');
-    expect(cfg?.agentCmd).toBe('acp-agent serve');
-    expect(cfg?.platforms?.telegram?.token).toBe('tok');
-  });
-
-  it('persistSessionId skips the write when the id is unchanged', () => {
-    writeFileSync(tmpConfigPath, JSON.stringify({ ...validConfig, sessionId: 'same-id' }));
-    const before = loadConfig();
-    persistSessionId('same-id');
-    const after = loadConfig();
-    expect(after?.sessionId).toBe('same-id');
-    expect(after).toEqual(before);
-  });
-
-  it('persistSessionId is a no-op when no config file exists', () => {
-    expect(() => persistSessionId('sess-123')).not.toThrow();
-    expect(existsSync(tmpConfigPath)).toBe(false);
-  });
-
-  it('persistSessionId does not throw on an invalid config', () => {
-    writeFileSync(tmpConfigPath, '{ invalid json');
-    expect(() => persistSessionId('sess-123')).not.toThrow();
+    expect(cfg?.sessionId).toBe('legacy-id');
   });
 });

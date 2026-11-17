@@ -136,7 +136,7 @@ describe('e2e: acp-tools MCP via fake agent', () => {
     expect(cb.response).toContain('aliases');
   }, 60000);
 
-  it('serves consolidated reminder actions (create + list)', async () => {
+  it('serves unified jobs actions (create + list)', async () => {
     const sink = await startCallbackSink();
     const s = await spawnBridge();
 
@@ -144,7 +144,7 @@ describe('e2e: acp-tools MCP via fake agent', () => {
       s,
       sink.received,
       sink.url,
-      'call acp-tools.reminder {"action":"create","in":"1h","prompt":"check deploy"}'
+      'call acp-tools.jobs {"action":"create","in":"1h","prompt":"check deploy"}'
     );
     expect(created.error).toBeNull();
     expect(created.response).toContain('"id"');
@@ -153,7 +153,7 @@ describe('e2e: acp-tools MCP via fake agent', () => {
       s,
       sink.received,
       sink.url,
-      'call acp-tools.reminder {"action":"list"}'
+      'call acp-tools.jobs {"action":"list"}'
     );
     expect(listed.error).toBeNull();
     expect(listed.response).toContain('check deploy');

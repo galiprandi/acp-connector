@@ -25,13 +25,11 @@
   },
 
   // ACP session (optional)
-  // sessionId is auto-managed: with restoreLastSession (default true) the
-  // bridge writes the active session id here on every change (/new,
-  // /session, restart) and resumes it on the next startup via
-  // session/resume or session/load. Set restoreLastSession to false to
-  // keep sessionId purely manual (pin a specific session, or omit for
-  // a fresh session each run).
-  // "sessionId": "some-session-id",
+  // With restoreLastSession (default true) the bridge keeps the active
+  // session id in .acp-connector/state.json on every change
+  // (/sessions new, /sessions <n>, restart) and resumes it on the next
+  // startup via session/resume or session/load. Set restoreLastSession
+  // to false for a fresh session every run.
   // "restoreLastSession": true,
 
   // Initial session mode (optional — applied after session/new, session/load, or session/resume)
@@ -64,8 +62,8 @@
   // Stream responses with message edits (default: true)
   "streaming": true,
 
-  // Echo prompts injected via cron, HTTP, or routines into the chat (default: true)
-  // Shows the prompt text with a source label (⏰ [cron], 🌐 [http], 🔁 [routine])
+  // Echo prompts injected via jobs, HTTP, or A2A into the chat (default: true)
+  // Shows the prompt text with a source label (⏰ [job], 🌐 [http], 🔁 [a2a])
   // so you can see what triggered the agent's response
   "echoInjectedPrompts": true,
 
@@ -75,30 +73,19 @@
   // Max chars of 👤/🤖 chat previews written to the log (default: 150, min: 20)
   // "logPreviewLength": 150,
 
-  // Timezone for absolute reminder times ("mañana 18hs", "tomorrow 10am")
+  // Timezone for absolute job times ("mañana 18hs", "tomorrow 10am")
   // without an explicit zone, e.g. "America/Argentina/Tucuman". Required
   // for those — durations ("30m") and explicit zones don't need it.
   // Written automatically by `acp-connector setup`.
   // "timezone": "America/Argentina/Tucuman",
 
-  // Scheduled jobs — can also be managed via /cron commands in Telegram.
-  // The agent can create its own jobs (managed: "agent") via the cron_* MCP
-  // tools — capped at 50; at fire time they get an "[Agent cron <id>]" prefix
-  // and can never run bridge commands.
-  "cron": [
-    {
-      "name": "daily-briefing",
-      "schedule": "0 9 * * *",
-      "prompt": "summarize today's calendar and unread emails",
-      "chatId": 123456789
-    }
-  ],
-
-  // Named reusable prompts — can also be managed via /routine commands
-  "routines": [
-    { "name": "briefing", "prompt": "summarize today's calendar and unread emails" },
-    { "name": "review", "prompt": "review the latest PRs on my repos" }
-  ],
+  // Jobs (one-shots, recurring schedules, manual triggers) live in
+  // .acp-connector/state.json — managed at runtime via /jobs chat
+  // commands, not here. The agent can create its own jobs
+  // (managed: "agent") via the jobs MCP tool — capped at 50; at fire
+  // time they get an "[agent-job]" prefix and can never run bridge
+  // commands. Legacy "cron"/"routines"/"sessionId" fields are migrated
+  // into state.json on first boot, then stripped from this file.
 
   // HTTP server (optional, default off)
   // "http": {
@@ -108,7 +95,7 @@
   //   "auth": {
   //     "token": "your-secret"    // bearer token — REQUIRED for non-loopback hosts (refuses to start otherwise)
   //   },
-  //   "commands": false,          // allow /commands (e.g. /a2a, /mode) via POST /prompt — default false: HTTP prompt text is agent input, never bridge administration
+  //   "commands": false,          // allow /commands (e.g. /a2a, /sessions) via POST /prompt — default false: HTTP prompt text is agent input, never bridge administration
   //   "callbackAllow": [],        // hostnames allowed for callbackUrl beyond public ones — loopback/private hosts are rejected by default (SSRF guard)
   //   "forwardHeaders": false,    // forward request headers to agent (Authorization always stripped)
   //   "maxBodySize": 1048576,     // 1MB
@@ -122,7 +109,8 @@
 
   // Agent tools / acp-tools MCP (optional)
   // The injected acp-tools MCP lets the agent send files back to chats
-  // (send_file) and manage reminders/cron. send_file is restricted to
+  // (send_file), list chat aliases (list_aliases) and manage jobs
+  // (jobs). send_file is restricted to
   // paths inside the agent cwd, the uploads dir, the OS tmpdir and any
   // dirs listed here — anything else (.env, tokens, SSH keys) is rejected.
   // "tools": {

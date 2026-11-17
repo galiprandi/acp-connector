@@ -12,9 +12,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { NetworkStore, type Peer } from '../src/network.ts';
+import { StateStore } from '../src/state.ts';
 
 let dir: string;
 let path: string;
+let stateStore: StateStore;
 let store: NetworkStore;
 
 function makePeer(id: string, status: Peer['status'] = 'pending'): Peer {
@@ -26,10 +28,15 @@ function makePeer(id: string, status: Peer['status'] = 'pending'): Peer {
   };
 }
 
+function reload(): NetworkStore {
+  return new NetworkStore(StateStore.load(path));
+}
+
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'acp-net-'));
-  path = join(dir, 'network.json');
-  store = new NetworkStore(path);
+  path = join(dir, 'state.json');
+  stateStore = StateStore.load(path);
+  store = new NetworkStore(stateStore);
 });
 
 afterEach(() => {
@@ -42,26 +49,27 @@ describe('NetworkStore persistence', () => {
     expect(existsSync(path)).toBe(false);
   });
 
-  it('persists peers to disk', () => {
+  it('persists peers inside state.json', () => {
     store.upsertPeer(makePeer('lean'));
     store.save();
     expect(existsSync(path)).toBe(true);
     const raw = JSON.parse(readFileSync(path, 'utf8'));
-    expect(raw.schemaVersion).toBe(1);
-    expect(raw.peers).toHaveLength(1);
-    expect(raw.peers[0].id).toBe('lean');
+    expect(raw.network.schemaVersion).toBe(1);
+    expect(raw.network.peers).toHaveLength(1);
+    expect(raw.network.peers[0].id).toBe('lean');
   });
 
   it('reloads state across instances', () => {
     store.upsertPeer(makePeer('lean', 'approved'));
     store.save();
-    const reloaded = new NetworkStore(path);
+    const reloaded = reload();
     expect(reloaded.getPeer('lean')?.status).toBe('approved');
   });
 
   it('writes state files and their directory with owner-only permissions', () => {
-    const nested = join(dir, 'state', 'network.json');
-    const s2 = new NetworkStore(nested);
+    const nested = join(dir, 'state', 'state.json');
+    const s2store = StateStore.load(nested);
+    const s2 = new NetworkStore(s2store);
     s2.upsertPeer(makePeer('lean'));
     s2.save();
     expect(statSync(nested).mode & 0o777).toBe(0o600);
@@ -72,13 +80,13 @@ describe('NetworkStore persistence', () => {
     expect(statSync(nested).mode & 0o777).toBe(0o600);
   });
 
-  it('rejects an unsupported schemaVersion', () => {
+  it('rejects an unsupported network schemaVersion', () => {
     store.upsertPeer(makePeer('x'));
     store.save();
     const corrupted = JSON.parse(readFileSync(path, 'utf8'));
-    corrupted.schemaVersion = 999;
+    corrupted.network.schemaVersion = 999;
     writeFileSync(path, JSON.stringify(corrupted));
-    expect(() => new NetworkStore(path)).toThrow(/schemaVersion/i);
+    expect(() => new NetworkStore(StateStore.load(path))).toThrow(/schemaVersion/i);
   });
 });
 
@@ -167,7 +175,7 @@ describe('task dedup', () => {
   it('persists seen task ids', () => {
     store.markTaskSeen('t1');
     store.save();
-    const reloaded = new NetworkStore(path);
+    const reloaded = reload();
     expect(reloaded.hasSeenTask('t1')).toBe(true);
   });
 });
@@ -189,7 +197,7 @@ describe('delegation chain', () => {
 describe('corrupt state file', () => {
   it('recovers by backing up the corrupt file and starting fresh', () => {
     writeFileSync(path, '{broken json!!!');
-    const s = new NetworkStore(path);
+    const s = new NetworkStore(StateStore.load(path));
     expect(s.listPeers()).toEqual([]);
     expect(existsSync(`${path}.corrupt`)).toBe(true);
   });
@@ -222,8 +230,8 @@ describe('peer auth', () => {
     expect(first).toMatch(/^[0-9a-f]{48}$/);
     store.save();
     const raw = JSON.parse(readFileSync(path, 'utf8'));
-    expect(raw.peers[0].auth.secret).toMatch(/^[0-9a-f]{48}$/);
-    expect(raw.peers[0].auth.issuedAt).toBeDefined();
+    expect(raw.network.peers[0].auth.secret).toMatch(/^[0-9a-f]{48}$/);
+    expect(raw.network.peers[0].auth.issuedAt).toBeDefined();
   });
 
   it('issues independent secrets for different peers', () => {
@@ -267,7 +275,7 @@ describe('peer auth', () => {
 });
 
 describe('audit log', () => {
-  it('appends JSONL entries to audit.log next to network.json', async () => {
+  it('appends JSONL entries to audit.log next to state.json', async () => {
     const { AuditLog } = await import('../src/network.ts');
     const audit = new AuditLog(join(dir, 'audit.log'));
     audit.write({ event: 'peer_approved', peer: 'lean' });

@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Unified runtime state**: `.acp-connector/state.json` (versioned, atomic writes, `0600`) now holds ALL runtime state — `sessionId`, chat aliases, jobs and A2A network peers. Legacy `aliases.json`/`reminders.json`/`network.json` and config fields `cron[]`/`routines[]`/`sessionId` migrate automatically on first boot (legacy files renamed `*.migrated`, config fields stripped)
+- **`/jobs` unified command**: one namespace for one-shot reminders, recurring schedules and manual jobs — `/jobs` lists all (numbered, with type/owner/fire time), `/jobs add [as <name>] <when> <prompt>`, `/jobs run|toggle|rm <n|name>`; bare `/jobs <n>` also runs. `<when>` accepts `in 20m`, `every 1h`, natural dates (`friday 9am`, `tomorrow 18hs` — needs `timezone` or explicit offset), raw 5-field cron, and `manual` (requires `as <name>`)
+- **`/time` command**: shows host system zone, configured `timezone`, and UTC clocks — the authoritative reference for scheduling across timezones
+- **`/sessions` namespace**: `/sessions` lists, `/sessions new` starts fresh, `/sessions <n|id>` switches, `/sessions rm <n|id>` deletes — replaces `/new`, `/session`, `/delete`
+- **`/config` absorbs `/mode` and `/model`**: one settings surface for all session options; agents exposing modes only via `session/set_mode` get a synthetic `mode` option (a real `mode` config option always wins)
+- **`jobs` MCP tool**: single agent-facing tool (`create`/`list`/`update`/`delete`/`run`/`toggle`) replacing `reminder`+`cron`; supports `manual:true`+`name` for operator-triggered jobs; responses include `firesAtLocal` and `now` for timezone-safe scheduling
+- **Telegram command menu**: `setMyCommands` registers `/stop /sessions /config /queue /jobs /time /status /help` so typing `/` shows descriptions
+
+### Removed
+- **Breaking**: `/new`, `/session`, `/delete`, `/mode`, `/model`, `/run`, `/cron`, `/routine`, `/reminder` chat commands — use `/sessions`, `/config`, `/jobs` (see migration notes above)
+- **Breaking (agent-facing)**: `reminder` and `cron` MCP tools on `acp-tools` — replaced by the unified `jobs` tool
+
+### Changed
+- `config.sessionId` is deprecated — the active session id now lives in `state.json` (`restoreLastSession` still auto-manages it); legacy value migrates on first boot
+- `config.cron[]`/`config.routines[]` are deprecated — migrated into `state.json` jobs on first boot
+- Prompt source labels: injected prompts now echo as `⏰ [job]`/`[agent-job]`, `🌐 [http]`, `🔁 [a2a]` (previously `[cron]`/`[routine]`/`[reminder]` variants)
+- `sessionId` persistence no longer rewrites `acp-connector.jsonc` — `persistSessionId`/`persistCronAndRoutines` removed; all writes go through `StateStore`
+
 ## [0.18.0] - 2026-11-16
 
 ### Added

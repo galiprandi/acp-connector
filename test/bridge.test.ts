@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { BridgeConfig } from '../src/config';
-import type { CronManagerOptions } from '../src/cron';
+import type { JobManagerOptions } from '../src/jobs';
 import { log } from '../src/logger';
 
 const validConfig: BridgeConfig = {
@@ -17,7 +17,8 @@ let mockConfig: BridgeConfig | null = null;
 
 vi.mock('../src/config.ts', () => ({
   loadConfig: () => mockConfig,
-  persistSessionId: vi.fn(),
+  defaultConfigPath: '/tmp/acp-connector-test.jsonc',
+  saveConfig: vi.fn(),
 }));
 
 interface MockAcpClient {
@@ -79,33 +80,29 @@ const mockDiscordBot: MockBot = {
   _handlePermission: vi.fn(async () => ({ outcome: { outcome: 'cancelled' } })),
 };
 
-let lastCronManagerArgs: CronManagerOptions | null = null;
+let lastJobManagerArgs: JobManagerOptions | null = null;
 
-interface MockCronManager {
+interface MockJobManager {
   start: vi.Mock;
   stop: vi.Mock;
   list: vi.Mock;
-  add: vi.Mock;
+  create: vi.Mock;
+  update: vi.Mock;
   remove: vi.Mock;
   toggle: vi.Mock;
   run: vi.Mock;
-}
-
-const mockCronManager: MockCronManager = {
-  start: vi.fn(),
-  stop: vi.fn(),
-  list: vi.fn(() => []),
-  add: vi.fn(),
-  remove: vi.fn(),
-  toggle: vi.fn(),
-  run: vi.fn(),
-};
-
-interface MockRoutineManager {
   handleCommand: vi.Mock;
 }
 
-const mockRoutineManager: MockRoutineManager = {
+const mockJobManager: MockJobManager = {
+  start: vi.fn(),
+  stop: vi.fn(),
+  list: vi.fn(() => []),
+  create: vi.fn(),
+  update: vi.fn(),
+  remove: vi.fn(),
+  toggle: vi.fn(),
+  run: vi.fn(),
   handleCommand: vi.fn(async () => false),
 };
 
@@ -191,38 +188,21 @@ vi.mock('../src/discord.ts', () => ({
     }
   },
 }));
-vi.mock('../src/cron.ts', () => ({
-  CronManager: class MockCronManager {
-    start = mockCronManager.start;
-    stop = mockCronManager.stop;
-    list = mockCronManager.list;
-    add = mockCronManager.add;
-    remove = mockCronManager.remove;
-    toggle = mockCronManager.toggle;
-    run = mockCronManager.run;
-    constructor(args: CronManagerOptions) {
-      lastCronManagerArgs = args;
+vi.mock('../src/jobs.ts', () => ({
+  JobManager: class MockJobManager {
+    start = mockJobManager.start;
+    stop = mockJobManager.stop;
+    list = mockJobManager.list;
+    create = mockJobManager.create;
+    update = mockJobManager.update;
+    remove = mockJobManager.remove;
+    toggle = mockJobManager.toggle;
+    run = mockJobManager.run;
+    handleCommand = mockJobManager.handleCommand;
+    constructor(args: JobManagerOptions) {
+      lastJobManagerArgs = args;
     }
   },
-}));
-vi.mock('../src/routines.ts', () => ({
-  RoutineManager: class MockRoutineManager {
-    handleCommand = mockRoutineManager.handleCommand;
-  },
-}));
-vi.mock('../src/reminders.ts', () => ({
-  ReminderManager: class MockReminderManager {
-    start = vi.fn();
-    stop = vi.fn();
-    list = vi.fn(() => []);
-    create = vi.fn();
-    cancel = vi.fn();
-    update = vi.fn();
-    flushDue = vi.fn();
-    constructor(public opts: unknown) {}
-  },
-  systemTimezone: () => 'UTC',
-  formatFiresAt: (iso: string) => iso,
 }));
 vi.mock('../src/bridge-api.ts', () => ({
   startBridgeApi: vi.fn(async () => ({
@@ -259,7 +239,7 @@ describe('bridge', () => {
     vi.clearAllMocks();
     mockAcpClient.start.mockResolvedValue(undefined);
     mockConfig = null;
-    lastCronManagerArgs = null;
+    lastJobManagerArgs = null;
     lastHttpServerArgs = null;
     intervalSpy = vi.spyOn(global, 'setInterval').mockImplementation(() => 0);
     onSpy = vi.spyOn(process, 'on').mockImplementation(() => process);
@@ -280,12 +260,12 @@ describe('bridge', () => {
     expect(exitSpy).toHaveBeenCalledWith(1);
   });
 
-  it('starts ACP, bot, cron, and HTTP', async () => {
+  it('starts ACP, bot, jobs, and HTTP', async () => {
     mockConfig = { ...validConfig };
     await run();
     expect(mockAcpClient.start).toHaveBeenCalled();
     expect(mockBot.start).toHaveBeenCalled();
-    expect(mockCronManager.start).toHaveBeenCalled();
+    expect(mockJobManager.start).toHaveBeenCalled();
     expect(mockHttpServer.start).toHaveBeenCalled();
   });
 
@@ -296,7 +276,7 @@ describe('bridge', () => {
     expect(exitSpy).toHaveBeenCalledWith(1);
   });
 
-  it('wires onCommand to routine manager', async () => {
+  it('wires onCommand to the jobs handler', async () => {
     mockConfig = { ...validConfig };
     await run();
     expect(lastBotInstance?.onCommand).toBeDefined();
@@ -310,7 +290,7 @@ describe('bridge', () => {
     expect(typeof lastAcpInstance?.onPermission).toBe('function');
   });
 
-  it('preserves Discord Snowflake channel IDs for cron allowedChatIds', async () => {
+  it('preserves Discord Snowflake channel IDs for job allowedChatIds', async () => {
     const snowflake: string = '123456789012345678';
     mockConfig = {
       agentCmd: 'acp-agent serve',
@@ -322,8 +302,8 @@ describe('bridge', () => {
       },
     };
     await run();
-    expect(lastCronManagerArgs).not.toBeNull();
-    expect(lastCronManagerArgs?.allowedChatIds).toContain(snowflake);
+    expect(lastJobManagerArgs).not.toBeNull();
+    expect(lastJobManagerArgs?.allowedChatIds).toContain(snowflake);
   });
 
   it('routes permission to the bot with an active prompt (Discord), not the first bot (TG)', async () => {

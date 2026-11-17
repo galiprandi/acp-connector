@@ -3,18 +3,15 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { AddressInfo } from 'node:net';
 import { isAbsolute, resolve, sep } from 'node:path';
 import type { AliasDirectory } from './aliases.js';
-import type { CronManager } from './cron.js';
-import { everyToCron } from './cron.js';
+import type { Job, JobManager, JobTrigger } from './jobs.js';
+import { everyToCron, formatFiresAt, needsExplicitTimezone, parseWhenTime } from './jobs.js';
 import { log } from './logger.js';
-import type { Reminder, ReminderManager } from './reminders.js';
-import { formatFiresAt, needsExplicitTimezone, parseReminderTime } from './reminders.js';
-import { persistCronAndRoutines } from './routines.js';
 
 /**
  * Loopback HTTP API backing the `acp-tools` MCP stdio server. The MCP
  * server runs inside the agent process; this API is how its tools reach
- * the bridge's reminder store, cron manager, chat alias directory and
- * messaging transports.
+ * the bridge's job scheduler, chat alias directory and messaging
+ * transports.
  *
  * Bound to 127.0.0.1 on an ephemeral port, no auth — same trust model
  * as the A2A loopback endpoints (the agent is already fully trusted).
@@ -24,13 +21,6 @@ const MAX_BODY = 64 * 1024;
 /** Default cap for agent-sent files — Telegram bot uploads max ~50MB. */
 export const DEFAULT_MAX_FILE_BYTES = 45 * 1024 * 1024;
 const CAPTION_MAX = 1024;
-
-/**
- * Maximum number of concurrently persisted agent-created cron jobs.
- * Mirrors MAX_REMINDERS in reminders.ts — bounds restart-surviving
- * resource use if an agent misbehaves. Operator jobs are not capped here.
- */
-export const AGENT_CRON_CAP = 50;
 
 type Json = Record<string, unknown>;
 
@@ -87,8 +77,7 @@ export interface FileSendHandlers {
 }
 
 export interface BridgeApiOptions {
-  reminders: ReminderManager;
-  cronManager: CronManager;
+  jobs: JobManager;
   /**
    * IANA timezone (`config.timezone`) for absolute times without an
    * explicit zone. Required for naive absolute times — unset means they
@@ -114,8 +103,7 @@ export interface BridgeApiOptions {
  * spawning the MCP server.
  */
 export function createBridgeApiHandler({
-  reminders,
-  cronManager,
+  jobs,
   timezone,
   aliases,
   fileSend,
@@ -166,71 +154,70 @@ export function createBridgeApiHandler({
     return { path: real };
   };
 
-  // Attach a human-readable local rendering (with GMT offset) so the agent
-  // can confirm "alarm set for <time> (<zone>)" to the operator.
-  const withLocal = (r: Reminder): Reminder & { firesAtLocal: string } => ({
-    ...r,
-    firesAtLocal: formatFiresAt(r.firesAt, timezone),
+  // Human-readable rendering with GMT offset so the agent can confirm
+  // schedules to the operator.
+  const describe = (j: Job): Job & { firesAtLocal?: string; readOnly: boolean } => ({
+    ...j,
+    firesAtLocal: j.trigger.kind === 'once' ? formatFiresAt(j.trigger.at, timezone) : undefined,
+    readOnly: j.managed !== 'agent',
   });
 
-  const parseFire = (body: Json): { ts: number | null; error?: string } => {
-    const input = _str(body.in) ?? _str(body.at);
-    if (_str(body.in) && _str(body.at)) {
-      return { ts: null, error: 'exactly one of "in" or "at" is required' };
-    }
-    if (!input) return { ts: null, error: 'exactly one of "in" or "at" is required' };
-    const mode = _str(body.in) ? 'in' : 'at';
-    if (!timezone && needsExplicitTimezone(input, mode)) {
-      return {
-        ts: null,
-        error: `"${input}" is an absolute time without a zone — set "timezone" in acp-connector.jsonc (e.g. "America/Argentina/Tucuman") or include an explicit offset like -03:00`,
-      };
-    }
-    const ts = parseReminderTime(input, mode, timezone, now());
-    if (ts === null) {
-      return {
-        ts: null,
-        error: `could not parse "${input}" as a future ${mode === 'in' ? 'delay' : 'time'}`,
-      };
-    }
-    return { ts };
-  };
-
-  const cronResolve = (body: Json): { schedule?: string; error?: string } => {
-    const expr = _str(body.expr);
+  /**
+   * Resolve the schedule fields of a create/update body into a JobTrigger.
+   * Exactly one of: in|at (once), every|expr (cron), manual:true.
+   */
+  const resolveTrigger = (body: Json): { trigger?: JobTrigger; error?: string } => {
+    const inStr = _str(body.in);
+    const at = _str(body.at);
     const every = _str(body.every);
-    if (expr && every) return { error: 'exactly one of "every" or "expr" is required' };
-    if (expr) return { schedule: expr };
+    const expr = _str(body.expr);
+    const manual = body.manual === true;
+
+    const sources = [inStr, at, every, expr].filter(Boolean).length + (manual ? 1 : 0);
+    if (sources !== 1) {
+      return {
+        error:
+          'exactly one schedule source required: "in"/"at" (once), "every"/"expr" (cron), or "manual": true',
+      };
+    }
+
+    if (manual) return { trigger: { kind: 'manual' } };
+
+    if (inStr || at) {
+      if (inStr && at) return { error: 'exactly one of "in" or "at" is required' };
+      const input = (inStr ?? at) as string;
+      if (!timezone && needsExplicitTimezone(input)) {
+        return {
+          error: `"${input}" is an absolute time without a zone — set "timezone" in acp-connector.jsonc (e.g. "America/Argentina/Tucuman") or include an explicit offset like -03:00`,
+        };
+      }
+      const ts = parseWhenTime(input, timezone, now());
+      if (ts === null) {
+        return {
+          error: `could not parse "${input}" as a future time`,
+        };
+      }
+      return { trigger: { kind: 'once', at: new Date(ts).toISOString() } };
+    }
+
     if (every) {
       const schedule = everyToCron(every);
       if (!schedule) {
         return { error: `cannot express "${every}" as cron — use "expr" instead` };
       }
-      return { schedule };
+      return { trigger: { kind: 'cron', expr: schedule } };
     }
-    return { error: 'exactly one of "every" or "expr" is required' };
+
+    return { trigger: { kind: 'cron', expr: expr as string } };
   };
 
-  // Operator-owned reminders are read-only for the agent — same rule as
-  // operator cron jobs (agentCron below).
-  const agentReminder = (id: string) => {
-    const r = reminders.list().find((x) => x.id === id);
-    if (!r) return { error: `reminder "${id}" not found`, status: 404 };
-    if ((r.managed ?? 'agent') !== 'agent') {
-      return {
-        error: `reminder "${id}" is operator-managed and read-only for the agent`,
-        status: 400,
-      };
-    }
-    return { reminder: r, status: 200 };
-  };
-
-  const agentCron = (id: string) => {
-    const job = cronManager.list().find((j) => j.name === id);
-    if (!job) return { error: `cron job "${id}" not found`, status: 404 };
+  // Operator-owned jobs are read-only for the agent.
+  const agentJob = (id: string) => {
+    const job = jobs.get(id);
+    if (!job) return { error: `job "${id}" not found`, status: 404 };
     if (job.managed !== 'agent') {
       return {
-        error: `cron job "${id}" is operator-managed and read-only for the agent`,
+        error: `job "${id}" is operator-managed and read-only for the agent`,
         status: 400,
       };
     }
@@ -266,117 +253,94 @@ export function createBridgeApiHandler({
         return _ok(res, { deliveredTo: target.alias });
       }
 
-      // ---------------------------------------------------------- reminders
-      if (path === '/reminder/list' && req.method === 'GET') {
-        _ok(res, { reminders: reminders.list().map(withLocal) });
+      // ---------------------------------------------------------------- jobs
+      if (path === '/jobs/list' && req.method === 'GET') {
+        _ok(res, { jobs: jobs.list().map(describe), now: new Date(now()).toISOString() });
         return;
       }
-      if (path === '/reminder/create' && req.method === 'POST') {
+      if (path === '/jobs/create' && req.method === 'POST') {
         const body = await _readBody(req);
         const prompt = _str(body.prompt);
         if (!prompt) return _err(res, '"prompt" is required');
-        const { ts, error } = parseFire(body);
-        if (ts === null) return _err(res, error ?? 'invalid time');
-        const r = reminders.create(prompt, ts, 'agent');
-        return _ok(res, { reminder: withLocal(r) });
+        const { trigger, error } = resolveTrigger(body);
+        if (!trigger) return _err(res, error ?? 'invalid trigger');
+        try {
+          const job = jobs.create({
+            prompt,
+            trigger,
+            name: _str(body.name),
+            managed: 'agent',
+          });
+          return _ok(res, { job: describe(job) });
+        } catch (err) {
+          return _err(res, (err as Error).message, 400);
+        }
       }
-      if (path === '/reminder/cancel' && req.method === 'POST') {
+      if (path === '/jobs/update' && req.method === 'POST') {
         const body = await _readBody(req);
         const id = _str(body.id);
         if (!id) return _err(res, '"id" is required');
-        const { error, status } = agentReminder(id);
-        if (error) return _err(res, error, status);
-        reminders.cancel(id);
-        return _ok(res);
-      }
-      if (path === '/reminder/update' && req.method === 'POST') {
-        const body = await _readBody(req);
-        const id = _str(body.id);
-        if (!id) return _err(res, '"id" is required');
-        const { error, status } = agentReminder(id);
-        if (error) return _err(res, error, status);
-        const patch: { firesAt?: number; prompt?: string } = {};
-        if (_str(body.in) || _str(body.at)) {
-          const { ts, error } = parseFire(body);
-          if (ts === null) return _err(res, error ?? 'invalid time');
-          patch.firesAt = ts;
-        }
-        const prompt = _str(body.prompt);
-        if (prompt) patch.prompt = prompt;
-        if (patch.firesAt === undefined && !patch.prompt) {
-          return _err(res, 'nothing to update: pass "in"/"at" and/or "prompt"');
-        }
-        const r = reminders.update(id, patch);
-        if (!r) return _err(res, `reminder "${id}" not found`, 404);
-        return _ok(res, { reminder: withLocal(r) });
-      }
-
-      // ---------------------------------------------------------------- cron
-      if (path === '/cron/list' && req.method === 'GET') {
-        const jobs = cronManager.list().map((j) => ({
-          id: j.name,
-          schedule: j.schedule,
-          prompt: j.prompt,
-          enabled: j.enabled !== false,
-          managed: j.managed === 'agent' ? 'agent' : 'operator',
-          readOnly: j.managed !== 'agent',
-        }));
-        _ok(res, { crons: jobs });
-        return;
-      }
-      if (path === '/cron/create' && req.method === 'POST') {
-        const body = await _readBody(req);
-        const prompt = _str(body.prompt);
-        if (!prompt) return _err(res, '"prompt" is required');
-        const { schedule, error } = cronResolve(body);
-        if (!schedule) return _err(res, error ?? 'invalid schedule');
-        const agentJobs = cronManager.list().filter((j) => j.managed === 'agent').length;
-        if (agentJobs >= AGENT_CRON_CAP) {
-          return _err(res, `agent cron job cap reached (${AGENT_CRON_CAP})`);
-        }
-        const id = `agent-${Date.now().toString(36)}-${Math.floor(Math.random() * 1e4)}`;
-        const job = cronManager.add({ name: id, schedule, prompt, managed: 'agent' });
-        if (!job) return _err(res, 'invalid schedule or duplicate job');
-        persistCronAndRoutines(cronManager.list());
-        return _ok(res, { cron: { id: job.name, schedule: job.schedule, prompt: job.prompt } });
-      }
-      if (path === '/cron/update' && req.method === 'POST') {
-        const body = await _readBody(req);
-        const id = _str(body.id);
-        if (!id) return _err(res, '"id" is required');
-        const { job, error, status } = agentCron(id);
+        const { job, error, status } = agentJob(id);
         if (!job) return _err(res, error ?? 'not found', status);
-        const patch = { ...job };
-        if (_str(body.every) || _str(body.expr)) {
-          const { schedule, error: sErr } = cronResolve(body);
-          if (!schedule) return _err(res, sErr ?? 'invalid schedule');
-          patch.schedule = schedule;
-        }
+        const patch: { prompt?: string; name?: string; enabled?: boolean; trigger?: JobTrigger } =
+          {};
         const prompt = _str(body.prompt);
         if (prompt) patch.prompt = prompt;
+        if (typeof body.name === 'string') patch.name = body.name;
         if (typeof body.enabled === 'boolean') patch.enabled = body.enabled;
-        cronManager.remove(id);
-        const added = cronManager.add(patch);
-        if (!added) return _err(res, 'invalid schedule — job removed', 500);
-        persistCronAndRoutines(cronManager.list());
-        return _ok(res, {
-          cron: {
-            id: added.name,
-            schedule: added.schedule,
-            prompt: added.prompt,
-            enabled: added.enabled !== false,
-          },
-        });
+        const hasSchedule =
+          _str(body.in) ||
+          _str(body.at) ||
+          _str(body.every) ||
+          _str(body.expr) ||
+          body.manual === true;
+        if (hasSchedule) {
+          const { trigger, error: tErr } = resolveTrigger(body);
+          if (!trigger) return _err(res, tErr ?? 'invalid trigger');
+          patch.trigger = trigger;
+        }
+        if (
+          !patch.prompt &&
+          patch.name === undefined &&
+          patch.enabled === undefined &&
+          !patch.trigger
+        ) {
+          return _err(res, 'nothing to update');
+        }
+        try {
+          const updated = jobs.update(job.id, patch);
+          if (!updated) return _err(res, `job "${id}" not found`, 404);
+          return _ok(res, { job: describe(updated) });
+        } catch (err) {
+          return _err(res, (err as Error).message, 400);
+        }
       }
-      if (path === '/cron/delete' && req.method === 'POST') {
+      if (path === '/jobs/delete' && req.method === 'POST') {
         const body = await _readBody(req);
         const id = _str(body.id);
         if (!id) return _err(res, '"id" is required');
-        const { job, error, status } = agentCron(id);
+        const { job, error, status } = agentJob(id);
         if (!job) return _err(res, error ?? 'not found', status);
-        cronManager.remove(id);
-        persistCronAndRoutines(cronManager.list());
+        jobs.remove(job.id);
         return _ok(res);
+      }
+      if (path === '/jobs/run' && req.method === 'POST') {
+        const body = await _readBody(req);
+        const id = _str(body.id);
+        if (!id) return _err(res, '"id" is required');
+        const { job, error, status } = agentJob(id);
+        if (!job) return _err(res, error ?? 'not found', status);
+        jobs.run(job.id);
+        return _ok(res);
+      }
+      if (path === '/jobs/toggle' && req.method === 'POST') {
+        const body = await _readBody(req);
+        const id = _str(body.id);
+        if (!id) return _err(res, '"id" is required');
+        const { job, error, status } = agentJob(id);
+        if (!job) return _err(res, error ?? 'not found', status);
+        const enabled = jobs.toggle(job.id);
+        return _ok(res, { enabled });
       }
 
       _err(res, `not found: ${req.method} ${path}`, 404);

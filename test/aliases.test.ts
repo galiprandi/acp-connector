@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { AliasDirectory } from '../src/aliases.js';
 import type { SenderInfo } from '../src/identity.js';
+import { StateStore } from '../src/state.js';
 
 const dm = (name: string): SenderInfo => ({ name, isGroup: false });
 const grp = (chatName: string, sender: string): SenderInfo => ({
@@ -84,13 +85,13 @@ describe('AliasDirectory', () => {
     expect(list[0]).not.toHaveProperty('chatId');
   });
 
-  it('persists and reloads aliases across restarts', () => {
+  it('persists and reloads aliases across restarts via state.json', () => {
     dir = mkdtempSync(join(tmpdir(), 'acp-alias-'));
-    const store = join(dir, 'aliases.json');
-    const d1 = new AliasDirectory(store);
+    const statePath = join(dir, 'state.json');
+    const d1 = new AliasDirectory(StateStore.load(statePath));
     d1.register('telegram', 777, dm('Persisted User'));
 
-    const d2 = new AliasDirectory(store);
+    const d2 = new AliasDirectory(StateStore.load(statePath));
     const r = d2.resolve('Telegram/Persisted User');
     expect(r.ok && r.entry.chatId).toBe('777');
   });

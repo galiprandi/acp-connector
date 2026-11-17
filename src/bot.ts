@@ -12,6 +12,14 @@ const TG_MAX_LEN = 4096;
 const TG_CAPTION_MAX = 1024;
 const TG_IMAGE_EXTS = new Set(['jpg', 'jpeg', 'png', 'gif', 'webp']);
 
+/**
+ * Prompt provenance. 'job'/'agent-job' come from the unified job
+ * scheduler (operator vs agent-managed — agent jobs are remote content);
+ * 'http' is POST /prompt; 'a2a' is a remote peer. User messages have no
+ * source.
+ */
+export type PromptSource = 'job' | 'agent-job' | 'http' | 'a2a';
+
 export interface PlatformBot {
   start(): Promise<void>;
   stop(): void;
@@ -20,7 +28,7 @@ export interface PlatformBot {
     chatId?: number | string,
     blocks?: ContentBlock[],
     onComplete?: (response: string, error?: string) => void,
-    source?: 'cron' | 'agent-cron' | 'agent-reminder' | 'http' | 'routine' | 'a2a' | 'reminder'
+    source?: PromptSource
   ): Promise<void>;
   sendMessage(chatId: number | string, text: string): Promise<void>;
   /** Send a local file — used by the acp-tools send_file tool. */
@@ -51,6 +59,7 @@ interface BridgeBotOpts {
   onCommand?: ((text: string, chatId: number | string) => Promise<boolean>) | null;
   onPrompt?: ((text: string, chatId: number | string) => void) | null;
   aliases?: AliasDirectory | null;
+  timezone?: string;
 }
 
 export class BridgeBot extends BaseBot {
@@ -76,6 +85,7 @@ export class BridgeBot extends BaseBot {
     onCommand = null,
     onPrompt = null,
     aliases = null,
+    timezone,
   }: BridgeBotOpts) {
     super({
       acp,
@@ -91,6 +101,7 @@ export class BridgeBot extends BaseBot {
       onPrompt,
       platformName: 'telegram',
       aliases,
+      timezone,
     });
     this.allowedChatIds = new Set(allowedChatIds);
     this.allowedUserIds = new Set(allowedUserIds);
@@ -99,6 +110,22 @@ export class BridgeBot extends BaseBot {
 
   async start(): Promise<void> {
     this._setupHandlers();
+    // Register the command menu — typing "/" in Telegram shows these
+    // with descriptions instead of making users memorize the grammar.
+    try {
+      await this.bot.setMyCommands([
+        { command: 'stop', description: 'Cancel the current task' },
+        { command: 'sessions', description: 'List/switch sessions (new, <n>, rm)' },
+        { command: 'config', description: 'Show or set session options' },
+        { command: 'queue', description: 'List or clear pending prompts' },
+        { command: 'jobs', description: 'Scheduled & manual jobs' },
+        { command: 'time', description: 'Host/config/UTC clocks' },
+        { command: 'status', description: 'Agent state and uptime' },
+        { command: 'help', description: 'Show all commands' },
+      ]);
+    } catch (err) {
+      log.warn(`setMyCommands failed: ${(err as Error).message}`);
+    }
   }
 
   stop(): void {

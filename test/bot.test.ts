@@ -12,6 +12,7 @@ interface MockBot {
   setMessageReaction: MockFn;
   sendDocument: MockFn;
   sendPhoto: MockFn;
+  setMyCommands: MockFn;
   stopPolling: MockFn;
 }
 
@@ -25,6 +26,7 @@ const mockBot: MockBot = {
   setMessageReaction: vi.fn(async () => true),
   sendDocument: vi.fn(async () => ({ message_id: 2 })),
   sendPhoto: vi.fn(async () => ({ message_id: 3 })),
+  setMyCommands: vi.fn(async () => true),
   stopPolling: vi.fn(),
 };
 
@@ -38,6 +40,7 @@ vi.mock('node-telegram-bot-api', () => ({
     setMessageReaction = mockBot.setMessageReaction;
     sendDocument = mockBot.sendDocument;
     sendPhoto = mockBot.sendPhoto;
+    setMyCommands = mockBot.setMyCommands;
     stopPolling = mockBot.stopPolling;
   },
 }));
@@ -583,7 +586,7 @@ describe('BridgeBot', () => {
     const { bot, acp } = createBot();
     await bot.start();
     const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
-    await handler({ chat: { id: 123 }, text: '/new' });
+    await handler({ chat: { id: 123 }, text: '/sessions new' });
     expect(acp.newSession).toHaveBeenCalled();
     expect(mockBot.sendMessage).toHaveBeenCalledWith(
       123,
@@ -599,7 +602,7 @@ describe('BridgeBot', () => {
     const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
     await handler({ chat: { id: 123 }, text: 'long task' });
     await vi.waitFor(() => expect(bot.busy).toBe(true));
-    await handler({ chat: { id: 123 }, text: '/new' });
+    await handler({ chat: { id: 123 }, text: '/sessions new' });
     expect(acp.newSession).not.toHaveBeenCalled();
     expect(mockBot.sendMessage).toHaveBeenCalledWith(
       123,
@@ -616,7 +619,7 @@ describe('BridgeBot', () => {
     expect(acp.listSessions).toHaveBeenCalled();
     expect(mockBot.sendMessage).toHaveBeenCalledWith(
       123,
-      '*Sessions:*\n  1. Session 1\n  2. s2\n\nSwitch with /session <n> or /session <id>.',
+      '*Sessions:*\n  1. Session 1\n  2. s2\n\nSwitch with /sessions <n> or /sessions <id>.',
       { parse_mode: 'Markdown' }
     );
   });
@@ -626,7 +629,7 @@ describe('BridgeBot', () => {
     await bot.start();
     const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
     await handler({ chat: { id: 123 }, text: '/sessions' });
-    await handler({ chat: { id: 123 }, text: '/session 2' });
+    await handler({ chat: { id: 123 }, text: '/sessions 2' });
     expect(acp.loadSession).toHaveBeenCalledWith('s2');
   });
 
@@ -634,7 +637,7 @@ describe('BridgeBot', () => {
     const { bot, acp } = createBot();
     await bot.start();
     const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
-    await handler({ chat: { id: 123 }, text: '/session 2' });
+    await handler({ chat: { id: 123 }, text: '/sessions 2' });
     expect(acp.loadSession).not.toHaveBeenCalled();
     expect(mockBot.sendMessage).toHaveBeenCalledWith(
       123,
@@ -648,7 +651,7 @@ describe('BridgeBot', () => {
     await bot.start();
     const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
     await handler({ chat: { id: 123 }, text: '/sessions' });
-    await handler({ chat: { id: 123 }, text: '/session 99' });
+    await handler({ chat: { id: 123 }, text: '/sessions 99' });
     expect(acp.loadSession).not.toHaveBeenCalled();
     expect(mockBot.sendMessage).toHaveBeenCalledWith(
       123,
@@ -674,7 +677,7 @@ describe('BridgeBot', () => {
     const { bot, acp } = createBot();
     await bot.start();
     const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
-    await handler({ chat: { id: 123 }, text: '/session abc-123' });
+    await handler({ chat: { id: 123 }, text: '/sessions abc-123' });
     expect(acp.loadSession).toHaveBeenCalledWith('abc-123');
     expect(mockBot.sendMessage).toHaveBeenCalledWith(123, '🔄 Switched to session: `abc-123`', {
       parse_mode: 'Markdown',
@@ -685,12 +688,10 @@ describe('BridgeBot', () => {
     const { bot } = createBot();
     await bot.start();
     const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
-    await handler({ chat: { id: 123 }, text: '/session' });
-    expect(mockBot.sendMessage).toHaveBeenCalledWith(
-      123,
-      'Usage: /session `<n>` or /session `<id>`',
-      { parse_mode: 'Markdown' }
-    );
+    await handler({ chat: { id: 123 }, text: '/sessions rm' });
+    expect(mockBot.sendMessage).toHaveBeenCalledWith(123, 'Usage: /sessions rm `<id>`', {
+      parse_mode: 'Markdown',
+    });
   });
 
   it('/session when busy refuses with message', async () => {
@@ -700,7 +701,7 @@ describe('BridgeBot', () => {
     const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
     await handler({ chat: { id: 123 }, text: 'long task' });
     await vi.waitFor(() => expect(bot.busy).toBe(true));
-    await handler({ chat: { id: 123 }, text: '/session abc-123' });
+    await handler({ chat: { id: 123 }, text: '/sessions abc-123' });
     expect(acp.loadSession).not.toHaveBeenCalled();
     expect(mockBot.sendMessage).toHaveBeenCalledWith(
       123,
@@ -714,7 +715,7 @@ describe('BridgeBot', () => {
     await bot.start();
     acp.newSession.mockRejectedValueOnce(new Error('agent crashed'));
     const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
-    await handler({ chat: { id: 123 }, text: '/new' });
+    await handler({ chat: { id: 123 }, text: '/sessions new' });
     expect(mockBot.sendMessage).toHaveBeenCalledWith(
       123,
       'Failed to create session: agent crashed',
@@ -722,62 +723,92 @@ describe('BridgeBot', () => {
     );
   });
 
-  it('/mode lists available modes', async () => {
+  it('/config mode lists modes as a synthetic option', async () => {
     const { bot } = createBot();
     await bot.start();
     const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
-    await handler({ chat: { id: 123 }, text: '/mode' });
-    expect(mockBot.sendMessage).toHaveBeenCalledWith(123, expect.stringContaining('*Modes:*'), {
-      parse_mode: 'Markdown',
-    });
-    expect(mockBot.sendMessage).toHaveBeenCalledWith(123, expect.stringContaining('`bypass`'), {
-      parse_mode: 'Markdown',
-    });
-  });
-
-  it('/mode <id> switches mode', async () => {
-    const { bot, acp } = createBot();
-    await bot.start();
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
-    await handler({ chat: { id: 123 }, text: '/mode bypass' });
-    expect(acp.setSessionMode).toHaveBeenCalledWith('bypass');
-    expect(mockBot.sendMessage).toHaveBeenCalledWith(123, '🔧 Mode set to: `bypass` (Bypass)', {
-      parse_mode: 'Markdown',
-    });
-  });
-
-  it('/mode <unknown> sends available modes', async () => {
-    const { bot } = createBot();
-    await bot.start();
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
-    await handler({ chat: { id: 123 }, text: '/mode unknown' });
+    await handler({ chat: { id: 123 }, text: '/config mode' });
     expect(mockBot.sendMessage).toHaveBeenCalledWith(
       123,
-      expect.stringContaining('Unknown mode `unknown`'),
+      '*`mode`* (Mode)\n▶ 1. Default\n  2. Bypass — Auto-approve all tool calls\n\nSet with /config mode <n> or <value>.',
       { parse_mode: 'Markdown' }
     );
   });
 
-  it('/mode when no modes available sends message', async () => {
+  it('/config mode <id> switches mode via set_mode', async () => {
     const { bot, acp } = createBot();
-    acp.modes = null;
     await bot.start();
     const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
-    await handler({ chat: { id: 123 }, text: '/mode' });
-    expect(mockBot.sendMessage).toHaveBeenCalledWith(123, 'No session modes available.', {
+    await handler({ chat: { id: 123 }, text: '/config mode bypass' });
+    expect(acp.setSessionMode).toHaveBeenCalledWith('bypass');
+    expect(acp.setConfigOption).not.toHaveBeenCalled();
+    expect(mockBot.sendMessage).toHaveBeenCalledWith(123, '⚙️ `mode` set to: `bypass`', {
       parse_mode: 'Markdown',
     });
   });
 
-  it('/mode on error sends error message', async () => {
+  it('/config mode <n> switches mode by index', async () => {
+    const { bot, acp } = createBot();
+    await bot.start();
+    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    await handler({ chat: { id: 123 }, text: '/config mode 2' });
+    expect(acp.setSessionMode).toHaveBeenCalledWith('bypass');
+  });
+
+  it('/config mode <unknown> sends available values', async () => {
+    const { bot } = createBot();
+    await bot.start();
+    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    await handler({ chat: { id: 123 }, text: '/config mode unknown' });
+    expect(mockBot.sendMessage).toHaveBeenCalledWith(
+      123,
+      expect.stringContaining('Unknown value `unknown`. Available: default, bypass'),
+      { parse_mode: 'Markdown' }
+    );
+  });
+
+  it('/config mode when no modes available reports unknown option', async () => {
+    const { bot, acp } = createBot();
+    acp.modes = null;
+    await bot.start();
+    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    await handler({ chat: { id: 123 }, text: '/config mode' });
+    expect(mockBot.sendMessage).toHaveBeenCalledWith(
+      123,
+      expect.stringContaining('Unknown option `mode`'),
+      { parse_mode: 'Markdown' }
+    );
+  });
+
+  it('/config mode on error sends error message', async () => {
     const { bot, acp } = createBot();
     await bot.start();
     acp.setSessionMode.mockRejectedValueOnce(new Error('agent rejected'));
     const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
-    await handler({ chat: { id: 123 }, text: '/mode bypass' });
-    expect(mockBot.sendMessage).toHaveBeenCalledWith(123, 'Failed to set mode: agent rejected', {
+    await handler({ chat: { id: 123 }, text: '/config mode bypass' });
+    expect(mockBot.sendMessage).toHaveBeenCalledWith(123, 'Failed to set option: agent rejected', {
       parse_mode: 'Markdown',
     });
+  });
+
+  it('a real mode configOption wins over the synthetic one', async () => {
+    const { bot, acp } = createBot();
+    acp.configOptions = [
+      ...(acp.configOptions ?? []),
+      {
+        id: 'mode',
+        name: 'Mode',
+        type: 'select',
+        currentValue: 'default',
+        options: [{ value: 'default', name: 'Default' }],
+      },
+    ];
+    await bot.start();
+    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    await handler({ chat: { id: 123 }, text: '/config mode default' });
+    // real configOption path — set_config_option, not set_mode
+    expect(acp.setConfigOption).toHaveBeenCalledWith('mode', 'default');
+    expect(acp.setSessionMode).not.toHaveBeenCalled();
   });
 
   it('/config lists all config options with current values', async () => {
@@ -818,11 +849,11 @@ describe('BridgeBot', () => {
     expect(acp.setConfigOption).toHaveBeenCalledWith('model', 'model-b');
   });
 
-  it('/model <n> sets the model by list index', async () => {
+  it('/config model <n> sets the model by list index', async () => {
     const { bot, acp } = createBot();
     await bot.start();
     const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
-    await handler({ chat: { id: 123 }, text: '/model 1' });
+    await handler({ chat: { id: 123 }, text: '/config model 1' });
     expect(acp.setConfigOption).toHaveBeenCalledWith('model', 'model-a');
   });
 
@@ -850,19 +881,19 @@ describe('BridgeBot', () => {
     });
   });
 
-  it('/model <value> is an alias for /config model <value>', async () => {
+  it('/config model <value> sets the model', async () => {
     const { bot, acp } = createBot();
     await bot.start();
     const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
-    await handler({ chat: { id: 123 }, text: '/model model-b' });
+    await handler({ chat: { id: 123 }, text: '/config model model-b' });
     expect(acp.setConfigOption).toHaveBeenCalledWith('model', 'model-b');
   });
 
-  it('/model without value lists model options', async () => {
+  it('/config model without value lists model options', async () => {
     const { bot } = createBot();
     await bot.start();
     const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
-    await handler({ chat: { id: 123 }, text: '/model' });
+    await handler({ chat: { id: 123 }, text: '/config model' });
     expect(mockBot.sendMessage).toHaveBeenCalledWith(
       123,
       expect.stringContaining('2. Model B — Fast'),
@@ -877,7 +908,7 @@ describe('BridgeBot', () => {
     await handler({ chat: { id: 123 }, text: '/config nope' });
     expect(mockBot.sendMessage).toHaveBeenCalledWith(
       123,
-      expect.stringContaining('Unknown option `nope`. Available: model, verbose'),
+      expect.stringContaining('Unknown option `nope`. Available: model, verbose, mode'),
       { parse_mode: 'Markdown' }
     );
   });
@@ -916,9 +947,10 @@ describe('BridgeBot', () => {
     );
   });
 
-  it('/config with no config options sends message', async () => {
+  it('/config with no config options and no modes sends message', async () => {
     const { bot, acp } = createBot();
     acp.configOptions = null;
+    acp.modes = null;
     await bot.start();
     const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
     await handler({ chat: { id: 123 }, text: '/config' });
@@ -977,7 +1009,7 @@ describe('BridgeBot', () => {
     );
     expect(mockBot.sendMessage).toHaveBeenCalledWith(
       123,
-      expect.stringContaining('/reminder add `<when> <prompt>`'),
+      expect.stringContaining('/jobs add `[as <name>] <when> <prompt>`'),
       { parse_mode: 'Markdown' }
     );
   });
@@ -1312,45 +1344,45 @@ describe('BridgeBot', () => {
 
   // --- /delete command ---
 
-  it('/delete <id> deletes a session', async () => {
+  it('/sessions rm <id> deletes a session', async () => {
     const { bot, acp } = createBot();
     await bot.start();
     const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
-    await handler({ chat: { id: 123 }, text: '/delete other-session' });
+    await handler({ chat: { id: 123 }, text: '/sessions rm other-session' });
     expect(acp.deleteSession).toHaveBeenCalledWith('other-session');
     expect(mockBot.sendMessage).toHaveBeenCalledWith(123, '🗑 Deleted session: `other-session`', {
       parse_mode: 'Markdown',
     });
   });
 
-  it('/delete without arg shows usage', async () => {
+  it('/sessions rm without arg shows usage', async () => {
     const { bot } = createBot();
     await bot.start();
     const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
-    await handler({ chat: { id: 123 }, text: '/delete' });
-    expect(mockBot.sendMessage).toHaveBeenCalledWith(123, 'Usage: /delete `<id>`', {
+    await handler({ chat: { id: 123 }, text: '/sessions rm' });
+    expect(mockBot.sendMessage).toHaveBeenCalledWith(123, 'Usage: /sessions rm `<id>`', {
       parse_mode: 'Markdown',
     });
   });
 
-  it('/delete active session is rejected', async () => {
+  it('/sessions rm active session is rejected', async () => {
     const { bot } = createBot();
     await bot.start();
     const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
-    await handler({ chat: { id: 123 }, text: '/delete test-session-id' });
+    await handler({ chat: { id: 123 }, text: '/sessions rm test-session-id' });
     expect(mockBot.sendMessage).toHaveBeenCalledWith(
       123,
-      'Cannot delete the active session. Use /new first.',
+      'Cannot delete the active session. Use /sessions new first.',
       { parse_mode: 'Markdown' }
     );
   });
 
-  it('/delete on error sends error message', async () => {
+  it('/sessions rm on error sends error message', async () => {
     const { bot, acp } = createBot();
     await bot.start();
     acp.deleteSession.mockRejectedValueOnce(new Error('agent rejected'));
     const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
-    await handler({ chat: { id: 123 }, text: '/delete other-session' });
+    await handler({ chat: { id: 123 }, text: '/sessions rm other-session' });
     expect(mockBot.sendMessage).toHaveBeenCalledWith(
       123,
       'Failed to delete session: agent rejected',
@@ -1368,12 +1400,12 @@ describe('echoInjectedPrompts', () => {
     vi.useRealTimers();
   });
 
-  it('echoes cron-sourced prompt with cron label', async () => {
+  it('echoes job-sourced prompt with job label', async () => {
     const { bot, acp } = createBot();
     await bot.start();
-    bot.enqueuePrompt('summarize today', 123, undefined, undefined, 'cron');
+    bot.enqueuePrompt('summarize today', 123, undefined, undefined, 'job');
     await vi.advanceTimersByTimeAsync(1000);
-    expect(mockBot.sendMessage).toHaveBeenCalledWith(123, '⏰ [cron] summarize today');
+    expect(mockBot.sendMessage).toHaveBeenCalledWith(123, '⏰ [job] summarize today');
     expect(acp.prompt).toHaveBeenCalledWith('summarize today');
   });
 
@@ -1385,12 +1417,12 @@ describe('echoInjectedPrompts', () => {
     expect(mockBot.sendMessage).toHaveBeenCalledWith(123, '🌐 [http] what is the weather');
   });
 
-  it('echoes routine-sourced prompt with routine label', async () => {
+  it('echoes a2a-sourced prompt with a2a label', async () => {
     const { bot } = createBot();
     await bot.start();
-    bot.enqueuePrompt('review the latest PRs', 123, undefined, undefined, 'routine');
+    bot.enqueuePrompt('review the latest PRs', 123, undefined, undefined, 'a2a');
     await vi.advanceTimersByTimeAsync(1000);
-    expect(mockBot.sendMessage).toHaveBeenCalledWith(123, '🔁 [routine] review the latest PRs');
+    expect(mockBot.sendMessage).toHaveBeenCalledWith(123, '🔁 [a2a] review the latest PRs');
   });
 
   it('does not echo when no source is provided (direct user message)', async () => {
@@ -1402,17 +1434,17 @@ describe('echoInjectedPrompts', () => {
     const calls = mockBot.sendMessage.mock.calls.filter(
       (c) => c[1] !== 'Hello back' && c[1] !== 'test prompt'
     );
-    expect(calls.some((c) => c[1]?.includes('[cron]') || c[1]?.includes('[http]'))).toBe(false);
+    expect(calls.some((c) => c[1]?.includes('[job]') || c[1]?.includes('[http]'))).toBe(false);
     expect(acp.prompt).toHaveBeenCalledWith('test prompt');
   });
 
   it('does not echo when echoInjectedPrompts is false', async () => {
     const { bot, acp } = createBot({ echoInjectedPrompts: false });
     await bot.start();
-    bot.enqueuePrompt('summarize today', 123, undefined, undefined, 'cron');
+    bot.enqueuePrompt('summarize today', 123, undefined, undefined, 'job');
     await vi.advanceTimersByTimeAsync(1000);
     const echoCalls = mockBot.sendMessage.mock.calls.filter(
-      (c) => typeof c[1] === 'string' && c[1].includes('[cron]')
+      (c) => typeof c[1] === 'string' && c[1].includes('[job]')
     );
     expect(echoCalls).toHaveLength(0);
     expect(acp.prompt).toHaveBeenCalledWith('summarize today');
@@ -1422,23 +1454,23 @@ describe('echoInjectedPrompts', () => {
     const { bot } = createBot();
     await bot.start();
     const longPrompt = 'a'.repeat(250);
-    bot.enqueuePrompt(longPrompt, 123, undefined, undefined, 'cron');
+    bot.enqueuePrompt(longPrompt, 123, undefined, undefined, 'job');
     await vi.advanceTimersByTimeAsync(1000);
     const echoCall = mockBot.sendMessage.mock.calls.find(
-      (c) => typeof c[1] === 'string' && c[1].includes('[cron]')
+      (c) => typeof c[1] === 'string' && c[1].includes('[job]')
     );
     expect(echoCall).toBeDefined();
-    // "⏰ [cron] " (10 chars) + 200 'a' + "…" = 211
-    expect(echoCall[1]).toBe(`⏰ [cron] ${'a'.repeat(200)}…`);
+    // "⏰ [job] " (9 chars) + 200 'a' + "…" = 210
+    expect(echoCall[1]).toBe(`⏰ [job] ${'a'.repeat(200)}…`);
   });
 
   it('defaults to true when not specified', async () => {
     const { bot } = createBot();
     await bot.start();
-    bot.enqueuePrompt('test', 123, undefined, undefined, 'cron');
+    bot.enqueuePrompt('test', 123, undefined, undefined, 'job');
     await vi.advanceTimersByTimeAsync(1000);
     const echoCall = mockBot.sendMessage.mock.calls.find(
-      (c) => typeof c[1] === 'string' && c[1].includes('[cron]')
+      (c) => typeof c[1] === 'string' && c[1].includes('[job]')
     );
     expect(echoCall).toBeDefined();
   });
@@ -1648,12 +1680,12 @@ describe('/queue and /status', () => {
     await vi.advanceTimersByTimeAsync(1000);
   });
 
-  it('/queue cancel with invalid index shows usage', async () => {
+  it('/queue rm with invalid index shows usage', async () => {
     const { bot } = createBot();
     await bot.start();
     const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
     await handler({ chat: { id: 123 }, message_id: 1, text: '/queue cancel 9' });
-    expect(mockBot.sendMessage).toHaveBeenCalledWith(123, 'Usage: /queue cancel `<position>`', {
+    expect(mockBot.sendMessage).toHaveBeenCalledWith(123, 'Usage: /queue rm `<position>`', {
       parse_mode: 'Markdown',
     });
   });
@@ -1754,7 +1786,7 @@ describe('/queue and /status', () => {
     await bot.start();
     mockBot.sendMessage.mockRejectedValueOnce(new Error('boom'));
     const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
-    await handler({ chat: { id: 123 }, message_id: 1, text: '/model' });
+    await handler({ chat: { id: 123 }, message_id: 1, text: '/config model' });
     const report = mockBot.sendMessage.mock.calls.find(
       (c) => typeof c[1] === 'string' && c[1].includes('⚠️')
     );
@@ -1805,12 +1837,12 @@ describe('command source isolation', () => {
     expect(acp.prompt).toHaveBeenCalledWith('/a2a approve evil');
   });
 
-  it('never runs commands for agent-created cron content', async () => {
+  it('never runs commands for agent-created job content', async () => {
     const onCommand = vi.fn(async () => true);
     const { bot, acp } = createBot({ onCommand });
     await bot.start();
 
-    await bot.enqueuePrompt('/a2a approve evil', 123, undefined, undefined, 'agent-cron');
+    await bot.enqueuePrompt('/a2a approve evil', 123, undefined, undefined, 'agent-job');
     await vi.advanceTimersByTimeAsync(1000);
     expect(onCommand).not.toHaveBeenCalled();
     expect(acp.prompt).toHaveBeenCalledWith('/a2a approve evil');
@@ -1821,18 +1853,29 @@ describe('command source isolation', () => {
     const { bot, acp } = createBot({ onCommand });
     await bot.start();
 
-    await bot.enqueuePrompt('/a2a approve evil', 123, undefined, undefined, 'agent-reminder');
+    await bot.enqueuePrompt('/a2a approve evil', 123, undefined, undefined, 'agent-job');
     await vi.advanceTimersByTimeAsync(1000);
     expect(onCommand).not.toHaveBeenCalled();
     expect(acp.prompt).toHaveBeenCalledWith('/a2a approve evil');
   });
 
-  it('runs commands for operator reminder content', async () => {
+  it('agent-job content stays remote even when it mimics an operator command', async () => {
     const onCommand = vi.fn(async () => true);
     const { bot, acp } = createBot({ onCommand });
     await bot.start();
 
-    await bot.enqueuePrompt('/reminder list', 123, undefined, undefined, 'reminder');
+    await bot.enqueuePrompt('/jobs rm 1', 123, undefined, undefined, 'agent-job');
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(onCommand).not.toHaveBeenCalled();
+    expect(acp.prompt).toHaveBeenCalledWith('/jobs rm 1');
+  });
+
+  it('runs commands for operator job content', async () => {
+    const onCommand = vi.fn(async () => true);
+    const { bot, acp } = createBot({ onCommand });
+    await bot.start();
+
+    await bot.enqueuePrompt('/jobs list', 123, undefined, undefined, 'job');
     await vi.advanceTimersByTimeAsync(1000);
     expect(onCommand).toHaveBeenCalled();
     expect(acp.prompt).not.toHaveBeenCalled();

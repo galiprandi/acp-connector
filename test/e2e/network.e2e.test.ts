@@ -86,10 +86,10 @@ async function sendPrompt(httpPort: number, text: string) {
 
 function peerSecret(s: Spawned, peerId: string): string | undefined {
   try {
-    const net = JSON.parse(readFileSync(join(s.dir, '.acp-connector', 'network.json'), 'utf8')) as {
-      peers?: Array<{ id: string; auth?: { secret?: string } }>;
+    const state = JSON.parse(readFileSync(join(s.dir, '.acp-connector', 'state.json'), 'utf8')) as {
+      network?: { peers?: Array<{ id: string; auth?: { secret?: string } }> };
     };
-    return net.peers?.find((p) => p.id === peerId)?.auth?.secret;
+    return state.network?.peers?.find((p) => p.id === peerId)?.auth?.secret;
   } catch {
     return undefined;
   }
@@ -106,10 +106,10 @@ async function waitForPeerSecret(s: Spawned, peerId: string, tries = 40): Promis
 async function waitForPeerApproved(s: Spawned, peerId: string, tries = 40): Promise<void> {
   for (let i = 0; i < tries; i++) {
     try {
-      const net = JSON.parse(
-        readFileSync(join(s.dir, '.acp-connector', 'network.json'), 'utf8')
-      ) as { peers?: Array<{ id: string; status?: string }> };
-      if (net.peers?.find((p) => p.id === peerId)?.status === 'approved') return;
+      const state = JSON.parse(
+        readFileSync(join(s.dir, '.acp-connector', 'state.json'), 'utf8')
+      ) as { network?: { peers?: Array<{ id: string; status?: string }> } };
+      if (state.network?.peers?.find((p) => p.id === peerId)?.status === 'approved') return;
     } catch {
       // not written yet
     }
