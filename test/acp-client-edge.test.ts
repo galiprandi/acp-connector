@@ -159,7 +159,7 @@ describe('AcpClient edge cases', () => {
   });
 
   // 2. Session load failure (session/load throws)
-  it('rejects start() when session/load throws', async () => {
+  it('falls back to session/new when session/load throws', async () => {
     mockCtx.request.mockImplementation(async (method: string) => {
       if (method === 'initialize') {
         return { protocolVersion: 1, agentCapabilities: { loadSession: true } };
@@ -171,11 +171,14 @@ describe('AcpClient edge cases', () => {
     });
 
     const client = new AcpClient({ agentCmd: 'acp-agent serve', sessionId: 'missing' });
-    await expect(client.start()).rejects.toThrow('session not found');
+    await client.start();
+    expect(mockCtx.buildSession).toHaveBeenCalled();
+    expect(client.sessionId).toBe('test-session-id');
+    expect(client.resumeSessionId).toBeNull();
   });
 
   // 3. Session resume failure (session/resume throws)
-  it('rejects start() when session/resume throws', async () => {
+  it('falls back to session/new when session/resume throws', async () => {
     mockCtx.request.mockImplementation(async (method: string) => {
       if (method === 'initialize') {
         return {
@@ -190,7 +193,10 @@ describe('AcpClient edge cases', () => {
     });
 
     const client = new AcpClient({ agentCmd: 'acp-agent serve', sessionId: 'missing' });
-    await expect(client.start()).rejects.toThrow('resume failed');
+    await client.start();
+    expect(mockCtx.buildSession).toHaveBeenCalled();
+    expect(client.sessionId).toBe('test-session-id');
+    expect(client.resumeSessionId).toBeNull();
   });
 
   // 4. Permission with no handler — default approve

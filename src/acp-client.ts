@@ -66,6 +66,8 @@ interface AcpClientOptions {
   onPermission?: PermissionCallback;
   /** Called when the agent process exits unexpectedly (not via kill()). */
   onExit?: (code: number | null, signal: string | null) => void;
+  /** Called whenever the active session id changes (create/load/resume). */
+  onSessionIdChange?: (sessionId: string) => void;
 }
 
 /**
@@ -96,6 +98,7 @@ export class AcpClient {
   initialSessionMode: string | null;
   onPermission: PermissionCallback | null;
   onExit: ((code: number | null, signal: string | null) => void) | null;
+  onSessionIdChange: ((sessionId: string) => void) | null;
   proc: ChildProcess | null;
   session: ActiveSession | null;
   protocolVersion: ProtocolVersion | null;
@@ -126,6 +129,7 @@ export class AcpClient {
     mcpServers,
     onPermission,
     onExit,
+    onSessionIdChange,
   }: AcpClientOptions) {
     this.agentCmd = agentCmd;
     this.agentCwd = agentCwd || process.cwd();
@@ -135,6 +139,7 @@ export class AcpClient {
     this.initialSessionMode = sessionMode || null;
     this.onPermission = onPermission || null;
     this.onExit = onExit || null;
+    this.onSessionIdChange = onSessionIdChange || null;
     this.proc = null;
     this.session = null;
     this.protocolVersion = null;
@@ -240,43 +245,56 @@ export class AcpClient {
         this.promptCapabilities = initResult.agentCapabilities?.promptCapabilities || null;
         this.agentCapabilities = initResult.agentCapabilities || null;
 
-        let session: ActiveSession;
+        const caps: AgentCapabilities = initResult.agentCapabilities || {};
+        const canResume = caps.sessionCapabilities?.resume !== undefined;
+        const canLoad = caps.loadSession === true;
+
+        let session: ActiveSession | null = null;
         if (this.resumeSessionId) {
-          const loadParams = this._sessionParams({
-            sessionId: this.resumeSessionId,
-          }) as ResumeSessionRequest | LoadSessionRequest;
-
-          const caps: AgentCapabilities = initResult.agentCapabilities || {};
-          const canResume = caps.sessionCapabilities?.resume !== undefined;
-          const canLoad = caps.loadSession === true;
-
-          if (canResume) {
-            const resumeResponse = await ctx.request(
-              acp.methods.agent.session.resume,
-              loadParams as ResumeSessionRequest
+          if (!canResume && !canLoad) {
+            log.warn(
+              `⚠️ Agent does not support session/resume or session/load — starting a new session (was asked to resume ${this.resumeSessionId}).`
             );
-            session = ctx.attachSession({
-              sessionId: this.resumeSessionId,
-              ...(resumeResponse as Partial<NewSessionResponse>),
-            } as NewSessionResponse);
-          } else if (canLoad) {
-            const loadResponse = await ctx.request(
-              acp.methods.agent.session.load,
-              loadParams as LoadSessionRequest
-            );
-            session = ctx.attachSession({
-              sessionId: this.resumeSessionId,
-              ...(loadResponse as Partial<NewSessionResponse>),
-            } as NewSessionResponse);
+            this.resumeSessionId = null;
           } else {
-            throw new Error('Agent does not support session/resume or session/load');
+            const loadParams = this._sessionParams({
+              sessionId: this.resumeSessionId,
+            }) as ResumeSessionRequest | LoadSessionRequest;
+            try {
+              if (canResume) {
+                const resumeResponse = await ctx.request(
+                  acp.methods.agent.session.resume,
+                  loadParams as ResumeSessionRequest
+                );
+                session = ctx.attachSession({
+                  sessionId: this.resumeSessionId,
+                  ...(resumeResponse as Partial<NewSessionResponse>),
+                } as NewSessionResponse);
+              } else {
+                const loadResponse = await ctx.request(
+                  acp.methods.agent.session.load,
+                  loadParams as LoadSessionRequest
+                );
+                session = ctx.attachSession({
+                  sessionId: this.resumeSessionId,
+                  ...(loadResponse as Partial<NewSessionResponse>),
+                } as NewSessionResponse);
+              }
+            } catch (err) {
+              log.warn(
+                `⚠️ Could not resume session ${this.resumeSessionId}: ${(err as Error).message}. Starting a new session.`
+              );
+              this.resumeSessionId = null;
+            }
           }
-        } else {
+        }
+        if (!session) {
           const builder = ctx.buildSession(this._sessionParams({}) as NewSessionRequest);
           session = await builder.start();
         }
         this.session = session;
         this.sessionId = session.sessionId;
+        this.onSessionIdChange?.(session.sessionId);
         this.modes = session.modes;
         this.configOptions = session.newSessionResponse?.configOptions ?? null;
         if (this.initialSessionMode) {
@@ -373,6 +391,7 @@ export class AcpClient {
     const session = await builder.start();
     this.session = session;
     this.sessionId = session.sessionId;
+    this.onSessionIdChange?.(session.sessionId);
     this.modes = session.modes;
     this.configOptions = session.newSessionResponse?.configOptions ?? null;
     if (this.initialSessionMode) {
@@ -442,6 +461,7 @@ export class AcpClient {
     } as NewSessionResponse);
     this.session = session;
     this.sessionId = session.sessionId;
+    this.onSessionIdChange?.(session.sessionId);
     this.modes = session.modes;
     this.configOptions = session.newSessionResponse?.configOptions ?? null;
     if (this.initialSessionMode) {

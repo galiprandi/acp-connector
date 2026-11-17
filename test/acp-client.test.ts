@@ -173,7 +173,7 @@ describe('AcpClient', () => {
     );
   });
 
-  it('throws when no load/resume capability and sessionId provided', async () => {
+  it('falls back to session/new when agent lacks load/resume capability', async () => {
     mockCtx.request.mockImplementation(async (method: string) => {
       if (method === 'initialize') {
         return { protocolVersion: 1, agentCapabilities: {} };
@@ -181,7 +181,61 @@ describe('AcpClient', () => {
       return {};
     });
     const client = new AcpClient({ agentCmd: 'acp-agent serve', sessionId: 'existing-session' });
-    await expect(client.start()).rejects.toThrow('does not support session/resume or session/load');
+    await client.start();
+    expect(mockCtx.request).not.toHaveBeenCalledWith('session/load', expect.anything());
+    expect(mockCtx.request).not.toHaveBeenCalledWith('session/resume', expect.anything());
+    expect(mockCtx.buildSession).toHaveBeenCalled();
+    expect(client.sessionId).toBe('test-session-id');
+    expect(client.resumeSessionId).toBeNull();
+  });
+
+  it('falls back to session/new when resume request fails at start', async () => {
+    mockCtx.request.mockImplementation(async (method: string) => {
+      if (method === 'initialize') {
+        return { protocolVersion: 1, agentCapabilities: { loadSession: true } };
+      }
+      if (method === 'session/load') throw new Error('session not found');
+      return {};
+    });
+    const client = new AcpClient({ agentCmd: 'acp-agent serve', sessionId: 'gone-session' });
+    await client.start();
+    expect(mockCtx.buildSession).toHaveBeenCalled();
+    expect(client.sessionId).toBe('test-session-id');
+    expect(client.resumeSessionId).toBeNull();
+  });
+
+  it('calls onSessionIdChange on start, newSession and loadSession', async () => {
+    const onSessionIdChange = vi.fn();
+    const client = new AcpClient({
+      agentCmd: 'acp-agent serve',
+      onSessionIdChange,
+    });
+    await client.start();
+    expect(onSessionIdChange).toHaveBeenCalledWith('test-session-id');
+
+    const newSession: MockSession = {
+      sessionId: 'new-session-id',
+      modes: { currentModeId: 'default' },
+      prompt: vi.fn(async () => {}),
+      nextUpdate: vi.fn(async () => ({ kind: 'stop', stopReason: 'end_turn' })),
+      dispose: vi.fn(),
+    };
+    mockCtx.buildSession.mockReturnValueOnce({
+      start: vi.fn(async () => newSession),
+    });
+    await client.newSession();
+    expect(onSessionIdChange).toHaveBeenCalledWith('new-session-id');
+
+    const loadedSession: MockSession = {
+      sessionId: 'loaded-session',
+      modes: { currentModeId: 'default' },
+      prompt: vi.fn(async () => {}),
+      nextUpdate: vi.fn(async () => ({ kind: 'stop', stopReason: 'end_turn' })),
+      dispose: vi.fn(),
+    };
+    mockCtx.attachSession.mockReturnValueOnce(loadedSession);
+    await client.loadSession('loaded-session');
+    expect(onSessionIdChange).toHaveBeenCalledWith('loaded-session');
   });
 
   it('auto-approves permission when no onPermission callback', async () => {

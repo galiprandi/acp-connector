@@ -17,6 +17,7 @@ let mockConfig: BridgeConfig | null = null;
 
 vi.mock('../src/config.ts', () => ({
   loadConfig: () => mockConfig,
+  persistSessionId: vi.fn(),
 }));
 
 interface MockAcpClient {

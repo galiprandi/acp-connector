@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`restoreLastSession`** (default `true`): the bridge now auto-resumes your last ACP session across restarts — the active `sessionId` is written back to `acp-connector.jsonc` on every session change (`/new`, `/session`, restart) and restored via `session/resume`/`session/load`. Resume failures and agents without resume/load support fall back to a fresh session with a warning instead of failing to boot
+
 ## [0.17.1] - 2026-11-16
 
 ### Added

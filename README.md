@@ -201,7 +201,8 @@ See [`acp-connector.example.jsonc`](acp-connector.example.jsonc) for the full re
 | `platforms` | `Platforms` | yes | — | Platform configs (Telegram and/or Discord) |
 | `platforms.telegram` | `object` | no | — | `{ token, allowedChatIds, allowedUserIds? }` — Telegram config |
 | `platforms.discord` | `object` | no | — | `{ token, allowedChannelIds, allowedUserIds? }` — Discord config |
-| `sessionId` | `string` | no | — | ACP session ID to load/resume (omit to create new) |
+| `sessionId` | `string` | no | — | ACP session ID to load/resume. Auto-managed when `restoreLastSession` is on (default) — the bridge writes the active id here on every session change |
+| `restoreLastSession` | `boolean` | no | `true` | Resume the last session on startup. The bridge keeps `sessionId` in sync automatically; set `false` for manual control |
 | `sessionMode` | `string` | no | — | Initial session mode (e.g. `"bypass"` for Devin's auto-approve-all) |
 | `sessionConfigPath` | `string` | no | — | Path to MCP/session config JSONC |
 | `showThoughts` | `boolean` | no | `false` | Forward agent thoughts to chat |
@@ -913,15 +914,17 @@ Non-breaking hardening on top of the trust-model fixes:
 
 ## 💾 Session persistence
 
-To resume a session across restarts, set `sessionId` in your config:
+By default (`restoreLastSession: true`) the bridge **automatically resumes your last session across restarts**: every time the active session changes — startup, `/new`, `/session <id>` — the bridge writes the session id back to `sessionId` in `acp-connector.jsonc`, and on the next start it calls `session/resume` or `session/load` (depending on agent capabilities).
+
+If the stored session can't be resumed (deleted, expired, or the agent doesn't support resume/load), the bridge logs a warning and starts a fresh session — it never fails to boot because of this.
+
+Set `"restoreLastSession": false` to opt out: `sessionId` then stays purely manual — pin a specific session by writing it yourself, or omit it to always start fresh.
 
 ```jsonc
 {
-  "sessionId": "your-session-id"
+  "restoreLastSession": false // default: true
 }
 ```
-
-The bridge will call `session/load` or `session/resume` (depending on agent capabilities) on startup. Omit this field to create a new session each time.
 
 ***
 

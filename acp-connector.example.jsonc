@@ -24,8 +24,15 @@
     // }
   },
 
-  // ACP session (optional — omit to create a new session each run)
+  // ACP session (optional)
+  // sessionId is auto-managed: with restoreLastSession (default true) the
+  // bridge writes the active session id here on every change (/new,
+  // /session, restart) and resumes it on the next startup via
+  // session/resume or session/load. Set restoreLastSession to false to
+  // keep sessionId purely manual (pin a specific session, or omit for
+  // a fresh session each run).
   // "sessionId": "some-session-id",
+  // "restoreLastSession": true,
 
   // Initial session mode (optional — applied after session/new, session/load, or session/resume)
   // Agent-specific. Devin supports: "accept-edits", "smart", "ask", "plan", "bypass"

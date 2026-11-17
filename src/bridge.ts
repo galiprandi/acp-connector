@@ -11,7 +11,7 @@ import { BaseBot } from './base-bot.js';
 import type { PlatformBot } from './bot.js';
 import { BridgeBot } from './bot.js';
 import { startBridgeApi } from './bridge-api.js';
-import { type BridgeConfig, loadConfig } from './config.js';
+import { type BridgeConfig, loadConfig, persistSessionId } from './config.js';
 import { CronManager } from './cron.js';
 import { DiscordBot } from './discord.js';
 import { DiscoveryService } from './discovery.js';
@@ -202,6 +202,12 @@ export async function run(): Promise<void> {
     sessionId: config.sessionId,
     sessionMode: config.sessionMode,
     mcpServers: a2aMcpServers,
+    // restoreLastSession (default on): keep config.sessionId in sync with
+    // the active session so the next startup resumes it. /new and
+    // /session <id> flow through here too.
+    onSessionIdChange: (id) => {
+      if (config.restoreLastSession !== false) persistSessionId(id);
+    },
   });
 
   const headless = !tg && !dc;

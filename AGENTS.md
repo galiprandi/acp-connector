@@ -163,6 +163,17 @@ start with `/`. Absolute reminder times without an explicit zone require
 Agents without MCP capabilities get a
 one-line warning at startup and no tools.
 
+### Session restore (default on)
+
+`restoreLastSession` (default `true`) keeps `config.sessionId` in sync with
+the active session: `AcpClient.onSessionIdChange` fires on every session
+assignment (start, `/new`, `/session <id>`, `restart()`) and the bridge
+persists it via `persistSessionId()` (config.ts — reloads the file first,
+same pattern as `persistCronAndRoutines`). Next startup resumes via
+`session/resume`/`session/load`; agents without either capability, or a
+resume that fails, fall back to `session/new` with a warning — never a
+boot failure. `restoreLastSession: false` leaves `sessionId` manual-only.
+
 ### Key principles
 
 - **Thin bridge**: no agent loop, no model provider, no tool ecosystem

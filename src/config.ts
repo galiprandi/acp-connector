@@ -148,6 +148,13 @@ export interface BridgeConfig {
   allowedChatIds?: number[];
   platforms?: PlatformsConfig;
   sessionId?: string;
+  /**
+   * When true (default), the bridge writes the active sessionId back to
+   * this config on every session change (/new, /session, restart), so the
+   * next startup resumes the last session via session/resume|load.
+   * Set false to keep sessionId purely manual.
+   */
+  restoreLastSession?: boolean;
   sessionMode?: string;
   sessionConfigPath?: string;
   showThoughts?: boolean;
@@ -300,5 +307,24 @@ export function saveConfig(config: BridgeConfig, path: string = defaultConfigPat
     chmodSync(path, 0o600);
   } catch {
     // best-effort: tighten pre-existing files; creation mode covers new ones
+  }
+}
+
+/**
+ * Persist the active ACP session id back to acp-connector.jsonc so the
+ * next startup can resume it (restoreLastSession). Reloads the config
+ * from disk first — same pattern as persistCronAndRoutines — so runtime
+ * writes never clobber fields another writer just changed. Non-fatal:
+ * persistence failure must not break session management.
+ */
+export function persistSessionId(sessionId: string, path: string = defaultConfigPath): void {
+  try {
+    const config = loadConfig(path);
+    if (!config) return;
+    if (config.sessionId === sessionId) return;
+    config.sessionId = sessionId;
+    saveConfig(config, path);
+  } catch (err) {
+    log.warn(`⚠️ Could not persist sessionId to config: ${(err as Error).message}`);
   }
 }
