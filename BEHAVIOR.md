@@ -230,9 +230,11 @@
 ## Module: BridgeBot
 - /config <boolean> true sets a boolean option
 - /config <boolean> with non-boolean value sends hint
+- /config <id> <n> out of range reports the list size
+- /config <id> <n> sets the option by list index
 - /config <id> <unknown value> sends available values
 - /config <id> <value> sets the option
-- /config <id> lists the option values with current marker
+- /config <id> lists the option values numbered with current marker
 - /config <unknown> sends available option ids
 - /config lists all config options with current values
 - /config on error sends error message
@@ -248,12 +250,16 @@
 - /mode lists available modes
 - /mode on error sends error message
 - /mode when no modes available sends message
+- /model <n> sets the model by list index
 - /model <value> is an alias for /config model <value>
 - /model without value lists model options
 - /new on error sends error message
 - /new when busy refuses with message
 - /new when idle creates new session
 - /session <id> switches session
+- /session <n> out of range reports the list size
+- /session <n> resolves the number against the last /sessions list
+- /session <n> without a prior /sessions asks to list first
 - /session when busy refuses with message
 - /session without id sends usage
 - /sessions lists available sessions
