@@ -118,6 +118,8 @@
 - default permission handling with options but no allow option returns cancelled
 - default-approves permission when no handler is set and allow option exists
 - delegates to onPermission handler that cancels
+- falls back to session/new when session/load throws
+- falls back to session/new when session/resume throws
 - handles agent closing stdin unexpectedly without crashing
 - listSessions before start throws
 - loadSession before start throws
@@ -128,8 +130,6 @@
 - prompt() before start() throws a clear error
 - prompt() forwards empty text to the session
 - prompt() forwards very long text to the session
-- rejects start() when session/load throws
-- rejects start() when session/resume throws
 - rejects start() when the child process emits an error (command not found)
 - second kill() is safe and does not throw
 - second start() is safe and does not spawn a second process
@@ -137,6 +137,7 @@
 ## Module: AcpClient
 - auto-approves permission when no onPermission callback
 - calls onExit when the agent process exits unexpectedly
+- calls onSessionIdChange on start, newSession and loadSession
 - calls session/load when sessionId provided and loadSession capability is true
 - calls session/resume when resume capability is available
 - closeSession is a no-op when no session is active
@@ -148,6 +149,8 @@
 - deleteSession throws when agent does not support it
 - does not call onExit on intentional kill()
 - does not call set_mode when no sessionMode configured
+- falls back to session/new when agent lacks load/resume capability
+- falls back to session/new when resume request fails at start
 - initial session mode failure is non-fatal (agent does not support modes)
 - kill() disposes session and kills process
 - listSessions returns sessions when capability supported
@@ -171,7 +174,6 @@
 - sets initial session mode after newSession
 - sets initial session mode after start when sessionMode provided
 - stores agentCapabilities from init response
-- throws when no load/resume capability and sessionId provided
 
 ## Module: AcpClient._sessionParams
 - always includes mcpServers — required by session/load on some agents
@@ -411,6 +413,10 @@
 - defaultConfigPath resolves to cwd
 - does not strip // inside strings
 - loads a simple config
+- persistSessionId does not throw on an invalid config
+- persistSessionId is a no-op when no config file exists
+- persistSessionId skips the write when the id is unchanged
+- persistSessionId writes sessionId and preserves other fields
 - returns null when no config file exists
 - saveConfig writes valid JSON
 - strips block comments
