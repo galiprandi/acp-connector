@@ -34,6 +34,7 @@ See [`acp-connector.example.jsonc`](../acp-connector.example.jsonc) for the full
 | `tools` | `ToolsConfig` | no | off | `acp-tools` MCP tuning: `allowedPaths` (extra dirs the agent may `send_file` from — agent cwd, uploads dir and tmpdir are always allowed) and `maxFileSizeMb` (default 45) |
 | `transcription` | `object` | no | on | Voice-note transcription tuning (see [Voice transcription](#voice-transcription)) |
 | `a2a` | `object` | no | off | A2A network config — see [A2A agent network](a2a.md) |
+| `webhooks` | `WebhookEndpoint[]` | no | off | Outbound event webhooks — see [Event webhooks](webhooks.md) |
 
 > **Backward compat:** `telegramToken` and `allowedChatIds` at the root level still work but are deprecated. Migrate to `platforms.telegram`.
 
@@ -130,7 +131,11 @@ curl -X POST http://localhost:7780/prompt \
 { "ok": true }
 ```
 
-The prompt enters the same queue as Telegram messages. If `chatId` is omitted, the first allowed chat ID is used.
+The prompt enters the same queue as Telegram messages. `chatId` must belong
+to a configured platform `allowedChatIds` (Telegram only — Discord channel
+IDs are not deliverable); when omitted or not allowed, the prompt is
+processed but the response has no chat to land in (fetch it via
+`callbackUrl` or a `webhooks[]` endpoint).
 
 #### Sending files via `/prompt`
 

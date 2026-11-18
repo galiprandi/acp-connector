@@ -55,4 +55,4 @@ Verified end-to-end with A2A delegation: `devin acp` orchestrating `opencode acp
 | `fs/*`, `terminal/*` client capabilities | ❌ | Not implemented — agents get no fs/terminal via the bridge |
 | `authenticate` | ❌ | Agents are expected pre-authenticated |
 | Image / embedded context | ✅ | `image` + `ResourceLink` media support |
-| Audio | ⚠️ | Voice/audio/video files are downloaded and sent as `ResourceLink` (agent reads them from disk) — no transcription, no ACP audio content block |
+| Audio | ⚠️ | Voice notes are transcribed to text by default (sherpa-onnx, on-device); audio/video files are sent as `ResourceLink` — no ACP audio content block |

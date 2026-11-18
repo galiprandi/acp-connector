@@ -1,12 +1,17 @@
 # Event webhooks
 
-[← Back to README](../README.md)
+← Back to [README](../README.md)
 
 `webhooks` replays bridge and agent events as JSON `POST`s to your own HTTP
 endpoints — n8n, Home Assistant, custom dashboards, audit sinks. It is
 **outbound only**: it never affects prompt processing, and delivery is
 fire-and-forget (failures are logged, never retried and never block the
 queue).
+
+> **Not to be confused with `callbackUrl`:** `POST /prompt` accepts a
+> per-request `callbackUrl` that receives that one response; `webhooks[]`
+> is a standing subscription that receives every matching event the bridge
+> emits (see [HTTP API](configuration.md#http-api)).
 
 ## Configuration
 
