@@ -63,6 +63,8 @@ export class MatrixBot extends BaseBot {
       canDeliver: () => acp.sessionId !== null,
     });
     this.onCommand = (text, chatId) => this.jobs.handleCommand(text, chatId);
+    // Same wiring bridge.ts does: /status picks up the live job summary.
+    this.jobsSummary = () => this.jobs.summary();
   }
 
   /** All captured text for a chat, concatenated — for assertions. */

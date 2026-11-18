@@ -39,6 +39,8 @@ interface DiscordBotOpts {
   onPrompt?: ((text: string, chatId: number | string) => void) | null;
   aliases?: AliasDirectory | null;
   timezone?: string;
+  jobsSummary?: () => string | null;
+  networkSummary?: () => string | null;
 }
 
 export class DiscordBot extends BaseBot {
@@ -67,6 +69,8 @@ export class DiscordBot extends BaseBot {
     onPrompt = null,
     aliases = null,
     timezone,
+    jobsSummary,
+    networkSummary,
   }: DiscordBotOpts) {
     super({
       acp,
@@ -83,6 +87,8 @@ export class DiscordBot extends BaseBot {
       platformName: 'discord',
       aliases,
       timezone,
+      jobsSummary,
+      networkSummary,
     });
     this.token = token;
     this.allowedChannelIds = new Set(allowedChannelIds.map(String));

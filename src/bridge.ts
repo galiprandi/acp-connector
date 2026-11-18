@@ -210,6 +210,25 @@ export async function run(): Promise<void> {
     process.exit(1);
   }
 
+  // A2A handles are declared before the bots so /status callbacks can
+  // close over them lazily (they stay null until the a2a block below).
+  let a2aManager: A2aManager | null = null;
+  let a2aNetwork: NetworkStore | null = null;
+  let a2aAudit: AuditLog | null = null;
+  let a2aSyncTimer: ReturnType<typeof setInterval> | null = null;
+
+  // One-line summaries surfaced by /status. Evaluated lazily at command
+  // time — a2aNetwork is still null when a2a is disabled.
+  const jobsSummary = () => jobManager.summary();
+  const networkSummary = () => {
+    if (!a2aNetwork) return null;
+    const approved = a2aNetwork.listPeers('approved').length;
+    const pending = a2aNetwork.listPeers('pending').length;
+    const parts = [`${approved} approved`];
+    if (pending > 0) parts.push(`${pending} pending`);
+    return parts.join(' · ');
+  };
+
   if (tg) {
     const bot = new BridgeBot({
       acp,
@@ -225,6 +244,8 @@ export async function run(): Promise<void> {
       logPreviewLength: config.logPreviewLength,
       aliases: aliasDir,
       timezone: config.timezone,
+      jobsSummary,
+      networkSummary,
     });
     bots.push(bot);
     primaryBot = bot;
@@ -245,6 +266,8 @@ export async function run(): Promise<void> {
       logPreviewLength: config.logPreviewLength,
       aliases: aliasDir,
       timezone: config.timezone,
+      jobsSummary,
+      networkSummary,
     });
     bots.push(bot);
     if (!primaryBot) primaryBot = bot;
@@ -258,10 +281,6 @@ export async function run(): Promise<void> {
   }
 
   // A2A manager: pairing + /a2a commands (created early for command wiring)
-  let a2aManager: A2aManager | null = null;
-  let a2aNetwork: NetworkStore | null = null;
-  let a2aAudit: AuditLog | null = null;
-  let a2aSyncTimer: ReturnType<typeof setInterval> | null = null;
   if (config.a2a?.enabled) {
     a2aNetwork = new NetworkStore(store);
     a2aAudit = new AuditLog(resolve(stateDir, 'audit.log'));

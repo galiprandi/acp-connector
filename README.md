@@ -551,7 +551,7 @@ The bridge intercepts these commands before forwarding to the agent:
 | `/queue` | List pending prompts waiting in the queue |
 | `/queue rm <n>` | Remove the pending prompt at position `n` |
 | `/queue clear` | Remove all pending prompts |
-| `/status` | Show agent state (busy/idle), session ID, mode, queue length and uptime |
+| `/status` | Bridge version + uptime, agent state/mode, agent command, session ID (with title when the agent lists it), queue + jobs summary (next fire), last prompt error, and A2A peer counts when enabled |
 | `/time` | Show the three clocks: host system zone, configured `timezone`, and UTC |
 
 ### Sessions

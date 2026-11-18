@@ -43,6 +43,9 @@ try {
 }
 const pkg = { version: pkgVersion };
 
+/** Bridge version reported to agents and shown by /status. */
+export const BRIDGE_VERSION = pkgVersion;
+
 /** Callback invoked when the agent requests permission for a tool call. */
 type PermissionCallback = (
   params: RequestPermissionRequest

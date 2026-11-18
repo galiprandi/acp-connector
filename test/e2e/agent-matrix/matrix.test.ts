@@ -144,7 +144,8 @@ describe.skipIf(!RUN)('e2e agent matrix', () => {
         const text = out.map((m) => m.text ?? '').join('\n');
         expect(text).toContain('agent:');
         expect(text).toContain('session:');
-        expect(text).toContain('uptime:');
+        expect(text).toContain('acp-connector');
+        expect(text).toContain('up ');
       });
 
       it('/queue lists the pending queue', async (ctx) => {

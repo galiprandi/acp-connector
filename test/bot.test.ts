@@ -1718,10 +1718,52 @@ describe('/queue and /status', () => {
       (c) => typeof c[1] === 'string' && c[1].includes('agent:')
     );
     expect(call).toBeDefined();
+    expect(call[1]).toContain('acp-connector');
     expect(call[1]).toContain('queue: 0 pending');
     expect(call[1]).toContain('session:');
-    expect(call[1]).toContain('uptime:');
+    expect(call[1]).toContain('`test-session-id`');
+    expect(call[1]).toContain('up ');
     expect(call[1]).toContain('`acp-agent serve`');
+  });
+
+  it('/status includes jobs and a2a summaries when provided', async () => {
+    const { bot } = createBot({
+      jobsSummary: () => '2 job(s) (1 once · 1 manual) — next "standup" in 3h',
+      networkSummary: () => '2 approved · 1 pending',
+    });
+    await bot.start();
+    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    await handler({ chat: { id: 123 }, message_id: 1, text: '/status' });
+    const call = mockBot.sendMessage.mock.calls.find(
+      (c) => typeof c[1] === 'string' && c[1].includes('agent:')
+    );
+    expect(call[1]).toContain('⏰ 2 job(s) (1 once · 1 manual) — next "standup" in 3h');
+    expect(call[1]).toContain('🌐 a2a: 2 approved · 1 pending');
+  });
+
+  it('/status appends the session title when the agent lists it', async () => {
+    const { bot, acp } = createBot();
+    acp.sessionId = 's1';
+    await bot.start();
+    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    await handler({ chat: { id: 123 }, message_id: 1, text: '/status' });
+    const call = mockBot.sendMessage.mock.calls.find(
+      (c) => typeof c[1] === 'string' && c[1].includes('session:')
+    );
+    expect(call[1]).toContain('`s1` — "Session 1"');
+  });
+
+  it('/status still answers when session/list is unsupported', async () => {
+    const { bot, acp } = createBot();
+    acp.listSessions.mockRejectedValue(new Error('Agent does not support session/list'));
+    await bot.start();
+    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    await handler({ chat: { id: 123 }, message_id: 1, text: '/status' });
+    const call = mockBot.sendMessage.mock.calls.find(
+      (c) => typeof c[1] === 'string' && c[1].includes('session:')
+    );
+    expect(call[1]).toContain('`test-session-id`');
+    expect(call[1]).not.toContain('Session 1');
   });
 
   it('sendMessage splits text longer than 4096 chars into chunks', async () => {

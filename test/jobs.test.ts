@@ -328,6 +328,29 @@ describe('JobManager firing', () => {
 
 // ------------------------------------------------------------ /jobs command
 
+describe('JobManager.summary', () => {
+  it('returns null when there are no enabled jobs', () => {
+    const m = makeManager();
+    expect(m.summary()).toBeNull();
+    m.create({ prompt: 'x', trigger: { kind: 'manual' }, name: 'a', enabled: false });
+    expect(m.summary()).toBeNull();
+  });
+
+  it('counts jobs by trigger kind and names the soonest one-shot', () => {
+    const m = makeManager();
+    m.create({ prompt: 'soon', trigger: { kind: 'once', at: future(3_600_000) }, name: 'soon' });
+    m.create({ prompt: 'later', trigger: { kind: 'once', at: future(7_200_000) }, name: 'later' });
+    m.create({ prompt: 'x', trigger: { kind: 'cron', expr: '0 * * * *' } });
+    m.create({ prompt: 'x', trigger: { kind: 'manual' }, name: 'deploy' });
+    const out = m.summary();
+    expect(out).toContain('4 job(s)');
+    expect(out).toContain('2 once');
+    expect(out).toContain('1 cron');
+    expect(out).toContain('1 manual');
+    expect(out).toContain('next "soon" in 1h');
+  });
+});
+
 describe('/jobs command', () => {
   it('lists jobs with numbers and kind icons', async () => {
     const m = makeManager({ timezone: 'America/Argentina/Tucuman' });

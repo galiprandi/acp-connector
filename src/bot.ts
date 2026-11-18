@@ -60,6 +60,8 @@ interface BridgeBotOpts {
   onPrompt?: ((text: string, chatId: number | string) => void) | null;
   aliases?: AliasDirectory | null;
   timezone?: string;
+  jobsSummary?: () => string | null;
+  networkSummary?: () => string | null;
 }
 
 export class BridgeBot extends BaseBot {
@@ -86,6 +88,8 @@ export class BridgeBot extends BaseBot {
     onPrompt = null,
     aliases = null,
     timezone,
+    jobsSummary,
+    networkSummary,
   }: BridgeBotOpts) {
     super({
       acp,
@@ -102,6 +106,8 @@ export class BridgeBot extends BaseBot {
       platformName: 'telegram',
       aliases,
       timezone,
+      jobsSummary,
+      networkSummary,
     });
     this.allowedChatIds = new Set(allowedChatIds);
     this.allowedUserIds = new Set(allowedUserIds);

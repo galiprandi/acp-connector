@@ -5,7 +5,7 @@ import type {
   SessionConfigSelectOption,
   SessionInfo,
 } from '@agentclientprotocol/sdk';
-import type { AcpClient } from './acp-client.js';
+import { type AcpClient, BRIDGE_VERSION } from './acp-client.js';
 import type { AliasDirectory } from './aliases.js';
 import type { PlatformBot, PromptSource } from './bot.js';
 import { identityPrefix, type SenderInfo } from './identity.js';
@@ -41,6 +41,10 @@ export interface BaseBotOpts {
   aliases?: AliasDirectory | null;
   /** `config.timezone` — used by /time and job schedule rendering. */
   timezone?: string;
+  /** Optional one-line job summary for /status (JobManager.summary). */
+  jobsSummary?: () => string | null;
+  /** Optional one-line A2A summary for /status (peer counts). */
+  networkSummary?: () => string | null;
 }
 
 export interface QueueItem {
@@ -105,6 +109,10 @@ export abstract class BaseBot implements PlatformBot {
   protected lastUserChannelId: string | number | null;
   /** Last /sessions listing — lets /session <n> resolve numbers to ids. */
   private lastSessionList: { sessions: SessionInfo[]; at: number } | null;
+  protected jobsSummary?: () => string | null;
+  protected networkSummary?: () => string | null;
+  /** Most recent prompt-processing failure — surfaced by /status. */
+  private lastError: { message: string; at: number } | null;
 
   protected abstract readonly maxLen: number;
 
@@ -124,6 +132,8 @@ export abstract class BaseBot implements PlatformBot {
     platformName = 'unknown',
     aliases = null,
     timezone,
+    jobsSummary,
+    networkSummary,
   }: BaseBotOpts) {
     this.acp = acp;
     this.agentCmd = agentCmd;
@@ -154,6 +164,9 @@ export abstract class BaseBot implements PlatformBot {
     this.timezone = timezone;
     this.lastUserChannelId = null;
     this.lastSessionList = null;
+    this.jobsSummary = jobsSummary;
+    this.networkSummary = networkSummary;
+    this.lastError = null;
   }
 
   abstract start(): Promise<void>;
@@ -524,6 +537,30 @@ export abstract class BaseBot implements PlatformBot {
     return true;
   }
 
+  /**
+   * Session label for /status: the raw id plus the session title when
+   * the agent's session list exposes one. Title lookup is best-effort —
+   * unsupported agents and busy agents degrade to the bare id.
+   */
+  private async _sessionStatusLabel(): Promise<string> {
+    const id = this.acp.sessionId;
+    if (!id) return '`none`';
+    const cached = this.lastSessionList;
+    const fresh =
+      cached && Date.now() - cached.at < BaseBot.SESSION_LIST_TTL_MS ? cached.sessions : null;
+    let sessions = fresh;
+    if (!sessions) {
+      // Race a short timeout: a busy agent may not answer session/list
+      // promptly, and /status must stay instant.
+      const listReq = this.acp.listSessions().catch(() => null);
+      const timeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), 3000));
+      sessions = await Promise.race([listReq, timeout]);
+      if (sessions) this.lastSessionList = { sessions, at: Date.now() };
+    }
+    const title = sessions?.find((s) => s.sessionId === id)?.title?.trim();
+    return title ? `\`${id}\` — "${title}"` : `\`${id}\``;
+  }
+
   private async _handleStatusCommand(channelId: string | number): Promise<boolean> {
     const uptimeMs = Date.now() - this.startedAt;
     const mins = Math.floor(uptimeMs / 60000);
@@ -531,14 +568,21 @@ export abstract class BaseBot implements PlatformBot {
     const uptime = hours > 0 ? `${hours}h ${mins % 60}m` : `${mins}m`;
     const state = this.busy ? 'busy' : 'idle';
     const mode = this.acp.modes?.currentModeId || 'default';
+    const session = await this._sessionStatusLabel();
+    const jobs = this.jobsSummary?.() ?? null;
+    const a2a = this.networkSummary?.() ?? null;
     const lines = [
-      `🟢 agent: ${state}`,
-      `📋 queue: ${this.queue.length} pending`,
-      `🆔 session: \`${this.acp.sessionId || 'none'}\``,
-      `⚙️ mode: \`${mode}\``,
+      `🏷 acp-connector ${BRIDGE_VERSION} · ⏱ up ${uptime}`,
+      `🟢 agent: ${state} · ⚙️ mode: \`${mode}\``,
       `🖥️ agent: \`${this.agentCmd}\``,
-      `⏱ uptime: ${uptime}`,
+      `🆔 session: ${session}`,
+      `📋 queue: ${this.queue.length} pending${jobs ? ` · ⏰ ${jobs}` : ''}`,
     ];
+    if (this.lastError) {
+      const ago = this._formatSessionAge(new Date(this.lastError.at).toISOString());
+      lines.push(`⚠️ last error: ${this.lastError.message.slice(0, 120)} (${ago})`);
+    }
+    if (a2a) lines.push(`🌐 a2a: ${a2a}`);
     await this.sendMessage(channelId, lines.join('\n'));
     return true;
   }
@@ -873,8 +917,10 @@ export abstract class BaseBot implements PlatformBot {
           await this._sendPlain(`[${stopReason}]`);
         }
       }
+      this.lastError = null;
     } catch (err) {
       errorMsg = (err as Error).message;
+      this.lastError = { message: errorMsg, at: Date.now() };
       await this._sendPlain(`Error: ${errorMsg}`);
     }
 

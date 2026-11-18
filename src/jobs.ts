@@ -515,6 +515,43 @@ export class JobManager {
     return true;
   }
 
+  /**
+   * One-line summary for /status: enabled-job counts by trigger kind
+   * plus the soonest upcoming one-shot fire. Null when nothing is
+   * scheduled.
+   */
+  summary(): string | null {
+    const enabled = this.list().filter((j) => j.enabled);
+    if (enabled.length === 0) return null;
+    const once = enabled.filter((j) => j.trigger.kind === 'once');
+    const cron = enabled.filter((j) => j.trigger.kind === 'cron');
+    const manual = enabled.filter((j) => j.trigger.kind === 'manual');
+    const parts: string[] = [];
+    if (once.length > 0) parts.push(`${once.length} once`);
+    if (cron.length > 0) parts.push(`${cron.length} cron`);
+    if (manual.length > 0) parts.push(`${manual.length} manual`);
+    let out = `${enabled.length} job(s) (${parts.join(' · ')})`;
+    const next = once
+      .map((j) => (j.trigger.kind === 'once' ? j : null))
+      .filter((j): j is Job => j !== null)
+      .sort((a, b) =>
+        a.trigger.kind === 'once' && b.trigger.kind === 'once'
+          ? a.trigger.at.localeCompare(b.trigger.at)
+          : 0
+      )[0];
+    if (next && next.trigger.kind === 'once') {
+      const ms = Date.parse(next.trigger.at) - this.now();
+      const rel =
+        ms < 3_600_000
+          ? `${Math.max(1, Math.round(ms / 60_000))}m`
+          : ms < 86_400_000
+            ? `${Math.round(ms / 3_600_000)}h`
+            : `${Math.round(ms / 86_400_000)}d`;
+      out += ` — next "${next.name ?? next.id}" in ${rel}`;
+    }
+    return out;
+  }
+
   // ------------------------------------------------------------ firing
 
   /**
