@@ -532,8 +532,9 @@ export async function run(): Promise<void> {
   if (config.sessionConfigPath) {
     log.info(`  📋  Config:   ${config.sessionConfigPath}`);
   }
-  if (config.cron && config.cron.length > 0) {
-    log.info(`  ⏰  Cron:     ${config.cron.length} job(s)`);
+  const jobCount = jobManager.list().filter((j) => j.enabled).length;
+  if (jobCount > 0) {
+    log.info(`  ⏰  Jobs:     ${jobCount} scheduled/manual`);
   }
   if (config.http?.enabled) {
     log.info(`  🌐  HTTP:     port ${config.http.port || 7780}`);
