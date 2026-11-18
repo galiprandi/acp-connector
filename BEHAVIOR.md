@@ -248,8 +248,7 @@
 - /config model without value lists model options
 - /config on error sends error message
 - /config with no config options and no modes sends message
-- /help includes agent-advertised commands
-- /help omits agent section when agent reports no commands
+- /help shows only bridge commands, not agent-advertised ones
 - /new on error sends error message
 - /new when busy refuses with message
 - /new when idle creates new session
@@ -795,6 +794,22 @@
 - notifies the user and enqueues nothing when transcription fails
 - transcribes a voice message into a text block for the agent
 
+## Module: WebhookEmitter
+- "*" matches every event
+- "prefix.*" matches the namespace only
+- combines patterns across the list
+- does not throw on delivery failure — logs a warning
+- does nothing with no endpoints configured
+- fans out to multiple subscribed endpoints
+- includes the transport headers
+- literal matches exactly
+- merges custom headers without overriding transport ones
+- omits the signature header without a secret
+- posts the event payload to subscribed endpoints
+- signs the body with x-acp-signature when secret is set
+- skips malformed endpoint entries
+- warns on non-2xx responses
+
 ## Module: e2e: acp-tools MCP via fake agent
 - injects acp-tools and serves list_aliases through tools/call
 - send_file enforces the path allowlist then fails cleanly with no chat
@@ -809,3 +824,7 @@
 
 ## Module: e2e: session resume
 - sessionId in config resumes via session/resume with mcpServers (0.11.1 regression)
+
+## Module: e2e: outbound event webhooks
+- delivers lifecycle + prompt events with signature and routing context
+- emits bridge.stopping on shutdown
