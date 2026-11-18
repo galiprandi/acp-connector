@@ -154,5 +154,20 @@
   //   "trustedPeers": ["lean"],        // optional: statically approved peer ids
   //   "registryMode": false,           // act as a discovery-only registry
   //   "secure": true                   // require HMAC peer signatures on inbound requests (default true; false only for legacy meshes)
-  // }
+  // },
+
+  // Outbound event webhooks (optional, default off)
+  // POST bridge/agent events as JSON to your own endpoints. Each entry
+  // subscribes via an allowlist: "*" = all events, "prompt.*" = a whole
+  // namespace, "prompt.completed" = one event. `secret` enables an
+  // HMAC-SHA256 signature header (x-acp-signature). Events and payload
+  // shapes are documented in docs/webhooks.md.
+  // "webhooks": [
+  //   {
+  //     "url": "https://example.com/acp-events",
+  //     "events": ["prompt.completed", "prompt.error", "agent.exited", "job.fired"],
+  //     "secret": "shared-secret-for-hmac",
+  //     "headers": { "Authorization": "Bearer token" }
+  //   }
+  // ]
 }

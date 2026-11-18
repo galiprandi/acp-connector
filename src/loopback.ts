@@ -3,12 +3,14 @@ import type { AcpClient } from './acp-client.js';
 import type { PlatformBot, PromptSource } from './bot.js';
 import { log } from './logger.js';
 import type { MediaHandler } from './media.js';
+import type { WebhookEmitter } from './webhooks.js';
 
 interface QueueItem {
   text: string;
   blocks?: ContentBlock[];
   onComplete?: (response: string, error?: string) => void;
   onChunk?: (chunk: string) => void;
+  source?: PromptSource;
 }
 
 /**
@@ -21,6 +23,7 @@ interface QueueItem {
 export class LoopbackBot implements PlatformBot {
   private queue: QueueItem[] = [];
   private busy = false;
+  private webhooks: WebhookEmitter | null = null;
   private onCommand: ((text: string, chatId: number | string) => Promise<boolean>) | null = null;
 
   constructor(private acp: AcpClient) {}
@@ -46,7 +49,12 @@ export class LoopbackBot implements PlatformBot {
       const handled = await this.onCommand(text, 'loopback');
       if (handled) return;
     }
-    this.queue.push({ text, blocks, onComplete, onChunk });
+    this.queue.push({ text, blocks, onComplete, onChunk, source });
+    this.webhooks?.emit(
+      'prompt.received',
+      { text },
+      { platform: 'loopback', sessionId: this.acp.sessionId ?? undefined, source }
+    );
     void this._process();
   }
 
@@ -75,6 +83,9 @@ export class LoopbackBot implements PlatformBot {
   }
 
   setMediaHandler(_handler: MediaHandler): void {}
+  setWebhooks(emitter: WebhookEmitter | null): void {
+    this.webhooks = emitter;
+  }
   setCommandHandler(
     fn: ((text: string, chatId: number | string) => Promise<boolean>) | null
   ): void {
@@ -88,6 +99,12 @@ export class LoopbackBot implements PlatformBot {
 
     let buffer = '';
     let errorMsg: string | undefined;
+    const startedAtMs = Date.now();
+    this.webhooks?.emit(
+      'prompt.started',
+      { text: item.text },
+      { platform: 'loopback', sessionId: this.acp.sessionId ?? undefined, source: item.source }
+    );
     try {
       await this.acp.prompt(item.blocks ?? item.text);
       for (;;) {
@@ -109,8 +126,20 @@ export class LoopbackBot implements PlatformBot {
     } catch (err) {
       errorMsg = (err as Error).message;
       log.error(`[loopback] prompt failed: ${errorMsg}`);
+      this.webhooks?.emit(
+        'prompt.error',
+        { text: item.text, error: errorMsg, durationMs: Date.now() - startedAtMs },
+        { platform: 'loopback', sessionId: this.acp.sessionId ?? undefined, source: item.source }
+      );
     }
 
+    if (!errorMsg) {
+      this.webhooks?.emit(
+        'prompt.completed',
+        { text: item.text, response: buffer, durationMs: Date.now() - startedAtMs },
+        { platform: 'loopback', sessionId: this.acp.sessionId ?? undefined, source: item.source }
+      );
+    }
     item.onComplete?.(buffer, errorMsg);
     this.busy = false;
     void this._process();

@@ -22,6 +22,7 @@ import { MediaHandler } from './media.js';
 import { AuditLog, NetworkStore } from './network.js';
 import { migrateLegacyState, StateStore } from './state.js';
 import { createTranscriber, deleteAfterTranscribe } from './transcriber.js';
+import { WebhookEmitter } from './webhooks.js';
 
 function printBanner(): void {
   const title = 'acp-connector';
@@ -53,6 +54,10 @@ export async function run(): Promise<void> {
 
   const tg = config.platforms?.telegram;
   const dc = config.platforms?.discord;
+
+  // Outbound event webhooks: fan-out bridge/agent events to configured
+  // endpoints. Created before the bots so every component can emit.
+  const webhooks = new WebhookEmitter(config.webhooks);
 
   // Collect active bots
   const bots: PlatformBot[] = [];
@@ -95,6 +100,7 @@ export async function run(): Promise<void> {
       }
     },
   });
+  jobManager.onEvent = (event, data) => webhooks.emit(event, data);
 
   // Loopback API backing the acp-tools MCP server (ephemeral port —
   // the agent learns it via BRIDGE_API_URL in the mcpServers entry).
@@ -201,6 +207,7 @@ export async function run(): Promise<void> {
     // (/sessions new, /sessions <n>, restart) flow through here too.
     onSessionIdChange: (id) => {
       if (config.restoreLastSession !== false) store.set('sessionId', id);
+      webhooks.emit('session.changed', { sessionId: id }, { sessionId: id });
     },
   });
 
@@ -342,6 +349,7 @@ export async function run(): Promise<void> {
   const httpCommandsAllowed = config.http?.commands ?? false;
   for (const bot of bots) {
     if (bot instanceof BaseBot) bot.httpCommandsAllowed = httpCommandsAllowed;
+    bot.setWebhooks?.(webhooks);
     bot.setCommandHandler((text, chatId) =>
       jobManager.handleCommand(text, chatId).then(async (handled) => {
         if (handled) return true;
@@ -399,6 +407,7 @@ export async function run(): Promise<void> {
   // bot sends a message with a "Reconnect" button that calls acp.restart()
   acp.onExit = (code) => {
     log.error(`⚠️ Agent process exited (code=${code})`);
+    webhooks.emit('agent.exited', { code }, { sessionId: acp.sessionId ?? undefined });
     for (const bot of bots) {
       bot.notifyAgentExit(code).catch((err) => {
         log.error('Failed to send agent-exit notification:', (err as Error).message);
@@ -408,16 +417,39 @@ export async function run(): Promise<void> {
 
   // Wire permission handler — route to the bot that has an active prompt
   // biome-ignore lint/suspicious/noExplicitAny: SDK permission types are complex
-  acp.onPermission = (params: any) => {
+  acp.onPermission = async (params: any) => {
+    webhooks.emit(
+      'permission.request',
+      {
+        toolCall: params.toolCall,
+        options: (params.options ?? []).map(
+          // biome-ignore lint/suspicious/noExplicitAny: SDK option type
+          (o: any) => ({ optionId: o.optionId, name: o.name, kind: o.kind })
+        ),
+      },
+      { sessionId: acp.sessionId ?? undefined }
+    );
     // Route to the bot with an active prompt (currentChatId/currentChannelId set)
     for (const bot of bots) {
       if (bot.hasActivePrompt()) {
         // biome-ignore lint/suspicious/noExplicitAny: PlatformBot doesn't expose _handlePermission
-        return (bot as any)._handlePermission(params);
+        const result = await (bot as any)._handlePermission(params);
+        webhooks.emit(
+          'permission.decision',
+          { toolCall: params.toolCall, outcome: result?.outcome },
+          { sessionId: acp.sessionId ?? undefined }
+        );
+        return result;
       }
     }
     // No active prompt — auto-approve or cancel as fallback
-    return { outcome: { outcome: 'cancelled' } };
+    const cancelled = { outcome: { outcome: 'cancelled' } };
+    webhooks.emit(
+      'permission.decision',
+      { toolCall: params.toolCall, outcome: cancelled.outcome },
+      { sessionId: acp.sessionId ?? undefined }
+    );
+    return cancelled;
   };
 
   const hadStoredSession = !!store.get('sessionId');
@@ -543,8 +575,21 @@ export async function run(): Promise<void> {
   log.info('  ─────────────────────────────────');
   log.info('');
 
-  const shutdown = (sig: string) => {
+  webhooks.emit(
+    'bridge.started',
+    {
+      agentCmd: config.agentCmd,
+      sessionId: acp.sessionId,
+      sessionRestored: hadStoredSession,
+      platforms: bots.map((b) => b.platform ?? 'loopback'),
+    },
+    { sessionId: acp.sessionId ?? undefined }
+  );
+
+  const shutdown = async (sig: string) => {
     log.info(`\n${sig} received, shutting down...`);
+    webhooks.emit('bridge.stopping', { signal: sig }, { sessionId: acp.sessionId ?? undefined });
+    await webhooks.drain();
     if (a2aSyncTimer) clearInterval(a2aSyncTimer);
     a2aDiscovery?.stop();
     a2aServer?.stop();

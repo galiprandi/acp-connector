@@ -60,6 +60,18 @@ export interface ToolsConfig {
   maxFileSizeMb?: number;
 }
 
+/**
+ * One webhook target for event replay. `events` is an allowlist:
+ * "*" for everything, "prefix.*" for a namespace, or exact event names.
+ * `secret` enables the `x-acp-signature` HMAC-SHA256 header.
+ */
+export interface WebhookConfig {
+  url: string;
+  events: string[];
+  secret?: string;
+  headers?: Record<string, string>;
+}
+
 export interface TranscriptionConfig {
   /** Transcribe voice notes to text before sending to the agent (default true). */
   enabled?: boolean;
@@ -186,6 +198,8 @@ export interface BridgeConfig {
   tools?: ToolsConfig;
   transcription?: TranscriptionConfig;
   a2a?: A2aConfig;
+  /** Outbound event webhooks — replay bridge/agent events to HTTP endpoints. */
+  webhooks?: WebhookConfig[];
 }
 
 export const defaultConfigPath = resolve(process.cwd(), 'acp-connector.jsonc');

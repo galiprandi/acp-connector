@@ -7,6 +7,7 @@ import { BaseBot } from './base-bot.js';
 import type { SenderInfo } from './identity.js';
 import { errorMessage, log } from './logger.js';
 import { fetchBuffer, type MediaHandler } from './media.js';
+import type { WebhookEmitter } from './webhooks.js';
 
 const TG_MAX_LEN = 4096;
 const TG_CAPTION_MAX = 1024;
@@ -41,6 +42,8 @@ export interface PlatformBot {
   hasActivePrompt(): boolean;
   setMediaHandler(handler: MediaHandler): void;
   setCommandHandler(fn: ((text: string, chatId: number | string) => Promise<boolean>) | null): void;
+  /** Outbound event webhooks — optional, no-op when unset. */
+  setWebhooks?(emitter: WebhookEmitter | null): void;
 }
 
 interface BridgeBotOpts {
@@ -462,6 +465,7 @@ export class BridgeBot extends BaseBot {
         await this.acp.cancel();
         this.queue = [];
         await this.bot.sendMessage(cid, '⏹ Stopped.');
+        this._emit('prompt.cancelled', {}, cid);
         log.info('⏹ stop requested');
       } catch (err) {
         await this.bot.sendMessage(cid, `Stop failed: ${(err as Error).message}`);

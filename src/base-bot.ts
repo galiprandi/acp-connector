@@ -12,6 +12,7 @@ import { identityPrefix, type SenderInfo } from './identity.js';
 import { systemTimezone } from './jobs.js';
 import { log } from './logger.js';
 import type { MediaHandler } from './media.js';
+import type { WebhookEmitter } from './webhooks.js';
 
 const STREAM_BATCH_MS = 800;
 const MAX_QUEUE = 100;
@@ -60,6 +61,8 @@ export interface QueueItem {
   queuedReaction?: boolean;
   /** Sender/chat identity — prefixes the prompt so the agent knows who is talking. */
   sender?: SenderInfo;
+  /** Injected-prompt origin (job/http/a2a); undefined for user messages. */
+  source?: PromptSource;
 }
 
 export interface PermissionResponse {
@@ -111,6 +114,8 @@ export abstract class BaseBot implements PlatformBot {
   private lastSessionList: { sessions: SessionInfo[]; at: number } | null;
   protected jobsSummary?: () => string | null;
   protected networkSummary?: () => string | null;
+  /** Outbound event webhooks — null when none are configured. */
+  protected webhooks: WebhookEmitter | null = null;
   /** Most recent prompt-processing failure — surfaced by /status. */
   private lastError: { message: string; at: number } | null;
 
@@ -751,6 +756,25 @@ export abstract class BaseBot implements PlatformBot {
     this.mediaHandler = handler;
   }
 
+  setWebhooks(emitter: WebhookEmitter | null): void {
+    this.webhooks = emitter;
+  }
+
+  /** Emit a webhook event with the bot's routing context attached. */
+  protected _emit(
+    event: string,
+    data: Record<string, unknown> = {},
+    chatId?: string | number,
+    source?: string
+  ): void {
+    this.webhooks?.emit(event, data, {
+      platform: this.platformName,
+      chatId: chatId ?? this.currentChannelId ?? undefined,
+      sessionId: this.acp.sessionId ?? undefined,
+      source,
+    });
+  }
+
   setCommandHandler(
     fn: ((text: string, chatId: number | string) => Promise<boolean>) | null
   ): void {
@@ -808,7 +832,8 @@ export abstract class BaseBot implements PlatformBot {
       void this.sendMessage(chatId, '⚠️ Queue is full — try again later.').catch(() => {});
       return;
     }
-    this.queue.push({ channelId: chatId, text, blocks, onComplete, onChunk });
+    this.queue.push({ channelId: chatId, text, blocks, onComplete, onChunk, source });
+    this._emit('prompt.received', { text }, chatId, source);
     this._processQueue();
   }
 
@@ -841,6 +866,7 @@ export abstract class BaseBot implements PlatformBot {
       });
     }
     this.queue.push(item);
+    this._emit('prompt.received', { text, sender }, channelId);
     this._processQueue();
   }
 
@@ -863,7 +889,9 @@ export abstract class BaseBot implements PlatformBot {
     this._startTypingLoop();
     this.planText = '';
 
+    const startedAtMs = Date.now();
     if (this.onPrompt) this.onPrompt(text, channelId);
+    this._emit('prompt.started', { text }, channelId, item.source);
 
     // User messages carry sender identity: prepend `[Platform/Chat] Name:`
     // so the agent knows who is talking and which alias to reply to.
@@ -904,9 +932,26 @@ export abstract class BaseBot implements PlatformBot {
         }
       }
       this.lastError = null;
+      this._emit(
+        'prompt.completed',
+        {
+          text,
+          response: this.streamBuffer,
+          stopReason: message?.stopReason,
+          durationMs: Date.now() - startedAtMs,
+        },
+        channelId,
+        item.source
+      );
     } catch (err) {
       errorMsg = (err as Error).message;
       this.lastError = { message: errorMsg, at: Date.now() };
+      this._emit(
+        'prompt.error',
+        { text, error: errorMsg, durationMs: Date.now() - startedAtMs },
+        channelId,
+        item.source
+      );
       await this._sendPlain(`Error: ${errorMsg}`);
     }
 

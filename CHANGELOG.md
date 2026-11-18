@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Event webhooks**: `webhooks[]` config replays bridge/agent events as JSON `POST`s to user endpoints — `bridge.*`, `session.changed`, `agent.exited`, `prompt.*` (received/started/completed/error/cancelled), `permission.*` and `job.*`. Allowlist subscription (`"*"`, `"prefix.*"`, exact names), optional HMAC-SHA256 signature (`x-acp-signature`, GitHub-style), custom headers, fire-and-forget delivery that never blocks the prompt queue. See `docs/webhooks.md`
+
 ### Changed
 - `/help` now lists only bridge commands — the *Agent commands* section (slash commands advertised via `available_commands_update`, e.g. Devin's ~47 built-ins + skills) is no longer rendered, which previously overflowed the platform message limit and arrived as many separate skill messages. Agent commands still forward to the agent when typed
 

@@ -316,6 +316,8 @@ export class JobManager {
   private timezone?: string;
   private canDeliver: () => boolean;
   private now: () => number;
+  /** Optional event hook — the bridge wires webhook fan-out here. */
+  onEvent: ((event: string, data: Record<string, unknown>) => void) | null = null;
 
   constructor({
     store,
@@ -582,8 +584,23 @@ export class JobManager {
     const chatId = job.chatId ?? this.allowedChatIds[0];
     if (chatId === undefined || chatId === null) {
       log.warn(`⚙️ job ${job.id} has no chat target — skipped`);
+      this.onEvent?.('job.failed', {
+        id: job.id,
+        name: job.name,
+        managed: job.managed,
+        trigger: job.trigger,
+        error: 'no chat target',
+      });
       return;
     }
+    this.onEvent?.('job.fired', {
+      id: job.id,
+      name: job.name,
+      managed: job.managed,
+      trigger: job.trigger,
+      prompt: job.prompt,
+      chatId,
+    });
     if (job.managed === 'agent') {
       // Agent jobs are remote content: prefix so a leading "/" is never
       // parsed as a bridge command, and flag the source accordingly.

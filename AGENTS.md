@@ -68,6 +68,10 @@ To release a new version:
 
 Single `acp-connector.jsonc` file in cwd. See `acp-connector.example.jsonc` for all options.
 
+User-facing docs live in `docs/` (configuration, commands, architecture,
+acp-tools, a2a, webhooks, protocol, deployment, testing, troubleshooting) —
+README.md is the index; keep it lean and link out.
+
 ## Architecture
 
 ```
@@ -101,6 +105,10 @@ src/
 ├── network.ts     — A2A peers/statuses/task dedup, persisted in state.json
 ├── loopback.ts    — headless PlatformBot (no TG/Discord): drives queue + auto-approves
 ├── config.ts      — JSONC config loader/saver, platforms support
+├── webhooks.ts    — WebhookEmitter: outbound event fan-out to user HTTP
+│                    endpoints (allowlist `*`/`prefix.*`/exact, HMAC signature,
+│                    fire-and-forget). Emit sites: bridge lifecycle/permission/
+│                    exit, BaseBot+LoopbackBot prompt pipeline, JobManager
 └── setup.ts       — interactive setup wizard (Telegram + Discord)
 ```
 
@@ -233,7 +241,7 @@ When implementing or modifying ACP protocol features, **always test against both
 - **OpenCode** (`opencode acp`): does NOT support `session/set_mode` (rejects it), but DOES expose `configOptions` (mode + model) and supports `session/set_config_option` — prefers the generic config-option path over set_mode; also supports session list, session resume, session close, session fork, image content, HTTP/SSE MCP
 - **dsh** (`dsh acp`, DeepSeek Harness): no session modes; `configOptions` (`model`, `reasoning_effort`); session/list works; NO `session/resume`/`load` — resume attempts fall back to `session/new`; prompts route via the `acp` profile's configured provider — locally patched to OpenRouter (`~/.dsh/profiles/acp/cordis.patch.yml`), stock default `deepseek-official` needs `DEEPSEEK_API_KEY`
 - **agy** (`npx agy-acp`, Antigravity): session modes (`default`, `accept-edits`, `plan`) + `configOptions` (`mode`, `model`, `reasoningEffort`); session list/resume; also advertises agent-level `/mode`, `/model`, `/plan`, `/effort`, `/skills` commands
-- **Available commands**: Devin (~47: built-ins + skills) and OpenCode (~20) advertise `available_commands_update`; pi does not advertise commands — `/help` omits the section gracefully
+- **Available commands**: Devin (~47: built-ins + skills) and OpenCode (~20) advertise `available_commands_update`; pi does not advertise commands. `/help` shows only bridge commands — agent commands are never listed there
 
 This ensures features degrade gracefully when an agent doesn't support them. Non-fatal errors (e.g. unsupported session mode) should log a warning and continue, not crash the bridge.
 

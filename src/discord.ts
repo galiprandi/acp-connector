@@ -396,6 +396,7 @@ export class DiscordBot extends BaseBot {
         await this.acp.cancel();
         this.queue = [];
         await channel?.send('⏹ Stopped.');
+        this._emit('prompt.cancelled', {}, channelId);
         log.info('⏹ stop requested');
       } catch (err) {
         await channel?.send(`Stop failed: ${(err as Error).message}`);
