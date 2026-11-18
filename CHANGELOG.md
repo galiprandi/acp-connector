@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-11-18
+
 ### Added
 - **Richer `/status`**: bridge version + uptime header, agent state/mode, agent command, session id enriched with the session title (when the agent's session list exposes one), queue count merged with a jobs summary (counts by trigger + soonest one-shot), last prompt-processing error with age, and A2A approved/pending peer counts when `a2a.enabled`
 - **Unified runtime state**: `.acp-connector/state.json` (versioned, atomic writes, `0600`) now holds ALL runtime state — `sessionId`, chat aliases, jobs and A2A network peers. Legacy `aliases.json`/`reminders.json`/`network.json` and config fields `cron[]`/`routines[]`/`sessionId` migrate automatically on first boot (legacy files renamed `*.migrated`, config fields stripped)

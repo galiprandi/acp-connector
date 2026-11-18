@@ -344,7 +344,10 @@
 - /queue lists pending prompts
 - /queue on empty queue reports empty
 - /queue rm with invalid index shows usage
+- /status appends the session title when the agent lists it
+- /status includes jobs and a2a summaries when provided
 - /status reports agent state, session, queue and uptime
+- /status still answers when session/list is unsupported
 - reports message handler errors without rejecting
 - sendMessage prefers line boundaries when no paragraph break fits
 - sendMessage prefers paragraph boundaries over hard cuts
@@ -616,6 +619,10 @@
 - manual jobs never auto-fire
 - run() delivers immediately without touching the schedule
 - stop() is safe to call twice and clears scheduled work
+
+## Module: JobManager.summary
+- counts jobs by trigger kind and names the soonest one-shot
+- returns null when there are no enabled jobs
 
 ## Module: /jobs command
 - accepts explicit offsets without a timezone
