@@ -987,42 +987,21 @@ describe('BridgeBot', () => {
     await vi.waitFor(() => expect(acp.configOptions?.[0]?.currentValue).toBe('model-b'));
   });
 
-  it('/help includes agent-advertised commands', async () => {
+  it('/help shows only bridge commands, not agent-advertised ones', async () => {
     const { bot } = createBot();
     await bot.start();
     const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
     await handler({ chat: { id: 123 }, text: '/help' });
     expect(mockBot.sendMessage).toHaveBeenCalledWith(
       123,
-      expect.stringContaining('*Agent commands:*'),
-      { parse_mode: 'Markdown' }
-    );
-    expect(mockBot.sendMessage).toHaveBeenCalledWith(
-      123,
-      expect.stringContaining('/compact — Force conversation compaction'),
-      { parse_mode: 'Markdown' }
-    );
-    expect(mockBot.sendMessage).toHaveBeenCalledWith(
-      123,
-      expect.stringContaining('/rename <new title> — Rename this session'),
-      { parse_mode: 'Markdown' }
-    );
-    expect(mockBot.sendMessage).toHaveBeenCalledWith(
-      123,
       expect.stringContaining('/jobs add `[as <name>] <when> <prompt>`'),
       { parse_mode: 'Markdown' }
     );
-  });
-
-  it('/help omits agent section when agent reports no commands', async () => {
-    const { bot, acp } = createBot();
-    acp.availableCommands = null;
-    await bot.start();
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
-    await handler({ chat: { id: 123 }, text: '/help' });
     const text = mockBot.sendMessage.mock.calls[0][1];
-    expect(text).not.toContain('Agent commands');
     expect(text).toContain('*Commands:*');
+    expect(text).not.toContain('Agent commands');
+    expect(text).not.toContain('/compact');
+    expect(text).not.toContain('/rename');
   });
 
   it('available_commands_update refreshes acp.availableCommands', async () => {

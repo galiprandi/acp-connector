@@ -173,12 +173,12 @@ describe.skipIf(!RUN)('e2e agent matrix', () => {
         for (const cmd of ['/sessions', '/config', '/queue', '/jobs', '/time', '/status']) {
           expect(text).toContain(cmd);
         }
-        // Removed bridge commands must not appear in the BUILT-IN help —
-        // agent-advertised commands (e.g. agy's own /mode, /model) are
-        // legitimate and listed under *Agent commands:*.
-        const builtin = text.split('*Agent commands:*')[0];
+        // /help only lists bridge commands — removed bridge commands and
+        // agent-advertised commands (e.g. agy's own /mode, /model) must not
+        // appear.
+        expect(text).not.toContain('Agent commands');
         for (const gone of ['/cron', '/routine', '/reminder', '/run ', '/model', '/mode ']) {
-          expect(builtin).not.toContain(gone);
+          expect(text).not.toContain(gone);
         }
       });
 

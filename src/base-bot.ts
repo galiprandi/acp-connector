@@ -747,20 +747,6 @@ export abstract class BaseBot implements PlatformBot {
     ];
   }
 
-  /**
-   * Help lines for slash commands advertised by the agent via
-   * `available_commands_update`. Empty when the agent reports none (e.g. pi).
-   */
-  protected _agentCommandsHelpLines(): string[] {
-    const commands = this.acp.availableCommands;
-    if (!commands || commands.length === 0) return [];
-    return commands.map((c) => {
-      const hint = c.input?.hint ? ` ${c.input.hint}` : '';
-      const desc = c.description ? ` — ${c.description}` : '';
-      return `  /${c.name}${hint}${desc}`;
-    });
-  }
-
   setMediaHandler(handler: MediaHandler): void {
     this.mediaHandler = handler;
   }

@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- `/help` now lists only bridge commands — the *Agent commands* section (slash commands advertised via `available_commands_update`, e.g. Devin's ~47 built-ins + skills) is no longer rendered, which previously overflowed the platform message limit and arrived as many separate skill messages. Agent commands still forward to the agent when typed
+
 ## [0.19.0] - 2026-11-18
 
 ### Added

@@ -139,8 +139,6 @@ export class MatrixBot extends BaseBot {
       return true;
     }
     if (text === '/start' || text === '/help') {
-      const agentLines = this._agentCommandsHelpLines();
-      const agentSection = agentLines.length > 0 ? ['', '*Agent commands:*', ...agentLines] : [];
       await this.sendMessage(
         chatId,
         [
@@ -150,7 +148,6 @@ export class MatrixBot extends BaseBot {
           '',
           '*Commands:*',
           ...this._bridgeCommandHelpLines(),
-          ...agentSection,
           '',
           'Any other text is sent to the agent.',
         ].join('\n')

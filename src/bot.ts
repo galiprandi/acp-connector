@@ -470,9 +470,6 @@ export class BridgeBot extends BaseBot {
     }
 
     if (text !== '/start' && text !== '/help') return false;
-    const agentCommandLines = this._agentCommandsHelpLines();
-    const agentSection =
-      agentCommandLines.length > 0 ? ['', '*Agent commands:*', ...agentCommandLines] : [];
     await this.sendMessage(
       cid,
       [
@@ -482,7 +479,6 @@ export class BridgeBot extends BaseBot {
         '',
         '*Commands:*',
         ...this._bridgeCommandHelpLines(),
-        ...agentSection,
         '',
         'Any other text is sent to the agent.',
         '',
