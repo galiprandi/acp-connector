@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-11-18
+
 ### Added
 - **Event webhooks**: `webhooks[]` config replays bridge/agent events as JSON `POST`s to user endpoints — `bridge.*`, `session.changed`, `agent.exited`, `prompt.*` (received/started/completed/error/cancelled), `permission.*` and `job.*`. Allowlist subscription (`"*"`, `"prefix.*"`, exact names), optional HMAC-SHA256 signature (`x-acp-signature`, GitHub-style), custom headers, fire-and-forget delivery that never blocks the prompt queue. See `docs/webhooks.md`
 
