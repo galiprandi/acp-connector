@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Transport layer**: platform I/O now goes through an explicit `PlatformTransport` contract (`src/transport/`) shared by Telegram, Discord and a loopback reference implementation. Expected platform failures return error-first `Result<T>` tuples classified as `network`/`rate_limited`/`api`/`fatal` — the caller decides retry/propagate — while bugs still throw. Transient failures get bounded exponential-backoff retries that honor `retry_after`
+- **`node-telegram-bot-api` 0.66 → 2.4**: migrated to the rewritten v2 client (typed `Bot.api`, `Bot.catch()` error boundary, typed `NetworkError`/`TimeoutError`/`TelegramApiError`, no deprecated request-promise deps). New connectors only implement the transport contract
+- **Transport health in `/status`**: shows `✅ transport: ok` or `⚠️ transport: degraded` with the last error kind/message and age
+
 ### Fixed
 - **Crash on Telegram network blips**: a floating `callback_query` handler plus fire-and-forget `answerCallbackQuery` calls could reject during connectivity failures and kill the process via `unhandledRejection`. Callback errors are now caught and logged, and a top-level `unhandledRejection` handler keeps the bridge alive (logs the stack instead of crashing)
 - **AggregateError storms on broken IPv6**: DNS resolution now prefers IPv4 (`setDefaultResultOrder('ipv4first')`) — on hosts with half-configured IPv6 the default order produced repeated `EFATAL: AggregateError` polling failures against `api.telegram.org`

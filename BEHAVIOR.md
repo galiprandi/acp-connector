@@ -794,6 +794,49 @@
 - notifies the user and enqueues nothing when transcription fails
 - transcribes a voice message into a text block for the agent
 
+## Module: withRetry
+- does not retry api errors
+- does not retry fatal errors
+- retries network errors up to the attempt cap
+- returns first success without retrying
+- succeeds on a later attempt after transient failures
+- waits at least retryAfterMs for rate_limited errors
+
+## Module: tryC
+- maps rejections through the classifier
+- wraps resolution into [null, data]
+
+## Module: mapTelegramError
+- maps TelegramApiError by status
+- maps fetch/AggregateError failures to network
+- maps unknown errors to api
+
+## Module: normalizeMessage
+- exposes username when names are missing (domain applies the @ fallback)
+- normalizes a private text message
+- normalizes group title and reply context
+- normalizes photo media picking the largest size
+- normalizes voice and document media
+
+## Module: normalizeCallback
+- maps callback query fields
+
+## Module: TelegramTransport
+- fileUrl builds the download URL from file_path
+- health recovers to ok after the error ages out
+- registers a catch boundary for handler errors
+- returns api errors as Results without retrying
+- routes callback queries through the callback handler
+- routes inbound messages through normalize + handler
+- send maps to api.sendMessage with snake_case params
+
+## Module: mapDiscordError
+- maps network-shaped errors to network
+- maps unknown errors to api
+
+## Module: TransportError contract
+- Result tuples are disjoint
+
 ## Module: WebhookEmitter
 - "*" matches every event
 - "prefix.*" matches the namespace only

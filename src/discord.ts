@@ -1,17 +1,6 @@
 import type { ContentBlock } from '@agentclientprotocol/sdk';
-import {
-  ActionRowBuilder,
-  ButtonBuilder,
-  type ButtonInteraction,
-  ButtonStyle,
-  ChannelType,
-  Client,
-  Events,
-  GatewayIntentBits,
-  type Message,
-  MessageFlags,
-  type TextChannel,
-} from 'discord.js';
+import type { ButtonInteraction, Message } from 'discord.js';
+import { MessageFlags } from 'discord.js';
 import type { AcpClient } from './acp-client.js';
 import type { AliasDirectory } from './aliases.js';
 import type { PermissionResponse } from './base-bot.js';
@@ -19,12 +8,18 @@ import { BaseBot } from './base-bot.js';
 import type { SenderInfo } from './identity.js';
 import { errorMessage, log } from './logger.js';
 import { fetchBuffer, type MediaHandler } from './media.js';
+import type {
+  InboundCallback,
+  InboundMessage,
+  PlatformTransport,
+  Result,
+} from './transport/types.js';
 
 const DISCORD_MAX_LEN = 2000;
 
 interface DiscordBotOpts {
   acp: AcpClient;
-  token: string;
+  transport: PlatformTransport;
   allowedChannelIds: string[];
   allowedUserIds?: string[];
   agentCmd: string;
@@ -44,17 +39,16 @@ interface DiscordBotOpts {
 }
 
 export class DiscordBot extends BaseBot {
-  private token: string;
   private allowedChannelIds: Set<string>;
   private allowedUserIds: Set<string>;
-  private client: Client;
-  private currentMessage: Message | null;
+  private transport: PlatformTransport;
+  private currentMessage: { id: string } | null;
 
   protected readonly maxLen = DISCORD_MAX_LEN;
 
   constructor({
     acp,
-    token,
+    transport,
     allowedChannelIds,
     allowedUserIds = [],
     agentCmd,
@@ -90,44 +84,39 @@ export class DiscordBot extends BaseBot {
       jobsSummary,
       networkSummary,
     });
-    this.token = token;
-    this.allowedChannelIds = new Set(allowedChannelIds.map(String));
-    this.allowedUserIds = new Set(allowedUserIds.map(String));
-    this.client = new Client({
-      intents: [
-        GatewayIntentBits.Guilds,
-        GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.MessageContent,
-      ],
-    });
+    this.allowedChannelIds = new Set(allowedChannelIds);
+    this.allowedUserIds = new Set(allowedUserIds);
+    this.transport = transport;
     this.currentMessage = null;
   }
 
+  transportHealth() {
+    return this.transport.health();
+  }
+
+  private _must<T>(r: Result<T>): T {
+    const [e, data] = r;
+    if (e) throw new Error(`${e.kind}: ${e.message}`);
+    return data;
+  }
+
   async start(): Promise<void> {
-    this._setupHandlers();
-    await this.client.login(this.token);
+    await this.transport.start({
+      onMessage: async (msg) => {
+        try {
+          await this._onMessage(msg);
+        } catch (err) {
+          log.error('Unhandled message error:', errorMessage(err));
+          const [e] = await this.transport.send(msg.chatId, `⚠️ ${errorMessage(err).slice(0, 200)}`);
+          if (e) log.error('Error report failed:', e.message);
+        }
+      },
+      onCallback: (cb) => this._onInteraction(cb),
+    });
   }
 
   stop(): void {
-    if (this.client) this.client.destroy();
-  }
-
-  private _setupHandlers(): void {
-    this.client.on(Events.MessageCreate, (msg) =>
-      this._onMessage(msg).catch(async (err) => {
-        log.error('Unhandled message error:', errorMessage(err));
-        try {
-          const channel = msg.channel as TextChannel;
-          await channel?.send(`⚠️ ${errorMessage(err).slice(0, 200)}`);
-        } catch {
-          // best effort — never crash on error reporting
-        }
-      })
-    );
-    this.client.on(Events.InteractionCreate, (interaction) =>
-      this._onInteraction(interaction as ButtonInteraction)
-    );
-    this.client.on(Events.Error, (err) => log.error('Discord error:', err.message));
+    this.transport.stop();
   }
 
   private _isAllowed(channelId: string): boolean {
@@ -141,53 +130,43 @@ export class DiscordBot extends BaseBot {
   protected async _sendNewMessage(text: string): Promise<{ messageId: number | string }> {
     const channelId = this._currentChannel() as string;
     if (!channelId) throw new Error('No active channel');
-    const channel = this.client.channels.cache.get(channelId) as TextChannel;
-    if (!channel) throw new Error('Channel not found');
-    this.currentMessage = await channel.send(text);
-    return { messageId: this.currentMessage.id };
+    const r = this._must(await this.transport.send(channelId, text));
+    this.currentMessage = { id: String(r.messageId) };
+    return { messageId: r.messageId };
   }
 
   protected async _editMessage(_messageId: number | string, text: string): Promise<void> {
-    if (this.currentMessage) {
-      await this.currentMessage.edit(text);
-    }
+    const channelId = this._currentChannel() as string;
+    if (!channelId || !this.currentMessage) return;
+    this._must(await this.transport.edit(channelId, this.currentMessage.id, text));
   }
 
   protected async _sendOverflowChunk(chunk: string): Promise<void> {
     const channelId = this._currentChannel() as string;
     if (!channelId) return;
-    const channel = this.client.channels.cache.get(channelId) as TextChannel;
-    if (!channel) return;
-    try {
-      await channel.send(chunk);
-    } catch {
-      // ignore
-    }
+    await this.transport.send(channelId, chunk);
   }
 
   protected async _sendPlain(text: string, chatId?: string | number): Promise<void> {
     const target = (chatId ?? this._currentChannel()) as string;
     if (!target) return;
-    const channel = this.client.channels.cache.get(target) as TextChannel;
-    await channel?.send(text);
+    this._must(await this.transport.send(target, text));
   }
 
   protected async _addQueuedReaction(
     channelId: string | number,
     messageId: string | number
   ): Promise<void> {
-    const channel = this.client.channels.cache.get(String(channelId)) as TextChannel;
-    const message = await channel?.messages.fetch(String(messageId)).catch(() => null);
-    await message?.react('⏳');
+    this._must(await (this.transport.react?.(channelId, messageId, '⏳') ?? [null, undefined]));
   }
 
   protected async _clearQueuedReaction(
     channelId: string | number,
     messageId: string | number
   ): Promise<void> {
-    const channel = this.client.channels.cache.get(String(channelId)) as TextChannel;
-    const message = await channel?.messages.fetch(String(messageId)).catch(() => null);
-    await message?.reactions.cache.get('⏳')?.users.remove(this.client.user?.id);
+    this._must(
+      await (this.transport.react?.(channelId, messageId, '⏳', true) ?? [null, undefined])
+    );
   }
 
   protected async _addTranscribingReaction(
@@ -195,9 +174,7 @@ export class DiscordBot extends BaseBot {
     messageId: string | number
   ): Promise<void> {
     try {
-      const channel = this.client.channels.cache.get(String(channelId)) as TextChannel;
-      const message = await channel?.messages?.fetch(String(messageId)).catch(() => null);
-      await message?.react('🎧').catch(() => {});
+      await this.transport.react?.(channelId, messageId, '🎧');
     } catch {
       /* best-effort UX hint */
     }
@@ -208,27 +185,21 @@ export class DiscordBot extends BaseBot {
     messageId: string | number
   ): Promise<void> {
     try {
-      const channel = this.client.channels.cache.get(String(channelId)) as TextChannel;
-      const message = await channel?.messages?.fetch(String(messageId)).catch(() => null);
-      await message?.reactions?.cache
-        ?.get('🎧')
-        ?.users?.remove(this.client.user?.id)
-        .catch(() => {});
+      await this.transport.react?.(channelId, messageId, '🎧', true);
     } catch {
       /* best-effort UX hint */
     }
   }
 
-  private async _onMessage(msg: Message): Promise<void> {
-    if (msg.author.bot) return;
-
-    const channelId = msg.channel.id;
-    const text = msg.content || '';
+  private async _onMessage(msg: InboundMessage): Promise<void> {
+    const channelId = String(msg.chatId);
+    const text = msg.text || '';
 
     if (!this._isAllowed(channelId)) {
       log.info(`🚫 [${channelId}] ${this._sanitize(text)}`);
       if (this.allowedChannelIds.size === 0) {
-        await (msg.channel as TextChannel).send(
+        await this.transport.send(
+          channelId,
           [
             `Your channel ID is: ${channelId}`,
             '',
@@ -246,8 +217,9 @@ export class DiscordBot extends BaseBot {
     if (await this._handleBuiltinCommand(text, channelId)) return;
 
     // Handle attachments (images, files)
-    if (msg.attachments && msg.attachments.size > 0 && this.mediaHandler) {
-      await this._handleDiscordMedia(msg, channelId);
+    const raw = msg.raw as Message | undefined;
+    if (raw?.attachments && raw.attachments.size > 0 && this.mediaHandler) {
+      await this._handleDiscordMedia(msg, raw, channelId);
       return;
     }
 
@@ -261,10 +233,10 @@ export class DiscordBot extends BaseBot {
     const preview = text.slice(0, this.previewLength).replace(/\n/g, ' ');
     log.info(`👤 ${preview}${text.length > this.previewLength ? '…' : ''}`);
 
-    const context = await this._replyContext(msg);
+    const context = await this._replyContext(raw);
     this._enqueueUserMessage(
       channelId,
-      msg.id,
+      msg.messageId,
       `${context}${text}`,
       undefined,
       this._senderInfo(msg)
@@ -274,22 +246,18 @@ export class DiscordBot extends BaseBot {
   /**
    * Sender/chat identity for the prompt prefix and alias directory.
    * DMs: author display name doubles as chat name; guild channels: the
-   * channel name is the destination, msg.author is who spoke.
+   * channel name is the destination, sender is who spoke.
    */
-  private _senderInfo(msg: Message): SenderInfo | undefined {
-    const name = msg.author.displayName || msg.author.username || '';
+  private _senderInfo(msg: InboundMessage): SenderInfo | undefined {
+    const name = msg.sender?.name || '';
     // No identifiable sender → no prefix, no alias.
     if (!name) return undefined;
-    const isGroup = msg.channel.type !== ChannelType.DM;
-    const chatName =
-      isGroup && 'name' in msg.channel && typeof msg.channel.name === 'string'
-        ? msg.channel.name
-        : undefined;
-    return { name, isGroup, chatName };
+    const isGroup = msg.chatType !== 'private';
+    return { name, isGroup, chatName: isGroup ? msg.chatTitle : undefined };
   }
 
-  private async _replyContext(msg: Message): Promise<string> {
-    if (!msg.reference?.messageId) return '';
+  private async _replyContext(msg?: Message): Promise<string> {
+    if (!msg?.reference?.messageId) return '';
     const ref = await msg.fetchReference().catch(() => null);
     const quote = (ref?.content || '').trim();
     if (!ref || !quote) return '';
@@ -299,21 +267,25 @@ export class DiscordBot extends BaseBot {
     return `[in reply to${author}: "${snippet}${suffix}"] `;
   }
 
-  private async _handleDiscordMedia(msg: Message, channelId: string): Promise<void> {
+  private async _handleDiscordMedia(
+    msg: InboundMessage,
+    raw: Message,
+    channelId: string
+  ): Promise<void> {
     if (!this.mediaHandler) return;
-    const caption = msg.content || '';
+    const caption = msg.caption || '';
 
     // Discord voice messages (IsVoiceMessage flag) arrive as a single
     // audio/ogg attachment — transcribe them into plain text when enabled.
-    const isVoiceMessage = msg.flags.has(MessageFlags.IsVoiceMessage);
+    const isVoiceMessage = raw.flags.has(MessageFlags.IsVoiceMessage);
     if (isVoiceMessage && this.mediaHandler.canTranscribe) {
-      await this._handleDiscordVoiceNote(msg, channelId, caption);
+      await this._handleDiscordVoiceNote(msg, raw, channelId, caption);
       return;
     }
 
     try {
       const allBlocks: ContentBlock[] = [];
-      for (const [, attachment] of msg.attachments) {
+      for (const [, attachment] of raw.attachments) {
         const mimeType = attachment.contentType || 'application/octet-stream';
         const ext = attachment.name?.split('.').pop() || 'bin';
         const downloadFn = () => fetchBuffer(attachment.url);
@@ -323,35 +295,35 @@ export class DiscordBot extends BaseBot {
       if (caption) {
         allBlocks.push({ type: 'text', text: caption } as ContentBlock);
       }
-      const preview = caption ? `📷 ${caption.slice(0, 60)}` : `📷 ${msg.attachments.size} file(s)`;
+      const preview = caption ? `📷 ${caption.slice(0, 60)}` : `📷 ${raw.attachments.size} file(s)`;
       log.info(`👤 ${preview}`);
-      const context = await this._replyContext(msg);
+      const context = await this._replyContext(raw);
       this._enqueueUserMessage(
         channelId,
-        msg.id,
+        msg.messageId,
         `${context}${caption || '[📄 file]'}`,
         allBlocks,
         this._senderInfo(msg)
       );
     } catch (err) {
       log.error('Discord media download failed:', errorMessage(err));
-      const channel = this.client.channels.cache.get(channelId) as TextChannel;
-      await channel?.send(`Error downloading media: ${errorMessage(err)}`);
+      await this.transport.send(channelId, `Error downloading media: ${errorMessage(err)}`);
     }
   }
 
   private async _handleDiscordVoiceNote(
-    msg: Message,
+    msg: InboundMessage,
+    raw: Message,
     channelId: string,
     caption: string
   ): Promise<void> {
     const mediaHandler = this.mediaHandler;
     if (!mediaHandler) return;
-    const messageId = msg.id;
+    const messageId = msg.messageId;
     await this._addTranscribingReaction(channelId, messageId);
     try {
       const allBlocks: ContentBlock[] = [];
-      for (const [, attachment] of msg.attachments) {
+      for (const [, attachment] of raw.attachments) {
         const mimeType = attachment.contentType || 'audio/ogg';
         const ext = attachment.name?.split('.').pop() || 'ogg';
         const downloadFn = () => fetchBuffer(attachment.url);
@@ -362,18 +334,20 @@ export class DiscordBot extends BaseBot {
         allBlocks.push({ type: 'text', text: caption } as ContentBlock);
       }
       log.info('👤 🎙️ voice message');
-      const context = await this._replyContext(msg);
+      const context = await this._replyContext(raw);
       this._enqueueUserMessage(
         channelId,
-        msg.id,
+        messageId,
         `${context}${caption || '[voice message]'}`,
         allBlocks,
         this._senderInfo(msg)
       );
     } catch (err) {
       log.error('Discord voice transcription failed:', errorMessage(err));
-      const channel = this.client.channels.cache.get(channelId) as TextChannel;
-      await channel?.send('🎙️ Transcription failed — please resend the voice message.');
+      await this.transport.send(
+        channelId,
+        '🎙️ Transcription failed — please resend the voice message.'
+      );
     } finally {
       await this._clearTranscribingReaction(channelId, messageId);
     }
@@ -387,19 +361,18 @@ export class DiscordBot extends BaseBot {
 
     const cid = String(channelId);
     if (text === '/stop') {
-      const channel = this.client.channels.cache.get(cid) as TextChannel;
       if (!this.busy) {
-        await channel?.send('Nothing to stop.');
+        await this.transport.send(cid, 'Nothing to stop.');
         return true;
       }
       try {
         await this.acp.cancel();
         this.queue = [];
-        await channel?.send('⏹ Stopped.');
+        await this.transport.send(cid, '⏹ Stopped.');
         this._emit('prompt.cancelled', {}, channelId);
         log.info('⏹ stop requested');
       } catch (err) {
-        await channel?.send(`Stop failed: ${(err as Error).message}`);
+        await this.transport.send(cid, `Stop failed: ${(err as Error).message}`);
       }
       return true;
     }
@@ -425,17 +398,19 @@ export class DiscordBot extends BaseBot {
 
   // biome-ignore lint/suspicious/noExplicitAny: SDK permission types are complex
   async _handlePermission(params: any): Promise<any> {
+    const allowOpt = params.options?.find(
+      // biome-ignore lint/suspicious/noExplicitAny: SDK option type
+      (o: any) => o.kind.startsWith('allow')
+    );
+    const autoAllow = () =>
+      allowOpt
+        ? { outcome: { outcome: 'selected', optionId: allowOpt.optionId } }
+        : { outcome: { outcome: 'cancelled' } };
+
     const cmd = (this.agentCmd || '').toLowerCase();
     if (cmd.includes('dangerous') || cmd.includes('bypass') || cmd.includes('yolo')) {
       log.info('⚡ auto-approved');
-      const allowOpt = params.options?.find(
-        // biome-ignore lint/suspicious/noExplicitAny: SDK option type
-        (o: any) => o.kind.startsWith('allow')
-      );
-      if (allowOpt) {
-        return { outcome: { outcome: 'selected', optionId: allowOpt.optionId } };
-      }
-      return { outcome: { outcome: 'cancelled' } };
+      return autoAllow();
     }
 
     if (!params.options || params.options.length === 0) {
@@ -443,75 +418,39 @@ export class DiscordBot extends BaseBot {
     }
 
     const channelId = this.currentChannelId as string | null;
-    if (!channelId) {
-      const allowOpt = params.options?.find(
-        // biome-ignore lint/suspicious/noExplicitAny: SDK option type
-        (o: any) => o.kind.startsWith('allow')
-      );
-      if (allowOpt) {
-        return { outcome: { outcome: 'selected', optionId: allowOpt.optionId } };
-      }
-      return { outcome: { outcome: 'cancelled' } };
-    }
+    if (!channelId) return autoAllow();
 
     const desc = this._formatPermission(params);
     log.info(`🔐 permiso: ${desc.slice(0, 60)}`);
 
-    try {
-      const channel = this.client.channels.cache.get(channelId) as TextChannel;
-      if (!channel) {
-        const allowOpt = params.options?.find(
-          // biome-ignore lint/suspicious/noExplicitAny: SDK option type
-          (o: any) => o.kind.startsWith('allow')
-        );
-        if (allowOpt) return { outcome: { outcome: 'selected', optionId: allowOpt.optionId } };
-        return { outcome: { outcome: 'cancelled' } };
-      }
-
-      const allowOpt = params.options?.find(
-        // biome-ignore lint/suspicious/noExplicitAny: SDK option type
-        (o: any) => o.kind.startsWith('allow')
-      );
-      const rejectOpt = params.options?.find(
-        // biome-ignore lint/suspicious/noExplicitAny: SDK option type
-        (o: any) => o.kind.startsWith('reject')
-      );
-
-      const row = new ActionRowBuilder<ButtonBuilder>();
-      if (allowOpt) {
-        row.addComponents(
-          new ButtonBuilder()
-            .setCustomId(`perm_allow_${allowOpt.optionId}`)
-            .setLabel('Allow')
-            .setStyle(ButtonStyle.Success)
-        );
-      }
-      if (rejectOpt) {
-        row.addComponents(
-          new ButtonBuilder()
-            .setCustomId(`perm_deny_${rejectOpt.optionId}`)
-            .setLabel('Deny')
-            .setStyle(ButtonStyle.Danger)
-        );
-      }
-
-      const content = `Permission required:\n\n${desc}`.slice(0, DISCORD_MAX_LEN);
-      const msg = await channel.send({ content, components: [row] });
-
-      return new Promise<PermissionResponse>((resolve) => {
-        this.permissionPending = { resolve, messageId: msg.id };
+    const rejectOpt = params.options?.find(
+      // biome-ignore lint/suspicious/noExplicitAny: SDK option type
+      (o: any) => o.kind.startsWith('reject')
+    );
+    const buttons: { text: string; callback_data: string; style: 'success' | 'danger' }[] = [];
+    if (allowOpt)
+      buttons.push({
+        text: 'Allow',
+        callback_data: `perm_allow_${allowOpt.optionId}`,
+        style: 'success',
       });
-    } catch (err) {
-      log.error('Discord permission send failed:', (err as Error).message);
-      const allowOpt = params.options?.find(
-        // biome-ignore lint/suspicious/noExplicitAny: SDK option type
-        (o: any) => o.kind.startsWith('allow')
-      );
-      if (allowOpt) {
-        return { outcome: { outcome: 'selected', optionId: allowOpt.optionId } };
-      }
-      return { outcome: { outcome: 'cancelled' } };
+    if (rejectOpt)
+      buttons.push({
+        text: 'Deny',
+        callback_data: `perm_deny_${rejectOpt.optionId}`,
+        style: 'danger',
+      });
+
+    const content = `Permission required:\n\n${desc}`.slice(0, DISCORD_MAX_LEN);
+    const [sendErr, sent] = await this.transport.send(channelId, content, { keyboard: [buttons] });
+    if (sendErr || !sent) {
+      log.error('Discord permission send failed:', sendErr?.message);
+      return autoAllow();
     }
+
+    return new Promise<PermissionResponse>((resolve) => {
+      this.permissionPending = { resolve, messageId: String(sent.messageId) };
+    });
   }
 
   /**
@@ -519,24 +458,23 @@ export class DiscordBot extends BaseBot {
    * operator: DMs are always allowed; guild channels require `user.id` in
    * `allowedUserIds`.
    */
-  private _isOperatorInteraction(interaction: ButtonInteraction): boolean {
-    const type = interaction.channel?.type;
-    if (type === ChannelType.DM || type === ChannelType.GroupDM) return true;
-    const userId = interaction.user?.id;
-    return userId !== undefined && this.allowedUserIds.has(String(userId));
+  private _isOperatorInteraction(cb: InboundCallback): boolean {
+    if (cb.chatType === 'private') return true;
+    return cb.fromId !== undefined && this.allowedUserIds.has(String(cb.fromId));
   }
 
-  private async _onInteraction(interaction: ButtonInteraction): Promise<void> {
-    if (!interaction.isButton()) return;
-    const channelId = interaction.channel?.id;
+  private async _onInteraction(cb: InboundCallback): Promise<void> {
+    const interaction = cb.raw as ButtonInteraction;
+    if (!interaction?.isButton?.()) return;
+    const channelId = cb.chatId ? String(cb.chatId) : undefined;
     if (!channelId || !this._isAllowed(channelId)) return;
 
-    const data = interaction.customId || '';
+    const data = cb.data || '';
     const sensitive = data === 'reconnect' || data.startsWith('perm_');
-    if (sensitive && !this._isOperatorInteraction(interaction)) {
+    if (sensitive && !this._isOperatorInteraction(cb)) {
       await interaction.reply({ content: '⛔ Not authorized', ephemeral: true }).catch(() => {});
       log.warn(
-        `Rejected ${data.split('_')[0]} interaction from user ${interaction.user?.id} in channel ${channelId}`
+        `Rejected ${data.split('_')[0]} interaction from user ${cb.fromId} in channel ${channelId}`
       );
       return;
     }
@@ -559,7 +497,7 @@ export class DiscordBot extends BaseBot {
       return;
     }
     if (data.startsWith('perm_') && this.permissionPending) {
-      if (interaction.message?.id !== this.permissionPending.messageId) {
+      if (String(cb.messageId) !== String(this.permissionPending.messageId)) {
         await interaction
           .reply({ content: '⌛ Permission request expired', ephemeral: true })
           .catch(() => {});
@@ -585,33 +523,19 @@ export class DiscordBot extends BaseBot {
 
   protected _sendTypingIndicator(): void {
     const channelId = this._currentChannel();
-    if (!channelId) return;
-    try {
-      const channel = this.client.channels.cache.get(String(channelId)) as TextChannel;
-      channel?.sendTyping().catch(() => {});
-    } catch {
-      // typing indicator is best-effort
-    }
+    if (!channelId || !this.transport.typing) return;
+    void this.transport.typing(channelId);
   }
 
   async notifyAgentExit(code: number | null): Promise<void> {
     const detail = code !== null ? ` (exit code ${code})` : '';
-    const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder()
-        .setCustomId('reconnect')
-        .setLabel('🔄 Reconnect')
-        .setStyle(ButtonStyle.Primary)
-    );
     for (const channelId of this.allowedChannelIds) {
-      try {
-        const channel = this.client.channels.cache.get(channelId) as TextChannel;
-        await channel?.send({
-          content: `⚠️ Agent process exited${detail} — connection lost.`,
-          components: [row],
-        });
-      } catch (err) {
-        log.error(`Failed to notify channel ${channelId}:`, (err as Error).message);
-      }
+      const [e] = await this.transport.send(
+        channelId,
+        `⚠️ Agent process exited${detail} — connection lost.`,
+        { keyboard: [[{ text: '🔄 Reconnect', callback_data: 'reconnect', style: 'primary' }]] }
+      );
+      if (e) log.error(`Failed to notify channel ${channelId}:`, e.message);
     }
   }
 
@@ -620,12 +544,12 @@ export class DiscordBot extends BaseBot {
     filePath: string,
     caption?: string
   ): Promise<void> {
-    const channel = this.client.channels.cache.get(String(channelId)) as TextChannel;
-    if (!channel) throw new Error(`Channel ${channelId} not found`);
-    await channel.send({
-      files: [filePath],
-      content: caption?.slice(0, DISCORD_MAX_LEN),
-    });
+    if (!this.transport.sendFile) throw new Error('sendFile not supported by transport');
+    this._must(
+      await this.transport.sendFile(channelId, filePath, {
+        caption: caption?.slice(0, DISCORD_MAX_LEN),
+      })
+    );
   }
 
   protected async _sendPlatformMessage(
@@ -633,16 +557,11 @@ export class DiscordBot extends BaseBot {
     text: string,
     replyToId?: number | string
   ): Promise<{ messageId?: number | string }> {
-    const channel = this.client.channels.cache.get(String(channelId)) as TextChannel;
-    const msg = await channel?.send({
-      content: text,
-      ...(replyToId !== undefined
-        ? {
-            reply: { messageReference: String(replyToId), failIfNotExists: false },
-            allowedMentions: { repliedUser: false },
-          }
-        : {}),
-    });
-    return { messageId: msg?.id };
+    const r = this._must(
+      await this.transport.send(channelId, text, {
+        replyToId: replyToId !== undefined ? String(replyToId) : undefined,
+      })
+    );
+    return { messageId: r.messageId };
   }
 }

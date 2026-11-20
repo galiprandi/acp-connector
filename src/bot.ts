@@ -1,5 +1,4 @@
 import type { ContentBlock } from '@agentclientprotocol/sdk';
-import TelegramBot from 'node-telegram-bot-api';
 import type { AcpClient } from './acp-client.js';
 import type { AliasDirectory } from './aliases.js';
 import type { PermissionResponse } from './base-bot.js';
@@ -7,6 +6,13 @@ import { BaseBot } from './base-bot.js';
 import type { SenderInfo } from './identity.js';
 import { errorMessage, log } from './logger.js';
 import { fetchBuffer, type MediaHandler } from './media.js';
+import type {
+  ChatId,
+  InboundCallback,
+  InboundMessage,
+  PlatformTransport,
+  Result,
+} from './transport/types.js';
 import type { WebhookEmitter } from './webhooks.js';
 
 const TG_MAX_LEN = 4096;
@@ -44,11 +50,13 @@ export interface PlatformBot {
   setCommandHandler(fn: ((text: string, chatId: number | string) => Promise<boolean>) | null): void;
   /** Outbound event webhooks — optional, no-op when unset. */
   setWebhooks?(emitter: WebhookEmitter | null): void;
+  /** Transport health for /status — absent when the bot has no transport. */
+  transportHealth?(): { ok: boolean; lastError?: { kind: string; message: string; at: number } };
 }
 
 interface BridgeBotOpts {
   acp: AcpClient;
-  telegramToken: string;
+  transport: PlatformTransport;
   allowedChatIds: number[];
   allowedUserIds?: number[];
   agentCmd: string;
@@ -67,16 +75,19 @@ interface BridgeBotOpts {
   networkSummary?: () => string | null;
 }
 
+/** Telegram rate-limit/parse rejections that deserve a plain-text retry. */
+const isParseError = (msg: string) => msg.includes('parse') || msg.includes('entity');
+
 export class BridgeBot extends BaseBot {
   private allowedChatIds: Set<number>;
   private allowedUserIds: Set<number>;
-  private bot: TelegramBot;
+  private transport: PlatformTransport;
 
   protected readonly maxLen = TG_MAX_LEN;
 
   constructor({
     acp,
-    telegramToken,
+    transport,
     allowedChatIds,
     allowedUserIds = [],
     agentCmd,
@@ -114,54 +125,54 @@ export class BridgeBot extends BaseBot {
     });
     this.allowedChatIds = new Set(allowedChatIds);
     this.allowedUserIds = new Set(allowedUserIds);
-    this.bot = new TelegramBot(telegramToken, { polling: true });
+    this.transport = transport;
+  }
+
+  transportHealth() {
+    return this.transport.health();
+  }
+
+  /** Throw the transport error — keeps BaseBot's try/catch semantics. */
+  private _must<T>(r: Result<T>): T {
+    const [e, data] = r;
+    if (e) throw new Error(`${e.kind}: ${e.message}`);
+    return data;
   }
 
   async start(): Promise<void> {
-    this._setupHandlers();
+    await this.transport.start({
+      onMessage: async (msg) => {
+        try {
+          await this._onMessage(msg);
+        } catch (err) {
+          log.error('Unhandled message error:', errorMessage(err));
+          const [e] = await this.transport.send(msg.chatId, `⚠️ ${errorMessage(err).slice(0, 200)}`);
+          if (e) log.error('Error report failed:', e.message);
+        }
+      },
+      onCallback: (cb) => this._onCallback(cb),
+    });
     // Register the command menu — typing "/" in Telegram shows these
     // with descriptions instead of making users memorize the grammar.
-    try {
-      await this.bot.setMyCommands([
-        { command: 'stop', description: 'Cancel the current task' },
-        { command: 'sessions', description: 'List/switch sessions (new, <n>, rm)' },
-        { command: 'config', description: 'Show or set session options' },
-        { command: 'queue', description: 'List or clear pending prompts' },
-        { command: 'jobs', description: 'Scheduled & manual jobs' },
-        { command: 'time', description: 'Host/config/UTC clocks' },
-        { command: 'status', description: 'Agent state and uptime' },
-        { command: 'help', description: 'Show all commands' },
-      ]);
-    } catch (err) {
-      log.warn(`setMyCommands failed: ${(err as Error).message}`);
-    }
+    const [e] = (await this.transport.registerCommands?.([
+      { command: 'stop', description: 'Cancel the current task' },
+      { command: 'sessions', description: 'List/switch sessions (new, <n>, rm)' },
+      { command: 'config', description: 'Show or set session options' },
+      { command: 'queue', description: 'List or clear pending prompts' },
+      { command: 'jobs', description: 'Scheduled & manual jobs' },
+      { command: 'time', description: 'Host/config/UTC clocks' },
+      { command: 'status', description: 'Agent state and uptime' },
+      { command: 'help', description: 'Show all commands' },
+    ])) ?? [null, undefined];
+    if (e) log.warn(`setMyCommands failed: ${e.message}`);
   }
 
   stop(): void {
-    if (this.bot) this.bot.stopPolling();
+    this.transport.stop();
   }
 
-  private _setupHandlers(): void {
-    this.bot.on('message', (msg) =>
-      this._onMessage(msg).catch(async (err) => {
-        log.error('Unhandled message error:', errorMessage(err));
-        try {
-          await this.bot.sendMessage(msg.chat.id, `⚠️ ${errorMessage(err).slice(0, 200)}`);
-        } catch {
-          // best effort — never crash on error reporting
-        }
-      })
-    );
-    this.bot.on('callback_query', (query) =>
-      this._onCallbackQuery(query).catch((err) =>
-        log.error('Callback query error:', errorMessage(err))
-      )
-    );
-    this.bot.on('polling_error', (err) => log.error('TG polling error:', err.message));
-  }
-
-  private _isAllowed(chatId: number): boolean {
-    return this.allowedChatIds.has(chatId);
+  private _isAllowed(chatId: ChatId): boolean {
+    return this.allowedChatIds.has(Number(chatId));
   }
 
   protected _currentChannel(): string | number | null {
@@ -171,80 +182,57 @@ export class BridgeBot extends BaseBot {
   protected async _sendNewMessage(text: string): Promise<{ messageId: number | string }> {
     const chatId = this._currentChannel() as number;
     if (!chatId) throw new Error('No active chat');
-    try {
-      const sent = await this.bot.sendMessage(chatId, text, { parse_mode: 'Markdown' });
-      return { messageId: sent.message_id };
-    } catch (err) {
-      const msg = (err as Error).message;
-      if (msg.includes('parse') || msg.includes('entity')) {
-        const sent = await this.bot.sendMessage(chatId, text);
-        return { messageId: sent.message_id };
-      }
-      throw err;
+    const [e, r] = await this.transport.send(chatId, text, { parseMode: 'Markdown' });
+    if (!e) return { messageId: r.messageId };
+    if (e.kind === 'api' && isParseError(e.message)) {
+      const r2 = await this.transport.send(chatId, text);
+      return { messageId: this._must(r2).messageId };
     }
+    throw new Error(`${e.kind}: ${e.message}`);
   }
 
   protected async _editMessage(messageId: number | string, text: string): Promise<void> {
     const chatId = this._currentChannel() as number;
     if (!chatId) return;
-    try {
-      await this.bot.editMessageText(text, {
-        chat_id: chatId,
-        message_id: messageId as number,
-        parse_mode: 'Markdown',
-      });
-    } catch (err) {
-      const msg = (err as Error).message;
-      if (msg.includes('parse') || msg.includes('entity')) {
-        await this.bot.editMessageText(text, {
-          chat_id: chatId,
-          message_id: messageId as number,
-        });
-      } else {
-        throw err;
-      }
+    const [e] = await this.transport.edit(chatId, messageId, text, { parseMode: 'Markdown' });
+    if (!e) return;
+    if (e.kind === 'api' && isParseError(e.message)) {
+      const [e2] = await this.transport.edit(chatId, messageId, text);
+      if (e2) throw new Error(`${e2.kind}: ${e2.message}`);
+      return;
     }
+    throw new Error(`${e.kind}: ${e.message}`);
   }
 
   protected async _sendOverflowChunk(chunk: string): Promise<void> {
     const chatId = this._currentChannel() as number;
     if (!chatId) return;
-    try {
-      await this.bot.sendMessage(chatId, chunk, { parse_mode: 'Markdown' });
-    } catch (err) {
-      const msg = (err as Error).message;
-      if (msg.includes('parse') || msg.includes('entity')) {
-        try {
-          await this._sendPlain(chunk);
-        } catch {
-          // ignore
-        }
-      }
+    const [e] = await this.transport.send(chatId, chunk, { parseMode: 'Markdown' });
+    if (e && e.kind === 'api' && isParseError(e.message)) {
+      await this._sendPlain(chunk).catch(() => {});
     }
   }
 
   protected async _sendPlain(text: string, chatId?: string | number): Promise<void> {
     const target = (chatId ?? this._currentChannel()) as number;
     if (!target) return;
-    await this.bot.sendMessage(target, text);
+    this._must(await this.transport.send(target, text));
   }
 
   protected async _addQueuedReaction(
     channelId: string | number,
     messageId: string | number
   ): Promise<void> {
-    await this.bot.setMessageReaction(channelId as number, messageId as number, {
-      reaction: [{ type: 'emoji', emoji: '😴' }],
-    });
+    this._must(await (this.transport.react?.(channelId, messageId, '😴') ?? [null, undefined]));
   }
 
   protected async _clearQueuedReaction(
     channelId: string | number,
     messageId: string | number
   ): Promise<void> {
-    await this.bot.setMessageReaction(channelId as number, messageId as number, {
-      reaction: [],
-    });
+    this._must(
+      await (this.transport.react?.(channelId, messageId, '😴', true) ?? [null, undefined])
+    );
   }
 
   protected async _addTranscribingReaction(
@@ -253,28 +241,26 @@ export class BridgeBot extends BaseBot {
   ): Promise<void> {
     // Telegram only allows a fixed emoji set for reactions — 🤔 signals
     // "processing" (🎧/🎙/👂 are not in the allowed list).
-    await this.bot.setMessageReaction(channelId as number, messageId as number, {
-      reaction: [{ type: 'emoji', emoji: '🤔' }],
-    });
+    this._must(await (this.transport.react?.(channelId, messageId, '🤔') ?? [null, undefined]));
   }
 
   protected async _clearTranscribingReaction(
     channelId: string | number,
     messageId: string | number
   ): Promise<void> {
-    await this.bot.setMessageReaction(channelId as number, messageId as number, {
-      reaction: [],
-    });
+    this._must(
+      await (this.transport.react?.(channelId, messageId, '🤔', true) ?? [null, undefined])
+    );
   }
 
-  private async _onMessage(msg: TelegramBot.Message): Promise<void> {
-    const chatId = msg.chat.id;
+  private async _onMessage(msg: InboundMessage): Promise<void> {
+    const chatId = msg.chatId;
     const text = msg.text || '';
 
     if (!this._isAllowed(chatId)) {
       log.info(`🚫 [${chatId}] ${this._sanitize(text)}`);
       if (this.allowedChatIds.size === 0) {
-        await this.bot.sendMessage(
+        await this.transport.send(
           chatId,
           [
             `Your chat ID is: ${chatId}`,
@@ -290,12 +276,9 @@ export class BridgeBot extends BaseBot {
       return;
     }
 
-    if (
-      !text &&
-      (msg.photo || msg.voice || msg.sticker || msg.document || msg.video || msg.audio)
-    ) {
+    if (!text && msg.media) {
       if (!this.mediaHandler) {
-        await this.bot.sendMessage(chatId, 'Media no soportado');
+        await this.transport.send(chatId, 'Media no soportado');
         return;
       }
       await this._handleMedia(msg, chatId);
@@ -316,7 +299,7 @@ export class BridgeBot extends BaseBot {
 
     this._enqueueUserMessage(
       chatId,
-      msg.message_id,
+      msg.messageId,
       `${this._replyContext(msg)}${text}`,
       undefined,
       this._senderInfo(msg)
@@ -325,116 +308,106 @@ export class BridgeBot extends BaseBot {
 
   /**
    * Sender/chat identity for the prompt prefix and alias directory.
-   * DMs: sender name doubles as chat name; groups: chat.title is the
-   * destination, msg.from is who spoke.
+   * DMs: sender name doubles as chat name; groups: chatTitle is the
+   * destination, sender is who spoke.
    */
-  private _senderInfo(msg: TelegramBot.Message): SenderInfo | undefined {
-    const isGroup = msg.chat.type !== 'private';
-    const from = msg.from;
-    const fullName = [from?.first_name, from?.last_name].filter(Boolean).join(' ').trim();
-    const name = fullName || (from?.username ? `@${from.username}` : '');
+  private _senderInfo(msg: InboundMessage): SenderInfo | undefined {
+    const isGroup = msg.chatType !== 'private';
+    const name = msg.sender?.name || (msg.sender?.username ? `@${msg.sender.username}` : '');
     // No identifiable sender (e.g. channel posts) → no prefix, no alias.
     if (!name) return undefined;
-    return { name, isGroup, chatName: isGroup ? msg.chat.title : undefined };
+    return { name, isGroup, chatName: isGroup ? msg.chatTitle : undefined };
   }
 
-  private _replyContext(msg: TelegramBot.Message): string {
-    const reply = msg.reply_to_message;
-    const quote = (reply?.text || reply?.caption || '').trim();
-    if (!reply || !quote) return '';
-    const author = reply.from?.username ? ` @${reply.from.username}` : '';
-    const snippet = quote.slice(0, 300).replace(/\n/g, ' ');
-    const suffix = quote.length > 300 ? '…' : '';
+  private _replyContext(msg: InboundMessage): string {
+    const reply = msg.replyTo;
+    if (!reply?.text) return '';
+    const author = reply.author ? ` ${reply.author}` : '';
+    const snippet = reply.text.slice(0, 300).replace(/\n/g, ' ');
+    const suffix = reply.text.length > 300 ? '…' : '';
     return `[in reply to${author}: "${snippet}${suffix}"] `;
   }
 
-  private async _handleMedia(msg: TelegramBot.Message, chatId: number): Promise<void> {
-    if (!this.mediaHandler) return;
-
-    let fileId: string | null = null;
-    let mimeType = 'application/octet-stream';
-    let ext = 'bin';
-
-    if (msg.photo && msg.photo.length > 0) {
-      // Use highest resolution
-      const photo = msg.photo[msg.photo.length - 1];
-      fileId = photo.file_id;
-      mimeType = 'image/jpeg';
-      ext = 'jpg';
-    } else if (msg.document) {
-      fileId = msg.document.file_id;
-      mimeType = msg.document.mime_type || 'application/octet-stream';
-      ext = msg.document.file_name?.split('.').pop() || 'bin';
-    } else if (msg.sticker) {
-      fileId = msg.sticker.file_id;
-      mimeType = 'image/webp';
-      ext = 'webp';
-    } else if (msg.voice) {
-      fileId = msg.voice.file_id;
-      mimeType = msg.voice.mime_type || 'audio/ogg';
-      ext = 'ogg';
-    } else if (msg.audio) {
-      fileId = msg.audio.file_id;
-      mimeType = msg.audio.mime_type || 'audio/mpeg';
-      ext = 'mp3';
-    } else if (msg.video) {
-      fileId = msg.video.file_id;
-      mimeType = msg.video.mime_type || 'video/mp4';
-      ext = 'mp4';
+  private _mediaExt(kind: string, fileName?: string): { mimeType: string; ext: string } {
+    switch (kind) {
+      case 'photo':
+        return { mimeType: 'image/jpeg', ext: 'jpg' };
+      case 'sticker':
+        return { mimeType: 'image/webp', ext: 'webp' };
+      case 'voice':
+        return { mimeType: 'audio/ogg', ext: 'ogg' };
+      case 'audio':
+        return { mimeType: 'audio/mpeg', ext: 'mp3' };
+      case 'video':
+        return { mimeType: 'video/mp4', ext: 'mp4' };
+      default:
+        return {
+          mimeType: 'application/octet-stream',
+          ext: fileName?.split('.').pop() || 'bin',
+        };
     }
+  }
 
-    if (!fileId) return;
+  private async _handleMedia(msg: InboundMessage, chatId: ChatId): Promise<void> {
+    const media = msg.media;
+    const mediaHandler = this.mediaHandler;
+    if (!media || !mediaHandler || !this.transport.fileUrl) return;
 
     const caption = msg.caption || '';
+    const { ext } = this._mediaExt(media.kind, media.fileName);
 
     // Voice notes go through transcription when enabled: the agent receives
     // plain text and the audio file is deleted afterwards.
-    if (msg.voice && this.mediaHandler.canTranscribe) {
-      await this._handleVoiceNote(msg, chatId, fileId, mimeType, ext, caption);
+    if (media.kind === 'voice' && mediaHandler.canTranscribe) {
+      await this._handleVoiceNote(msg, chatId, media.fileId, media.mimeType, ext, caption);
       return;
     }
 
+    const [linkErr, link] = await this.transport.fileUrl(media.fileId);
+    if (linkErr || !link) {
+      log.error('Media file link failed:', linkErr?.message);
+      await this.transport.send(chatId, `Error downloading media: ${linkErr?.message}`);
+      return;
+    }
     try {
-      const link = await this.bot.getFileLink(fileId);
-      const downloadFn = () => fetchBuffer(link);
-      const blocks = await this.mediaHandler.processMedia(
-        downloadFn,
-        mimeType,
+      const blocks = await mediaHandler.processMedia(
+        () => fetchBuffer(link),
+        media.mimeType,
         ext,
         caption || undefined
       );
-      const preview = caption ? `📷 ${caption.slice(0, 60)}` : `📷 ${mimeType}`;
+      const preview = caption ? `📷 ${caption.slice(0, 60)}` : `📷 ${media.mimeType}`;
       log.info(`👤 ${preview}`);
       this._enqueueUserMessage(
         chatId,
-        msg.message_id,
+        msg.messageId,
         `${this._replyContext(msg)}${caption || `[📄 file]`}`,
         blocks,
         this._senderInfo(msg)
       );
     } catch (err) {
       log.error('Media download failed:', errorMessage(err));
-      await this.bot.sendMessage(chatId, `Error downloading media: ${errorMessage(err)}`);
+      await this.transport.send(chatId, `Error downloading media: ${errorMessage(err)}`);
     }
   }
 
   private async _handleVoiceNote(
-    msg: TelegramBot.Message,
-    chatId: number,
+    msg: InboundMessage,
+    chatId: ChatId,
     fileId: string,
     mimeType: string,
     ext: string,
     caption: string
   ): Promise<void> {
-    const messageId = msg.message_id;
+    const messageId = msg.messageId;
     const mediaHandler = this.mediaHandler;
-    if (!mediaHandler) return;
+    if (!mediaHandler || !this.transport.fileUrl) return;
     await this._addTranscribingReaction(chatId, messageId).catch(() => {});
     try {
-      const link = await this.bot.getFileLink(fileId);
-      const downloadFn = () => fetchBuffer(link);
+      const [linkErr, link] = await this.transport.fileUrl(fileId);
+      if (linkErr || !link) throw new Error(linkErr?.message || 'no file link');
       const blocks = await mediaHandler.processVoiceNote(
-        downloadFn,
+        () => fetchBuffer(link),
         mimeType,
         ext,
         caption || undefined
@@ -450,7 +423,7 @@ export class BridgeBot extends BaseBot {
       );
     } catch (err) {
       log.error('Voice transcription failed:', errorMessage(err));
-      await this.bot.sendMessage(chatId, '🎙️ Transcription failed — please resend the voice note.');
+      await this.transport.send(chatId, '🎙️ Transcription failed — please resend the voice note.');
     } finally {
       await this._clearTranscribingReaction(chatId, messageId).catch(() => {});
     }
@@ -462,17 +435,17 @@ export class BridgeBot extends BaseBot {
     const cid = chatId as number;
     if (text === '/stop') {
       if (!this.busy) {
-        await this.bot.sendMessage(cid, 'Nothing to stop.');
+        await this.transport.send(cid, 'Nothing to stop.');
         return true;
       }
       try {
         await this.acp.cancel();
         this.queue = [];
-        await this.bot.sendMessage(cid, '⏹ Stopped.');
+        await this.transport.send(cid, '⏹ Stopped.');
         this._emit('prompt.cancelled', {}, cid);
         log.info('⏹ stop requested');
       } catch (err) {
-        await this.bot.sendMessage(cid, `Stop failed: ${(err as Error).message}`);
+        await this.transport.send(cid, `Stop failed: ${(err as Error).message}`);
       }
       return true;
     }
@@ -498,17 +471,19 @@ export class BridgeBot extends BaseBot {
 
   // biome-ignore lint/suspicious/noExplicitAny: SDK permission types are complex
   async _handlePermission(params: any): Promise<any> {
+    const allowOpt = params.options?.find(
+      // biome-ignore lint/suspicious/noExplicitAny: SDK option type
+      (o: any) => o.kind.startsWith('allow')
+    );
+    const autoAllow = () =>
+      allowOpt
+        ? { outcome: { outcome: 'selected', optionId: allowOpt.optionId } }
+        : { outcome: { outcome: 'cancelled' } };
+
     const cmd = (this.agentCmd || '').toLowerCase();
     if (cmd.includes('dangerous') || cmd.includes('bypass') || cmd.includes('yolo')) {
       log.info('⚡ auto-approved');
-      const allowOpt = params.options?.find(
-        // biome-ignore lint/suspicious/noExplicitAny: SDK option type
-        (o: any) => o.kind.startsWith('allow')
-      );
-      if (allowOpt) {
-        return { outcome: { outcome: 'selected', optionId: allowOpt.optionId } };
-      }
-      return { outcome: { outcome: 'cancelled' } };
+      return autoAllow();
     }
 
     if (!params.options || params.options.length === 0) {
@@ -516,53 +491,26 @@ export class BridgeBot extends BaseBot {
     }
 
     const chatId = this.currentChannelId as number | null;
-    if (!chatId) {
-      const allowOpt = params.options?.find(
-        // biome-ignore lint/suspicious/noExplicitAny: SDK option type
-        (o: any) => o.kind.startsWith('allow')
-      );
-      if (allowOpt) {
-        return { outcome: { outcome: 'selected', optionId: allowOpt.optionId } };
-      }
-      return { outcome: { outcome: 'cancelled' } };
-    }
+    if (!chatId) return autoAllow();
 
     const desc = this._formatPermission(params);
     log.info(`🔐 permiso: ${desc.slice(0, 60)}`);
 
-    try {
-      const allowOpt = params.options?.find(
-        // biome-ignore lint/suspicious/noExplicitAny: SDK option type
-        (o: any) => o.kind.startsWith('allow')
-      );
-      const rejectOpt = params.options?.find(
-        // biome-ignore lint/suspicious/noExplicitAny: SDK option type
-        (o: any) => o.kind.startsWith('reject')
-      );
-      const buttons: { text: string; callback_data: string }[] = [];
-      if (allowOpt)
-        buttons.push({ text: 'Allow', callback_data: `perm_allow_${allowOpt.optionId}` });
-      if (rejectOpt)
-        buttons.push({ text: 'Deny', callback_data: `perm_deny_${rejectOpt.optionId}` });
+    const rejectOpt = params.options?.find(
+      // biome-ignore lint/suspicious/noExplicitAny: SDK option type
+      (o: any) => o.kind.startsWith('reject')
+    );
+    const buttons: { text: string; callback_data: string }[] = [];
+    if (allowOpt) buttons.push({ text: 'Allow', callback_data: `perm_allow_${allowOpt.optionId}` });
+    if (rejectOpt) buttons.push({ text: 'Deny', callback_data: `perm_deny_${rejectOpt.optionId}` });
 
-      const text = `Permission required:\n\n${desc}`.slice(0, TG_MAX_LEN);
-      const sent = await this.bot.sendMessage(chatId, text, {
-        reply_markup: { inline_keyboard: [buttons] },
-      });
+    const text = `Permission required:\n\n${desc}`.slice(0, TG_MAX_LEN);
+    const [sendErr, sent] = await this.transport.send(chatId, text, { keyboard: [buttons] });
+    if (sendErr || !sent) return autoAllow();
 
-      return new Promise<PermissionResponse>((resolve) => {
-        this.permissionPending = { resolve, messageId: sent.message_id };
-      });
-    } catch {
-      const allowOpt = params.options?.find(
-        // biome-ignore lint/suspicious/noExplicitAny: SDK option type
-        (o: any) => o.kind.startsWith('allow')
-      );
-      if (allowOpt) {
-        return { outcome: { outcome: 'selected', optionId: allowOpt.optionId } };
-      }
-      return { outcome: { outcome: 'cancelled' } };
-    }
+    return new Promise<PermissionResponse>((resolve) => {
+      this.permissionPending = { resolve, messageId: Number(sent.messageId) };
+    });
   }
 
   /**
@@ -570,60 +518,56 @@ export class BridgeBot extends BaseBot {
    * private chats are always allowed (single human member); group chats require
    * `from.id` in `allowedUserIds`.
    */
-  private _isOperatorCallback(query: TelegramBot.CallbackQuery): boolean {
-    if (query.message?.chat?.type === 'private') return true;
-    const fromId = query.from?.id;
-    return fromId !== undefined && this.allowedUserIds.has(fromId);
+  private _isOperatorCallback(cb: InboundCallback): boolean {
+    if (cb.chatType === 'private') return true;
+    return cb.fromId !== undefined && this.allowedUserIds.has(Number(cb.fromId));
   }
 
-  private async _onCallbackQuery(query: TelegramBot.CallbackQuery): Promise<void> {
-    const chatId = query.message?.chat?.id;
+  private _answer(id: string, text?: string, alert?: boolean): void {
+    if (!this.transport.answerCallback) return;
+    void this.transport.answerCallback(id, text, alert);
+  }
+
+  private async _onCallback(cb: InboundCallback): Promise<void> {
+    const chatId = cb.chatId;
     if (!chatId || !this._isAllowed(chatId)) return;
 
-    const data = query.data || '';
+    const data = cb.data || '';
     const sensitive = data === 'reconnect' || data.startsWith('perm_');
-    if (sensitive && !this._isOperatorCallback(query)) {
-      this.bot.answerCallbackQuery(query.id, {
-        text: '⛔ Not authorized',
-        show_alert: true,
-      });
-      log.warn(
-        `Rejected ${data.split('_')[0]} callback from user ${query.from?.id} in chat ${chatId}`
-      );
+    if (sensitive && !this._isOperatorCallback(cb)) {
+      this._answer(cb.id, '⛔ Not authorized', true);
+      log.warn(`Rejected ${data.split('_')[0]} callback from user ${cb.fromId} in chat ${chatId}`);
       return;
     }
     if (data === 'reconnect') {
-      this.bot.answerCallbackQuery(query.id);
-      try {
-        await this.bot.editMessageText('🔄 Reconnecting agent…', {
-          chat_id: chatId,
-          message_id: query.message?.message_id,
-        });
-      } catch {
-        // ignore
-      }
+      this._answer(cb.id);
+      await this.transport.edit(chatId, cb.messageId as ChatId, '🔄 Reconnecting agent…');
       try {
         await this.acp.restart();
         const sessionNote = this.acp.sessionId
           ? `session \`${this.acp.sessionId}\``
           : 'new session';
-        await this.bot.editMessageText(`✅ Agent reconnected — ${sessionNote}`, {
-          chat_id: chatId,
-          message_id: query.message?.message_id,
-          parse_mode: 'Markdown',
-        });
+        await this.transport.edit(
+          chatId,
+          cb.messageId as ChatId,
+          `✅ Agent reconnected — ${sessionNote}`,
+          {
+            parseMode: 'Markdown',
+          }
+        );
         log.info(`🔄 agent restarted, session: ${this.acp.sessionId}`);
       } catch (err) {
-        await this.bot.editMessageText(`❌ Reconnect failed: ${(err as Error).message}`, {
-          chat_id: chatId,
-          message_id: query.message?.message_id,
-        });
+        await this.transport.edit(
+          chatId,
+          cb.messageId as ChatId,
+          `❌ Reconnect failed: ${(err as Error).message}`
+        );
       }
       return;
     }
     if (data.startsWith('perm_') && this.permissionPending) {
-      if (query.message?.message_id !== this.permissionPending.messageId) {
-        this.bot.answerCallbackQuery(query.id, { text: '⌛ Permission request expired' });
+      if (Number(cb.messageId) !== this.permissionPending.messageId) {
+        this._answer(cb.id, '⌛ Permission request expired');
         return;
       }
       const [, outcome, ...rest] = data.split('_');
@@ -633,44 +577,30 @@ export class BridgeBot extends BaseBot {
       this.permissionPending.resolve(response);
       this.permissionPending = null;
 
-      try {
-        await this.bot.editMessageText(
-          `Permission: ${outcome === 'allow' ? 'Allowed' : 'Denied'}`,
-          {
-            chat_id: chatId,
-            message_id: query.message?.message_id,
-          }
-        );
-      } catch {
-        // ignore
-      }
-
-      this.bot.answerCallbackQuery(query.id);
+      await this.transport.edit(
+        chatId,
+        cb.messageId as ChatId,
+        `Permission: ${outcome === 'allow' ? 'Allowed' : 'Denied'}`
+      );
+      this._answer(cb.id);
     }
   }
 
   protected _sendTypingIndicator(): void {
     const chatId = this._currentChannel() as number;
-    if (!chatId) return;
-    try {
-      this.bot.sendChatAction(chatId, 'typing').catch(() => {});
-    } catch {
-      // typing indicator is best-effort
-    }
+    if (!chatId || !this.transport.typing) return;
+    void this.transport.typing(chatId);
   }
 
   async notifyAgentExit(code: number | null): Promise<void> {
     const detail = code !== null ? ` (exit code ${code})` : '';
     for (const chatId of this.allowedChatIds) {
-      try {
-        await this.bot.sendMessage(chatId, `⚠️ Agent process exited${detail} — connection lost.`, {
-          reply_markup: {
-            inline_keyboard: [[{ text: '🔄 Reconnect', callback_data: 'reconnect' }]],
-          },
-        });
-      } catch (err) {
-        log.error(`Failed to notify chat ${chatId}:`, (err as Error).message);
-      }
+      const [e] = await this.transport.send(
+        chatId,
+        `⚠️ Agent process exited${detail} — connection lost.`,
+        { keyboard: [[{ text: '🔄 Reconnect', callback_data: 'reconnect' }]] }
+      );
+      if (e) log.error(`Failed to notify chat ${chatId}:`, e.message);
     }
   }
 
@@ -679,13 +609,14 @@ export class BridgeBot extends BaseBot {
     filePath: string,
     caption?: string
   ): Promise<void> {
+    if (!this.transport.sendFile) throw new Error('sendFile not supported by transport');
     const ext = filePath.split('.').pop()?.toLowerCase() ?? '';
-    const opts = caption ? { caption: caption.slice(0, TG_CAPTION_MAX) } : {};
-    if (TG_IMAGE_EXTS.has(ext)) {
-      await this.bot.sendPhoto(chatId as number, filePath, opts);
-    } else {
-      await this.bot.sendDocument(chatId as number, filePath, opts);
-    }
+    this._must(
+      await this.transport.sendFile(chatId, filePath, {
+        caption: caption ? caption.slice(0, TG_CAPTION_MAX) : undefined,
+        isImage: TG_IMAGE_EXTS.has(ext),
+      })
+    );
   }
 
   protected async _sendPlatformMessage(
@@ -693,23 +624,16 @@ export class BridgeBot extends BaseBot {
     text: string,
     replyToId?: number | string
   ): Promise<{ messageId?: number | string }> {
-    const replyOpts =
-      replyToId !== undefined
-        ? { reply_to_message_id: Number(replyToId), allow_sending_without_reply: true }
-        : {};
-    try {
-      const sent = await this.bot.sendMessage(chatId as number, text, {
-        parse_mode: 'Markdown',
-        ...replyOpts,
-      });
-      return { messageId: sent.message_id };
-    } catch (err) {
-      const msg = (err as Error).message;
-      if (msg.includes('parse') || msg.includes('entity')) {
-        const sent = await this.bot.sendMessage(chatId as number, text, replyOpts);
-        return { messageId: sent.message_id };
-      }
-      throw err;
+    const opts = replyToId !== undefined ? { replyToId } : {};
+    const [e, r] = await this.transport.send(chatId, text, {
+      parseMode: 'Markdown',
+      ...opts,
+    });
+    if (!e) return { messageId: r.messageId };
+    if (e.kind === 'api' && isParseError(e.message)) {
+      const r2 = await this.transport.send(chatId, text, opts);
+      return { messageId: this._must(r2).messageId };
     }
+    throw new Error(`${e.kind}: ${e.message}`);
   }
 }

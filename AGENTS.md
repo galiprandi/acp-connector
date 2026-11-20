@@ -80,8 +80,20 @@ src/
 ├── base-bot.ts    — BaseBot: shared queue, streaming, commands, sendMessage chunking
 │                    (paragraph/line/word boundaries) + reply threading via
 │                    _sendPlatformMessage primitive implemented per platform
-├── bot.ts         — Telegram bot, PlatformBot interface, _sendPlatformMessage (Markdown + plain fallback)
-├── discord.ts     — Discord bot, implements PlatformBot, _sendPlatformMessage
+├── bot.ts         — Telegram bot, PlatformBot interface, delegates to PlatformTransport
+│                    (Markdown + plain fallback on parse errors)
+├── discord.ts     — Discord bot, implements PlatformBot over PlatformTransport
+├── transport/     — connector contract + implementations
+│   ├── types.ts   — PlatformTransport interface, Result<T> error-first tuples,
+│   │                TransportError kinds (network/rate_limited/api/fatal),
+│   │                InboundMessage/InboundCallback normalized payloads
+│   ├── retry.ts   — withRetry (exponential backoff+jitter, honors retryAfter,
+│   │                no retry on api/fatal) + tryC (throws → Result)
+│   ├── telegram.ts— TelegramTransport over node-telegram-bot-api v2 (bot.api,
+│   │                Bot.catch error boundary, error classification, health)
+│   ├── discord.ts — DiscordTransport: thin adapter over discord.js (which owns
+│   │                gateway reconnect + rate-limit queues), error mapping, health
+│   └── loopback.ts— reference transport (always succeeds) for tests/examples
 ├── media.ts       — MediaHandler: download (fetchBuffer w/ retry), save, convert to ACP ContentBlocks,
 │                    voice-note transcription via processVoiceNote
 ├── transcriber.ts — voice transcription seam: wraps the audio-transcription package (sherpa-onnx
@@ -204,6 +216,10 @@ entirely. Legacy `config.sessionId` migrates into state on first boot.
 - **Agent-agnostic**: no hardcoded agent references anywhere
 - **Config is truth**: user config in `acp-connector.jsonc`; runtime state in `.acp-connector/state.json`
 - **Serialized queue**: one prompt at a time, no concurrent prompts (cap 100)
+- **Transport boundary**: all platform I/O goes through `PlatformTransport`
+  (`src/transport/`) — expected failures return `Result<T>` tuples
+  (classified `network`/`rate_limited`/`api`/`fatal`); bugs still throw.
+  New connectors (Slack, …) implement ~6 methods against the same contract.
 
 ## Testing
 

@@ -1,18 +1,23 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { type DiscordLike, DiscordTransport } from '../src/transport/discord';
 
-// Mock discord.js
-const mockChannel: {
-  send: ReturnType<typeof vi.fn>;
-} = {
+// Mock discord.js (used by the transport for Events/ChannelType/builders)
+const mockChannel = {
   send: vi.fn(async (_content: unknown) => ({ id: '1', edit: vi.fn(async () => ({})) })),
+  sendTyping: vi.fn(async () => {}),
+  messages: {
+    fetch: vi.fn(async () => ({
+      id: '1',
+      edit: vi.fn(async () => ({})),
+      react: vi.fn(async () => ({})),
+      reactions: {
+        cache: { get: vi.fn(() => ({ users: { remove: vi.fn(async () => ({})) } })) },
+      },
+    })),
+  },
 };
 
-const mockClient: {
-  on: ReturnType<typeof vi.fn>;
-  login: ReturnType<typeof vi.fn>;
-  destroy: ReturnType<typeof vi.fn>;
-  channels: { cache: { get: ReturnType<typeof vi.fn> } };
-} = {
+const mockClient = {
   on: vi.fn(),
   login: vi.fn(async () => {}),
   destroy: vi.fn(),
@@ -21,6 +26,7 @@ const mockClient: {
       get: vi.fn(() => mockChannel),
     },
   },
+  user: { id: 'bot-user' },
 };
 
 vi.mock('discord.js', () => ({
@@ -48,9 +54,10 @@ vi.mock('discord.js', () => ({
     setLabel = vi.fn(() => this);
     setStyle = vi.fn(() => this);
   },
-  ButtonStyle: { Success: 3, Danger: 4 },
+  ButtonStyle: { Success: 3, Danger: 4, Primary: 1 },
   ChannelType: { GuildText: 0, DM: 1, GroupDM: 3 },
   MessageFlags: { IsVoiceMessage: 1 << 30 },
+  DiscordAPIError: class DiscordAPIError extends Error {},
 }));
 
 // Mock ACP client
@@ -74,7 +81,7 @@ function createBot(overrides: Partial<ConstructorParameters<typeof DiscordBotCla
   const acp = createMockAcp();
   const bot = new DiscordBotClass({
     acp,
-    token: 'test-token',
+    transport: new DiscordTransport(mockClient as unknown as DiscordLike, 'test-token'),
     allowedChannelIds: ['123'],
     agentCmd: 'acp-agent serve',
     ...overrides,
@@ -121,6 +128,21 @@ function makeInteraction(overrides: Partial<MockInteraction> = {}): MockInteract
   };
 }
 
+/** Invoke the transport's registered MessageCreate listener — exercises
+ * normalization, the bot-author filter, and the error boundary. */
+const dcMessage = async (_bot: unknown, payload: unknown): Promise<void> => {
+  const calls = mockClient.on.mock.calls.filter((c) => c[0] === 'messageCreate');
+  const listener = calls[calls.length - 1]?.[1] as (m: unknown) => Promise<void>;
+  await listener?.(payload);
+};
+
+/** Invoke the transport's registered InteractionCreate listener. */
+const dcInteraction = async (_bot: unknown, payload: unknown): Promise<void> => {
+  const calls = mockClient.on.mock.calls.filter((c) => c[0] === 'interactionCreate');
+  const listener = calls[calls.length - 1]?.[1] as (i: unknown) => Promise<void>;
+  await listener?.(payload);
+};
+
 describe('DiscordBot', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -142,52 +164,37 @@ describe('DiscordBot', () => {
   it('rejects unauthorized channel ID', async () => {
     const { bot } = createBot({ allowedChannelIds: ['123'] });
     await bot.start();
-    const handler = mockClient.on.mock.calls.find((c) => c[0] === 'messageCreate')[1] as (
-      msg: MockMessage
-    ) => Promise<void>;
-    await handler(makeMessage('999', 'hello'));
+    await dcMessage(bot, makeMessage('999', 'hello'));
     expect(mockChannel.send).not.toHaveBeenCalledWith('hello');
   });
 
   it('responds with channel ID in setup mode (empty allowlist)', async () => {
     const { bot } = createBot({ allowedChannelIds: [] });
     await bot.start();
-    const handler = mockClient.on.mock.calls.find((c) => c[0] === 'messageCreate')[1] as (
-      msg: MockMessage
-    ) => Promise<void>;
-    await handler(makeMessage('999', 'hello'));
+    await dcMessage(bot, makeMessage('999', 'hello'));
     expect(mockChannel.send).toHaveBeenCalledWith(
-      expect.stringContaining('Your channel ID is: 999')
+      expect.objectContaining({ content: expect.stringContaining('Your channel ID is: 999') })
     );
   });
 
   it('ignores bot messages', async () => {
     const { bot, acp } = createBot();
     await bot.start();
-    const handler = mockClient.on.mock.calls.find((c) => c[0] === 'messageCreate')[1] as (
-      msg: MockMessage
-    ) => Promise<void>;
-    await handler(makeMessage('123', 'hello', true));
+    await dcMessage(bot, makeMessage('123', 'hello', true));
     expect(acp.prompt).not.toHaveBeenCalled();
   });
 
   it('forwards allowed messages to ACP', async () => {
     const { bot, acp } = createBot();
     await bot.start();
-    const handler = mockClient.on.mock.calls.find((c) => c[0] === 'messageCreate')[1] as (
-      msg: MockMessage
-    ) => Promise<void>;
-    await handler(makeMessage('123', 'hello agent'));
+    await dcMessage(bot, makeMessage('123', 'hello agent'));
     expect(acp.prompt).toHaveBeenCalledWith('hello agent');
   });
 
   it('prefixes guild messages with [Discord/Channel] Sender:', async () => {
     const { bot, acp } = createBot();
     await bot.start();
-    const handler = mockClient.on.mock.calls.find((c) => c[0] === 'messageCreate')[1] as (
-      msg: MockMessage
-    ) => Promise<void>;
-    await handler({
+    await dcMessage(bot, {
       author: { bot: false, displayName: 'Santi', username: 'santi' },
       channel: { id: '123', type: 0, name: 'general', send: mockChannel.send },
       content: 'hola',
@@ -198,10 +205,7 @@ describe('DiscordBot', () => {
   it('prefixes DM messages with [Discord] Sender:', async () => {
     const { bot, acp } = createBot();
     await bot.start();
-    const handler = mockClient.on.mock.calls.find((c) => c[0] === 'messageCreate')[1] as (
-      msg: MockMessage
-    ) => Promise<void>;
-    await handler({
+    await dcMessage(bot, {
       author: { bot: false, displayName: 'Germán', username: 'german' },
       channel: { id: '123', type: 1, send: mockChannel.send },
       content: 'hola',
@@ -212,10 +216,7 @@ describe('DiscordBot', () => {
   it('handles /start and /help commands', async () => {
     const { bot, acp } = createBot();
     await bot.start();
-    const handler = mockClient.on.mock.calls.find((c) => c[0] === 'messageCreate')[1] as (
-      msg: MockMessage
-    ) => Promise<void>;
-    await handler(makeMessage('123', '/help'));
+    await dcMessage(bot, makeMessage('123', '/help'));
     expect(acp.prompt).not.toHaveBeenCalled();
     expect(mockChannel.send).toHaveBeenCalledWith(
       expect.objectContaining({ content: expect.stringContaining('acp-connector') })
@@ -225,10 +226,7 @@ describe('DiscordBot', () => {
   it('ignores empty text', async () => {
     const { bot, acp } = createBot();
     await bot.start();
-    const handler = mockClient.on.mock.calls.find((c) => c[0] === 'messageCreate')[1] as (
-      msg: MockMessage
-    ) => Promise<void>;
-    await handler(makeMessage('123', ''));
+    await dcMessage(bot, makeMessage('123', ''));
     expect(acp.prompt).not.toHaveBeenCalled();
   });
 
@@ -251,16 +249,15 @@ describe('DiscordBot', () => {
       update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: ' world' } },
     });
 
-    const handler = mockClient.on.mock.calls.find((c) => c[0] === 'messageCreate')[1] as (
-      msg: MockMessage
-    ) => Promise<void>;
-    await handler(makeMessage('123', 'hi'));
+    await dcMessage(bot, makeMessage('123', 'hi'));
 
     // Flush stream timer
     await vi.advanceTimersByTimeAsync(800);
     await vi.runAllTimersAsync();
 
-    expect(mockChannel.send).toHaveBeenCalledWith(expect.stringContaining('Hello world'));
+    expect(mockChannel.send).toHaveBeenCalledWith(
+      expect.objectContaining({ content: expect.stringContaining('Hello world') })
+    );
   });
 
   it('handles agent_message (non-chunk)', async () => {
@@ -274,10 +271,7 @@ describe('DiscordBot', () => {
       },
     });
 
-    const handler = mockClient.on.mock.calls.find((c) => c[0] === 'messageCreate')[1] as (
-      msg: MockMessage
-    ) => Promise<void>;
-    await handler(makeMessage('123', 'hi'));
+    await dcMessage(bot, makeMessage('123', 'hi'));
 
     expect(acp.prompt).toHaveBeenCalledWith('hi');
   });
@@ -289,14 +283,11 @@ describe('DiscordBot', () => {
     });
     await bot.start();
 
-    const handler = mockClient.on.mock.calls.find((c) => c[0] === 'messageCreate')[1] as (
-      msg: MockMessage
-    ) => Promise<void>;
-    await handler(makeMessage('123', 'hi'));
+    await dcMessage(bot, makeMessage('123', 'hi'));
 
     await vi.waitFor(() => {
       expect(mockChannel.send).toHaveBeenCalledWith(
-        expect.stringContaining('Error: agent crashed')
+        expect.objectContaining({ content: expect.stringContaining('Error: agent crashed') })
       );
     });
   });
@@ -306,14 +297,11 @@ describe('DiscordBot', () => {
     acp.prompt.mockRejectedValueOnce(new Error('prompt failed'));
     await bot.start();
 
-    const handler = mockClient.on.mock.calls.find((c) => c[0] === 'messageCreate')[1] as (
-      msg: MockMessage
-    ) => Promise<void>;
-    await handler(makeMessage('123', 'hi'));
+    await dcMessage(bot, makeMessage('123', 'hi'));
 
     await vi.waitFor(() => {
       expect(mockChannel.send).toHaveBeenCalledWith(
-        expect.stringContaining('Error: prompt failed')
+        expect.objectContaining({ content: expect.stringContaining('Error: prompt failed') })
       );
     });
   });
@@ -354,10 +342,7 @@ describe('DiscordBot', () => {
         })
     );
 
-    const handler = mockClient.on.mock.calls.find((c) => c[0] === 'messageCreate')[1] as (
-      msg: MockMessage
-    ) => Promise<void>;
-    handler(makeMessage('123', 'hi'));
+    await dcMessage(bot, makeMessage('123', 'hi'));
 
     // Wait for prompt to be called (queue is processing)
     await vi.waitFor(() => expect(acp.prompt).toHaveBeenCalled());
@@ -386,15 +371,12 @@ describe('DiscordBot', () => {
       update: { sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: 'thinking' } },
     });
 
-    const handler = mockClient.on.mock.calls.find((c) => c[0] === 'messageCreate')[1] as (
-      msg: MockMessage
-    ) => Promise<void>;
-    await handler(makeMessage('123', 'hi'));
+    await dcMessage(bot, makeMessage('123', 'hi'));
 
     // Should not have sent 'thinking' — only empty or nothing
     const calls = mockChannel.send.mock.calls;
     for (const call of calls) {
-      expect(call[0]).not.toContain('thinking');
+      expect(String(call[0]?.content ?? call[0])).not.toContain('thinking');
     }
   });
 
@@ -409,15 +391,14 @@ describe('DiscordBot', () => {
       },
     });
 
-    const handler = mockClient.on.mock.calls.find((c) => c[0] === 'messageCreate')[1] as (
-      msg: MockMessage
-    ) => Promise<void>;
-    await handler(makeMessage('123', 'hi'));
+    await dcMessage(bot, makeMessage('123', 'hi'));
 
     await vi.advanceTimersByTimeAsync(800);
     await vi.runAllTimersAsync();
 
-    expect(mockChannel.send).toHaveBeenCalledWith(expect.stringContaining('thinking'));
+    expect(mockChannel.send).toHaveBeenCalledWith(
+      expect.objectContaining({ content: expect.stringContaining('thinking') })
+    );
   });
 
   it('sends stop reason when response is empty', async () => {
@@ -425,13 +406,10 @@ describe('DiscordBot', () => {
     await bot.start();
     acp.nextUpdate = vi.fn(async () => ({ kind: 'stop', stopReason: 'max_tokens' }));
 
-    const handler = mockClient.on.mock.calls.find((c) => c[0] === 'messageCreate')[1] as (
-      msg: MockMessage
-    ) => Promise<void>;
-    await handler(makeMessage('123', 'hi'));
+    await dcMessage(bot, makeMessage('123', 'hi'));
 
     await vi.waitFor(() => {
-      expect(mockChannel.send).toHaveBeenCalledWith('[max_tokens]');
+      expect(mockChannel.send).toHaveBeenCalledWith({ content: '[max_tokens]' });
     });
   });
 
@@ -451,10 +429,7 @@ describe('DiscordBot', () => {
     const onCommand = vi.fn(async () => true);
     const { bot, acp } = createBot({ onCommand });
     await bot.start();
-    const handler = mockClient.on.mock.calls.find((c) => c[0] === 'messageCreate')[1] as (
-      msg: MockMessage
-    ) => Promise<void>;
-    await handler(makeMessage('123', '/custom'));
+    await dcMessage(bot, makeMessage('123', '/custom'));
     expect(onCommand).toHaveBeenCalledWith('/custom', '123');
     expect(acp.prompt).not.toHaveBeenCalled();
   });
@@ -462,11 +437,8 @@ describe('DiscordBot', () => {
   it('/stop when idle responds nothing to stop', async () => {
     const { bot, acp } = createBot();
     await bot.start();
-    const handler = mockClient.on.mock.calls.find((c) => c[0] === 'messageCreate')[1] as (
-      msg: MockMessage
-    ) => Promise<void>;
-    await handler(makeMessage('123', '/stop'));
-    expect(mockChannel.send).toHaveBeenCalledWith('Nothing to stop.');
+    await dcMessage(bot, makeMessage('123', '/stop'));
+    expect(mockChannel.send).toHaveBeenCalledWith({ content: 'Nothing to stop.' });
     expect(acp.cancel).not.toHaveBeenCalled();
   });
 
@@ -474,29 +446,23 @@ describe('DiscordBot', () => {
     const { bot, acp } = createBot();
     await bot.start();
     acp.nextUpdate.mockReturnValue(new Promise(() => {}));
-    const handler = mockClient.on.mock.calls.find((c) => c[0] === 'messageCreate')[1] as (
-      msg: MockMessage
-    ) => Promise<void>;
-    await handler(makeMessage('123', 'long task'));
+    await dcMessage(bot, makeMessage('123', 'long task'));
     await vi.waitFor(() => expect(bot.busy).toBe(true));
-    await handler(makeMessage('123', '/stop'));
+    await dcMessage(bot, makeMessage('123', '/stop'));
     expect(acp.cancel).toHaveBeenCalled();
-    expect(mockChannel.send).toHaveBeenCalledWith('⏹ Stopped.');
+    expect(mockChannel.send).toHaveBeenCalledWith({ content: '⏹ Stopped.' });
   });
 
   it('/stop clears the queue', async () => {
     const { bot, acp } = createBot();
     await bot.start();
     acp.nextUpdate.mockReturnValue(new Promise(() => {}));
-    const handler = mockClient.on.mock.calls.find((c) => c[0] === 'messageCreate')[1] as (
-      msg: MockMessage
-    ) => Promise<void>;
-    await handler(makeMessage('123', 'first'));
+    await dcMessage(bot, makeMessage('123', 'first'));
     await vi.waitFor(() => expect(bot.busy).toBe(true));
-    await handler(makeMessage('123', 'second'));
-    await handler(makeMessage('123', 'third'));
+    await dcMessage(bot, makeMessage('123', 'second'));
+    await dcMessage(bot, makeMessage('123', 'third'));
     expect(bot.queue.length).toBe(2);
-    await handler(makeMessage('123', '/stop'));
+    await dcMessage(bot, makeMessage('123', '/stop'));
     expect(bot.queue.length).toBe(0);
   });
 
@@ -549,14 +515,11 @@ describe('DiscordBot', () => {
     const resolve = vi.fn();
     // biome-ignore lint/suspicious/noExplicitAny: protected member under test
     (bot as any).permissionPending = { resolve, messageId: 'm1' };
-    const handler = mockClient.on.mock.calls.find((c) => c[0] === 'interactionCreate')[1] as (
-      i: MockInteraction
-    ) => Promise<void>;
     const interaction = makeInteraction({
       channel: { id: '123', type: 0 },
       user: { id: 'u2' },
     });
-    await handler(interaction);
+    await dcInteraction(bot, interaction);
     expect(resolve).not.toHaveBeenCalled();
     expect(interaction.reply).toHaveBeenCalledWith(expect.objectContaining({ ephemeral: true }));
   });
@@ -567,11 +530,8 @@ describe('DiscordBot', () => {
     const resolve = vi.fn();
     // biome-ignore lint/suspicious/noExplicitAny: protected member under test
     (bot as any).permissionPending = { resolve, messageId: 'm1' };
-    const handler = mockClient.on.mock.calls.find((c) => c[0] === 'interactionCreate')[1] as (
-      i: MockInteraction
-    ) => Promise<void>;
     const interaction = makeInteraction({ channel: { id: '123', type: 0 } });
-    await handler(interaction);
+    await dcInteraction(bot, interaction);
     expect(resolve).not.toHaveBeenCalled();
   });
 
@@ -581,11 +541,8 @@ describe('DiscordBot', () => {
     const resolve = vi.fn();
     // biome-ignore lint/suspicious/noExplicitAny: protected member under test
     (bot as any).permissionPending = { resolve, messageId: 'm1' };
-    const handler = mockClient.on.mock.calls.find((c) => c[0] === 'interactionCreate')[1] as (
-      i: MockInteraction
-    ) => Promise<void>;
     const interaction = makeInteraction({ channel: { id: '123', type: 0 } });
-    await handler(interaction);
+    await dcInteraction(bot, interaction);
     expect(resolve).toHaveBeenCalledWith({
       outcome: { outcome: 'selected', optionId: 'opt1' },
     });
@@ -600,10 +557,7 @@ describe('DiscordBot', () => {
     const resolve = vi.fn();
     // biome-ignore lint/suspicious/noExplicitAny: protected member under test
     (bot as any).permissionPending = { resolve, messageId: 'm1' };
-    const handler = mockClient.on.mock.calls.find((c) => c[0] === 'interactionCreate')[1] as (
-      i: MockInteraction
-    ) => Promise<void>;
-    await handler(makeInteraction());
+    await dcInteraction(bot, makeInteraction());
     expect(resolve).toHaveBeenCalled();
   });
 
@@ -613,11 +567,8 @@ describe('DiscordBot', () => {
     const resolve = vi.fn();
     // biome-ignore lint/suspicious/noExplicitAny: protected member under test
     (bot as any).permissionPending = { resolve, messageId: 'm1' };
-    const handler = mockClient.on.mock.calls.find((c) => c[0] === 'interactionCreate')[1] as (
-      i: MockInteraction
-    ) => Promise<void>;
     const interaction = makeInteraction({ message: { id: 'old-msg' } });
-    await handler(interaction);
+    await dcInteraction(bot, interaction);
     expect(resolve).not.toHaveBeenCalled();
     expect(interaction.reply).toHaveBeenCalledWith(
       expect.objectContaining({ content: '⌛ Permission request expired', ephemeral: true })
@@ -630,12 +581,9 @@ describe('DiscordBot', () => {
     const { bot } = createBot();
     await bot.start();
     mockChannel.send.mockRejectedValueOnce(new Error('boom'));
-    const handler = mockClient.on.mock.calls.find((c) => c[0] === 'messageCreate')[1] as (
-      msg: MockMessage
-    ) => Promise<void>;
-    await handler(makeMessage('123', '/sessions'));
+    await dcMessage(bot, makeMessage('123', '/sessions'));
     const report = mockChannel.send.mock.calls.find(
-      (c) => typeof c[0] === 'string' && c[0].includes('⚠️')
+      (c) => typeof c[0]?.content === 'string' && c[0].content.includes('⚠️')
     );
     expect(report).toBeDefined();
   });
@@ -660,13 +608,10 @@ describe('DiscordBot', () => {
     });
     const { bot, acp } = createBot({ mediaHandler });
     await bot.start();
-    const handler = mockClient.on.mock.calls.find((c) => c[0] === 'messageCreate')[1] as (
-      msg: unknown
-    ) => Promise<void>;
     const attachments = new Map([
       ['a1', { contentType: 'audio/ogg', name: 'voice.ogg', url: 'https://cdn.example/v.ogg' }],
     ]);
-    await handler({
+    await dcMessage(bot, {
       ...makeMessage('123', ''),
       id: 'm-voice',
       flags: { has: (f: number) => f === 1 << 30 },
