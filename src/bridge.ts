@@ -22,6 +22,8 @@ import { MediaHandler } from './media.js';
 import { AuditLog, NetworkStore } from './network.js';
 import { migrateLegacyState, StateStore } from './state.js';
 import { createTranscriber, deleteAfterTranscribe } from './transcriber.js';
+import { createDiscordTransport } from './transport/discord.js';
+import { createTelegramTransport } from './transport/telegram.js';
 import { WebhookEmitter } from './webhooks.js';
 
 function printBanner(): void {
@@ -239,7 +241,7 @@ export async function run(): Promise<void> {
   if (tg) {
     const bot = new BridgeBot({
       acp,
-      telegramToken: tg.token,
+      transport: createTelegramTransport(tg.token),
       allowedChatIds: tg.allowedChatIds,
       allowedUserIds: tg.allowedUserIds ?? [],
       agentCmd: config.agentCmd,
@@ -261,7 +263,7 @@ export async function run(): Promise<void> {
   if (dc) {
     const bot = new DiscordBot({
       acp,
-      token: dc.token,
+      transport: createDiscordTransport(dc.token),
       allowedChannelIds: dc.allowedChannelIds.map(String),
       allowedUserIds: dc.allowedUserIds ?? [],
       agentCmd: config.agentCmd,

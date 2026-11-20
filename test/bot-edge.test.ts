@@ -1,34 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AcpClient } from '../src/acp-client';
+import { createMockTransport, tgCallback, tgMessage } from './helpers/mock-transport';
 
 type MockFn = ReturnType<typeof vi.fn>;
 
-interface MockBot {
-  on: MockFn;
-  sendMessage: MockFn;
-  editMessageText: MockFn;
-  answerCallbackQuery: MockFn;
-  stopPolling: MockFn;
-}
-
-// Mock node-telegram-bot-api
-const mockBot: MockBot = {
-  on: vi.fn(),
-  sendMessage: vi.fn(async () => ({ message_id: 1 })),
-  editMessageText: vi.fn(async () => ({})),
-  answerCallbackQuery: vi.fn(async () => ({})),
-  stopPolling: vi.fn(),
-};
-
-vi.mock('node-telegram-bot-api', () => ({
-  default: class MockTelegramBot {
-    on = mockBot.on;
-    sendMessage = mockBot.sendMessage;
-    editMessageText = mockBot.editMessageText;
-    answerCallbackQuery = mockBot.answerCallbackQuery;
-    stopPolling = mockBot.stopPolling;
-  },
-}));
+const mockT = createMockTransport();
 
 interface MockAcpUpdate {
   kind: string;
@@ -68,7 +44,7 @@ function createBot(overrides: BotOverrides = {}) {
   const acp = createMockAcp();
   const bot = new BridgeBot({
     acp: acp as unknown as AcpClient,
-    telegramToken: 'test-token',
+    transport: mockT,
     allowedChatIds: [123],
     agentCmd: 'acp-agent serve',
     ...overrides,
@@ -77,13 +53,11 @@ function createBot(overrides: BotOverrides = {}) {
 }
 
 async function sendMessage(_bot: unknown, msg: Record<string, unknown>): Promise<void> {
-  const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
-  await handler(msg);
+  await tgMessage(mockT, msg);
 }
 
 async function sendCallbackQuery(_bot: unknown, query: Record<string, unknown>): Promise<void> {
-  const handler = mockBot.on.mock.calls.find((c) => c[0] === 'callback_query')[1];
-  await handler(query);
+  await tgCallback(mockT, query);
 }
 
 describe('BridgeBot edge cases', () => {
@@ -115,7 +89,7 @@ describe('BridgeBot edge cases', () => {
     await sendMessage(bot, { chat: { id: 123 }, text: 'hi' });
     await vi.advanceTimersByTimeAsync(3000);
     // Should send initial message + overflow chunk(s)
-    const sendCalls = mockBot.sendMessage.mock.calls.filter(
+    const sendCalls = mockT.send.mock.calls.filter(
       (c) => c[0] === 123 && !c[1]?.includes('solo texto')
     );
     expect(sendCalls.length).toBeGreaterThanOrEqual(2);
@@ -129,15 +103,15 @@ describe('BridgeBot edge cases', () => {
       content: [{ type: 'text', text: 'valid text' }],
     });
     // First sendMessage (initial) throws markdown error, retry without parse_mode
-    mockBot.sendMessage.mockImplementationOnce(async () => {
+    mockT.send.mockImplementationOnce(async () => {
       const err = new Error("can't parse entities: unmatched brackets");
       throw err;
     });
-    mockBot.sendMessage.mockImplementationOnce(async () => ({ message_id: 1 }));
+    mockT.send.mockImplementationOnce(async () => ({ message_id: 1 }));
     await sendMessage(bot, { chat: { id: 123 }, text: 'hi' });
     await vi.advanceTimersByTimeAsync(2000);
     // Should have retried without markdown
-    const calls = mockBot.sendMessage.mock.calls;
+    const calls = mockT.send.mock.calls;
     const hasPlainRetry = calls.some((c) => c[2] === undefined || !c[2]?.parse_mode);
     expect(hasPlainRetry).toBe(true);
   });
@@ -210,28 +184,28 @@ describe('BridgeBot edge cases', () => {
     const { bot } = createBot();
     await bot.start();
     await sendMessage(bot, { chat: { id: 123 }, photo: [{ file_id: 'x' }] });
-    expect(mockBot.sendMessage).toHaveBeenCalledWith(123, 'Media no soportado');
+    expect(mockT.send).toHaveBeenCalledWith(123, 'Media no soportado');
   });
 
   it('rejects voice messages', async () => {
     const { bot } = createBot();
     await bot.start();
     await sendMessage(bot, { chat: { id: 123 }, voice: { file_id: 'x' } });
-    expect(mockBot.sendMessage).toHaveBeenCalledWith(123, 'Media no soportado');
+    expect(mockT.send).toHaveBeenCalledWith(123, 'Media no soportado');
   });
 
   it('rejects sticker messages', async () => {
     const { bot } = createBot();
     await bot.start();
     await sendMessage(bot, { chat: { id: 123 }, sticker: { file_id: 'x' } });
-    expect(mockBot.sendMessage).toHaveBeenCalledWith(123, 'Media no soportado');
+    expect(mockT.send).toHaveBeenCalledWith(123, 'Media no soportado');
   });
 
   it('rejects document messages', async () => {
     const { bot } = createBot();
     await bot.start();
     await sendMessage(bot, { chat: { id: 123 }, document: { file_id: 'x' } });
-    expect(mockBot.sendMessage).toHaveBeenCalledWith(123, 'Media no soportado');
+    expect(mockT.send).toHaveBeenCalledWith(123, 'Media no soportado');
   });
 
   it('rejects unauthorized chat', async () => {
@@ -246,18 +220,15 @@ describe('BridgeBot edge cases', () => {
     await bot.start();
     await sendMessage(bot, { chat: { id: 123 }, text: 'hi' });
     // In setup mode, should send setup instructions
-    expect(mockBot.sendMessage).toHaveBeenCalledWith(
-      123,
-      expect.stringContaining('allowedChatIds')
-    );
+    expect(mockT.send).toHaveBeenCalledWith(123, expect.stringContaining('allowedChatIds'));
   });
 
   it('handles /start from enqueuePrompt (HTTP path)', async () => {
     const { bot } = createBot();
     await bot.start();
     await bot.enqueuePrompt('/start', 123);
-    expect(mockBot.sendMessage).toHaveBeenCalled();
-    const lastCall = mockBot.sendMessage.mock.calls[mockBot.sendMessage.mock.calls.length - 1];
+    expect(mockT.send).toHaveBeenCalled();
+    const lastCall = mockT.send.mock.calls[mockT.send.mock.calls.length - 1];
     expect(lastCall[1]).toContain('acp-connector');
   });
 
@@ -265,8 +236,8 @@ describe('BridgeBot edge cases', () => {
     const { bot } = createBot();
     await bot.start();
     await bot.enqueuePrompt('/help', 123);
-    expect(mockBot.sendMessage).toHaveBeenCalled();
-    const lastCall = mockBot.sendMessage.mock.calls[mockBot.sendMessage.mock.calls.length - 1];
+    expect(mockT.send).toHaveBeenCalled();
+    const lastCall = mockT.send.mock.calls[mockT.send.mock.calls.length - 1];
     expect(lastCall[1]).toContain('acp-connector');
   });
 
@@ -284,7 +255,7 @@ describe('BridgeBot edge cases', () => {
     acp.nextUpdate.mockRejectedValueOnce(new Error('agent crashed'));
     await sendMessage(bot, { chat: { id: 123 }, text: 'hi' });
     await vi.advanceTimersByTimeAsync(1000);
-    expect(mockBot.sendMessage).toHaveBeenCalledWith(123, expect.stringContaining('Error'));
+    expect(mockT.send).toHaveBeenCalledWith(123, expect.stringContaining('Error'));
   });
 
   it('handles stream with only stop (no content)', async () => {
@@ -307,7 +278,7 @@ describe('BridgeBot edge cases', () => {
     await sendMessage(bot, { chat: { id: 123 }, text: 'hi' });
     await vi.advanceTimersByTimeAsync(2000);
     // The thought should be in the output
-    const calls = mockBot.sendMessage.mock.calls.concat(mockBot.editMessageText.mock.calls);
+    const calls = mockT.send.mock.calls.concat(mockT.edit.mock.calls);
     const allText = calls.map((c) => c[1] || '').join(' ');
     expect(allText).toContain('thinking');
   });
@@ -325,7 +296,7 @@ describe('BridgeBot edge cases', () => {
     });
     await sendMessage(bot, { chat: { id: 123 }, text: 'hi' });
     await vi.advanceTimersByTimeAsync(2000);
-    const calls = mockBot.sendMessage.mock.calls.concat(mockBot.editMessageText.mock.calls);
+    const calls = mockT.send.mock.calls.concat(mockT.edit.mock.calls);
     const allText = calls.map((c) => c[1] || '').join(' ');
     expect(allText).not.toContain('thinking');
   });

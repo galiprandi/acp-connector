@@ -3,39 +3,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AcpClient } from '../src/acp-client';
 import type { Transcriber } from '../src/transcriber';
 
-type MockFn = ReturnType<typeof vi.fn>;
+import { createMockTransport, tgMessage } from './helpers/mock-transport';
 
-interface MockBot {
-  on: MockFn;
-  sendMessage: MockFn;
-  editMessageText: MockFn;
-  answerCallbackQuery: MockFn;
-  stopPolling: MockFn;
-  getFileLink: MockFn;
-  setMessageReaction: MockFn;
-}
-
-const mockBot: MockBot = {
-  on: vi.fn(),
-  sendMessage: vi.fn(async () => ({ message_id: 1 })),
-  editMessageText: vi.fn(async () => ({})),
-  answerCallbackQuery: vi.fn(async () => ({})),
-  stopPolling: vi.fn(),
-  getFileLink: vi.fn(async () => 'https://example.com/voice.ogg'),
-  setMessageReaction: vi.fn(async () => ({})),
-};
-
-vi.mock('node-telegram-bot-api', () => ({
-  default: class MockTelegramBot {
-    on = mockBot.on;
-    sendMessage = mockBot.sendMessage;
-    editMessageText = mockBot.editMessageText;
-    answerCallbackQuery = mockBot.answerCallbackQuery;
-    stopPolling = mockBot.stopPolling;
-    getFileLink = mockBot.getFileLink;
-    setMessageReaction = mockBot.setMessageReaction;
-  },
-}));
+const mockT = createMockTransport();
 
 vi.stubGlobal(
   'fetch',
@@ -81,7 +51,7 @@ function createBot(transcriber: Transcriber | null, opts: BotOverrides = {}) {
   });
   const bot = new BridgeBot({
     acp: acp as unknown as AcpClient,
-    telegramToken: 'test-token',
+    transport: mockT,
     allowedChatIds: [123],
     agentCmd: 'acp-agent serve',
     mediaHandler,
@@ -196,23 +166,21 @@ describe('BridgeBot voice note handling', () => {
     const transcriber: Transcriber = { transcribe: vi.fn(async () => 'el transcript del audio') };
     const { bot, acp } = createBot(transcriber);
     await bot.start();
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
-    await handler(voiceMsg);
+    await tgMessage(mockT, voiceMsg);
     await vi.waitFor(() => expect(acp.prompt).toHaveBeenCalled());
     const promptArg = acp.prompt.mock.calls[0][0];
     expect(promptArg[0]).toMatchObject({ type: 'text', text: 'el transcript del audio' });
     // caption rides along as a second text block
     expect(promptArg[1]).toMatchObject({ type: 'text', text: 'dime algo' });
     // 🎧-equivalent reaction lifecycle (🤔 on Telegram)
-    expect(mockBot.setMessageReaction).toHaveBeenCalled();
+    expect(mockT.react).toHaveBeenCalled();
     expect(savedFiles()).toHaveLength(0);
   });
 
   it('keeps legacy resource_link path when transcription is disabled', async () => {
     const { bot, acp } = createBot(null);
     await bot.start();
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
-    await handler(voiceMsg);
+    await tgMessage(mockT, voiceMsg);
     await vi.waitFor(() => expect(acp.prompt).toHaveBeenCalled());
     const promptArg = acp.prompt.mock.calls[0][0];
     expect(promptArg[0].type).toBe('resource_link');
@@ -226,13 +194,9 @@ describe('BridgeBot voice note handling', () => {
     };
     const { bot, acp } = createBot(transcriber);
     await bot.start();
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
-    await handler(voiceMsg);
+    await tgMessage(mockT, voiceMsg);
     await vi.waitFor(() =>
-      expect(mockBot.sendMessage).toHaveBeenCalledWith(
-        123,
-        expect.stringContaining('Transcription failed')
-      )
+      expect(mockT.send).toHaveBeenCalledWith(123, expect.stringContaining('Transcription failed'))
     );
     expect(acp.prompt).not.toHaveBeenCalled();
     expect(savedFiles()).toHaveLength(0);

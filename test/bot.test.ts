@@ -1,49 +1,36 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AcpClient } from '../src/acp-client';
+import { normalizeCallback, normalizeMessage } from '../src/transport/telegram';
+import type { Result, TransportEventHandlers } from '../src/transport/types';
 
 type MockFn = ReturnType<typeof vi.fn>;
 
-interface MockBot {
-  on: MockFn;
-  sendMessage: MockFn;
-  editMessageText: MockFn;
-  answerCallbackQuery: MockFn;
-  sendChatAction: MockFn;
-  setMessageReaction: MockFn;
-  sendDocument: MockFn;
-  sendPhoto: MockFn;
-  setMyCommands: MockFn;
-  stopPolling: MockFn;
-}
-
-// Mock node-telegram-bot-api
-const mockBot: MockBot = {
-  on: vi.fn(),
-  sendMessage: vi.fn(async () => ({ message_id: 1 })),
-  editMessageText: vi.fn(async () => ({})),
-  answerCallbackQuery: vi.fn(async () => ({})),
-  sendChatAction: vi.fn(async () => ({})),
-  setMessageReaction: vi.fn(async () => true),
-  sendDocument: vi.fn(async () => ({ message_id: 2 })),
-  sendPhoto: vi.fn(async () => ({ message_id: 3 })),
-  setMyCommands: vi.fn(async () => true),
-  stopPolling: vi.fn(),
+// PlatformTransport mock — records calls, captures inbound handlers, and
+// resolves Results instead of throwing (the transport contract).
+const mockT = {
+  platform: 'telegram',
+  handlers: null as TransportEventHandlers | null,
+  start: vi.fn(async (h: TransportEventHandlers) => {
+    mockT.handlers = h;
+  }),
+  stop: vi.fn(),
+  send: vi.fn(async (): Promise<Result<{ messageId: number }>> => [null, { messageId: 1 }]),
+  edit: vi.fn(async (): Promise<Result<void>> => [null, undefined]),
+  react: vi.fn(async (): Promise<Result<void>> => [null, undefined]),
+  answerCallback: vi.fn(async (): Promise<Result<void>> => [null, undefined]),
+  typing: vi.fn(async (): Promise<Result<void>> => [null, undefined]),
+  fileUrl: vi.fn(async (): Promise<Result<string>> => [null, 'https://files/test']),
+  sendFile: vi.fn(async (): Promise<Result<void>> => [null, undefined]),
+  registerCommands: vi.fn(async (): Promise<Result<void>> => [null, undefined]),
+  health: vi.fn(() => ({ ok: true })),
 };
 
-vi.mock('node-telegram-bot-api', () => ({
-  default: class MockTelegramBot {
-    on = mockBot.on;
-    sendMessage = mockBot.sendMessage;
-    editMessageText = mockBot.editMessageText;
-    answerCallbackQuery = mockBot.answerCallbackQuery;
-    sendChatAction = mockBot.sendChatAction;
-    setMessageReaction = mockBot.setMessageReaction;
-    sendDocument = mockBot.sendDocument;
-    sendPhoto = mockBot.sendPhoto;
-    setMyCommands = mockBot.setMyCommands;
-    stopPolling = mockBot.stopPolling;
-  },
-}));
+// Feed raw Bot API payloads through the real transport normalizers so
+// tests exercise the same InboundMessage shape production produces.
+// biome-ignore lint/suspicious/noExplicitAny: test payloads are partial Bot API objects
+const onMessage = (raw: any) => mockT.handlers?.onMessage(normalizeMessage(raw));
+// biome-ignore lint/suspicious/noExplicitAny: test payloads are partial Bot API objects
+const onCallback = (raw: any) => mockT.handlers?.onCallback?.(normalizeCallback(raw));
 
 interface MockAcpUpdate {
   kind: string;
@@ -149,7 +136,7 @@ function createBot(overrides: BotOverrides = {}) {
   const acp = createMockAcp();
   const bot = new BridgeBot({
     acp: acp as unknown as AcpClient,
-    telegramToken: 'test-token',
+    transport: mockT,
     allowedChatIds: [123],
     agentCmd: 'acp-agent serve',
     ...overrides,
@@ -170,42 +157,40 @@ describe('BridgeBot', () => {
   it('starts and sets up handlers', async () => {
     const { bot } = createBot();
     await bot.start();
-    expect(mockBot.on).toHaveBeenCalledWith('message', expect.any(Function));
-    expect(mockBot.on).toHaveBeenCalledWith('callback_query', expect.any(Function));
+    expect(mockT.start).toHaveBeenCalled();
+    expect(mockT.handlers?.onMessage).toBeTypeOf('function');
+    expect(mockT.handlers?.onCallback).toBeTypeOf('function');
   });
 
   it('rejects unauthorized chat ID', async () => {
     const { bot } = createBot({ allowedChatIds: [123] });
     await bot.start();
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    const handler = onMessage;
     await handler({ chat: { id: 999 }, text: 'hello' });
-    expect(mockBot.sendMessage).not.toHaveBeenCalledWith(999, expect.anything());
+    expect(mockT.send).not.toHaveBeenCalledWith(999, expect.anything());
   });
 
   it('responds with chat ID in setup mode (empty allowlist)', async () => {
     const { bot } = createBot({ allowedChatIds: [] });
     await bot.start();
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    const handler = onMessage;
     await handler({ chat: { id: 999 }, text: 'hello' });
-    expect(mockBot.sendMessage).toHaveBeenCalledWith(
-      999,
-      expect.stringContaining('Your chat ID is: 999')
-    );
+    expect(mockT.send).toHaveBeenCalledWith(999, expect.stringContaining('Your chat ID is: 999'));
   });
 
   it('rejects non-text messages', async () => {
     const { bot, acp } = createBot();
     await bot.start();
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    const handler = onMessage;
     await handler({ chat: { id: 123 }, photo: [{ file_id: 'x' }] });
-    expect(mockBot.sendMessage).toHaveBeenCalledWith(123, 'Media no soportado');
+    expect(mockT.send).toHaveBeenCalledWith(123, 'Media no soportado');
     expect(acp.prompt).not.toHaveBeenCalled();
   });
 
   it('queues and forwards text to ACP', async () => {
     const { bot, acp } = createBot();
     await bot.start();
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    const handler = onMessage;
     await handler({ chat: { id: 123 }, text: 'hello agent' });
     await vi.advanceTimersByTimeAsync(1000);
     expect(acp.prompt).toHaveBeenCalledWith('hello agent');
@@ -214,7 +199,7 @@ describe('BridgeBot', () => {
   it('prefixes DM prompts with [Telegram] SenderName:', async () => {
     const { bot, acp } = createBot();
     await bot.start();
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    const handler = onMessage;
     await handler({
       chat: { id: 123, type: 'private' },
       from: { id: 42, first_name: 'Germán', last_name: 'Aliprandi' },
@@ -227,7 +212,7 @@ describe('BridgeBot', () => {
   it('prefixes group prompts with [Telegram/Chat] Sender: keeping sender vs destination', async () => {
     const { bot, acp } = createBot({ allowedChatIds: [-100] });
     await bot.start();
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    const handler = onMessage;
     await handler({
       chat: { id: -100, type: 'supergroup', title: 'Familia' },
       from: { id: 7, first_name: 'Santi' },
@@ -242,7 +227,7 @@ describe('BridgeBot', () => {
     const aliases = new AliasDirectory();
     const { bot } = createBot({ aliases, allowedChatIds: [-100, 123] });
     await bot.start();
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    const handler = onMessage;
     await handler({
       chat: { id: -100, type: 'supergroup', title: 'Familia' },
       from: { id: 7, first_name: 'Santi' },
@@ -258,13 +243,17 @@ describe('BridgeBot', () => {
   it('sendFile delivers documents and photos to the given chat', async () => {
     const { bot } = createBot();
     await bot.sendFile(123, '/tmp/report.pdf', 'quarterly');
-    expect(mockBot.sendDocument).toHaveBeenCalledWith(
+    expect(mockT.sendFile).toHaveBeenCalledWith(
       123,
       '/tmp/report.pdf',
-      expect.objectContaining({ caption: 'quarterly' })
+      expect.objectContaining({ caption: 'quarterly', isImage: false })
     );
     await bot.sendFile(123, '/tmp/pic.png');
-    expect(mockBot.sendPhoto).toHaveBeenCalledWith(123, '/tmp/pic.png', {});
+    expect(mockT.sendFile).toHaveBeenCalledWith(
+      123,
+      '/tmp/pic.png',
+      expect.objectContaining({ isImage: true })
+    );
   });
 
   it('streams agent_message_chunk and edits single message', async () => {
@@ -274,10 +263,10 @@ describe('BridgeBot', () => {
       kind: 'update',
       update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Hello' } },
     });
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    const handler = onMessage;
     await handler({ chat: { id: 123 }, text: 'hi' });
     await vi.advanceTimersByTimeAsync(1000);
-    expect(mockBot.sendMessage).toHaveBeenCalledWith(123, 'Hello', { parse_mode: 'Markdown' });
+    expect(mockT.send).toHaveBeenCalledWith(123, 'Hello', { parseMode: 'Markdown' });
   });
 
   it('handles agent_message (full message)', async () => {
@@ -290,11 +279,11 @@ describe('BridgeBot', () => {
         content: [{ type: 'text', text: 'Full response' }],
       },
     });
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    const handler = onMessage;
     await handler({ chat: { id: 123 }, text: 'hi' });
     await vi.advanceTimersByTimeAsync(1000);
-    expect(mockBot.sendMessage).toHaveBeenCalledWith(123, 'Full response', {
-      parse_mode: 'Markdown',
+    expect(mockT.send).toHaveBeenCalledWith(123, 'Full response', {
+      parseMode: 'Markdown',
     });
   });
 
@@ -306,28 +295,31 @@ describe('BridgeBot', () => {
       kind: 'update',
       update: { sessionUpdate: 'agent_message', content: { type: 'text', text: longText } },
     });
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    const handler = onMessage;
     await handler({ chat: { id: 123 }, text: 'hi' });
     await vi.advanceTimersByTimeAsync(2000);
     // First message (send) + overflow chunks (send)
-    const sends = mockBot.sendMessage.mock.calls.filter((c) => c[0] === 123);
+    const sends = mockT.send.mock.calls.filter((c) => c[0] === 123);
     expect(sends.length).toBeGreaterThanOrEqual(2);
   });
 
   it('falls back to plain text on markdown parse error', async () => {
     const { bot, acp } = createBot();
     await bot.start();
-    mockBot.sendMessage.mockRejectedValueOnce(new Error("can't parse entities at byte offset 0"));
-    mockBot.sendMessage.mockResolvedValueOnce({ message_id: 2 });
+    mockT.send.mockResolvedValueOnce([
+      { kind: 'api', message: "can't parse entities at byte offset 0" },
+      null,
+    ]);
+    mockT.send.mockResolvedValueOnce({ message_id: 2 });
     acp._pushUpdate({
       kind: 'update',
       update: { sessionUpdate: 'agent_message', content: { type: 'text', text: 'bad **markdown' } },
     });
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    const handler = onMessage;
     await handler({ chat: { id: 123 }, text: 'hi' });
     await vi.advanceTimersByTimeAsync(1000);
     // Should have retried without parse_mode
-    const plainSend = mockBot.sendMessage.mock.calls.find((c) => c[2] === undefined);
+    const plainSend = mockT.send.mock.calls.find((c) => c[2] === undefined);
     expect(plainSend).toBeDefined();
   });
 
@@ -336,30 +328,30 @@ describe('BridgeBot', () => {
     await bot.start();
     // No updates pushed — nextUpdate returns stop immediately
     acp.nextUpdate.mockResolvedValueOnce({ kind: 'stop', stopReason: 'max_tokens' });
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    const handler = onMessage;
     await handler({ chat: { id: 123 }, text: 'hi' });
     await vi.advanceTimersByTimeAsync(1000);
-    expect(mockBot.sendMessage).toHaveBeenCalledWith(123, '[max_tokens]');
+    expect(mockT.send).toHaveBeenCalledWith(123, '[max_tokens]');
   });
 
   it('sends error message on prompt failure', async () => {
     const { bot, acp } = createBot();
     await bot.start();
     acp.nextUpdate.mockRejectedValueOnce(new Error('connection lost'));
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    const handler = onMessage;
     await handler({ chat: { id: 123 }, text: 'hi' });
     await vi.advanceTimersByTimeAsync(1000);
-    expect(mockBot.sendMessage).toHaveBeenCalledWith(123, 'Error: connection lost');
+    expect(mockT.send).toHaveBeenCalledWith(123, 'Error: connection lost');
   });
 
   it('sends error message when acp.prompt() rejects', async () => {
     const { bot, acp } = createBot();
     await bot.start();
     acp.prompt.mockRejectedValueOnce(new Error('prompt failed'));
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    const handler = onMessage;
     await handler({ chat: { id: 123 }, text: 'hi' });
     await vi.advanceTimersByTimeAsync(1000);
-    expect(mockBot.sendMessage).toHaveBeenCalledWith(123, 'Error: prompt failed');
+    expect(mockT.send).toHaveBeenCalledWith(123, 'Error: prompt failed');
   });
 
   it('ignores thoughts when showThoughts=false', async () => {
@@ -369,13 +361,11 @@ describe('BridgeBot', () => {
       kind: 'update',
       update: { sessionUpdate: 'agent_thought', content: { type: 'text', text: 'thinking...' } },
     });
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    const handler = onMessage;
     await handler({ chat: { id: 123 }, text: 'hi' });
     await vi.advanceTimersByTimeAsync(1000);
     // No message sent because thought was ignored and no agent_message followed
-    const sends = mockBot.sendMessage.mock.calls.filter(
-      (c) => c[0] === 123 && c[1] !== '[end_turn]'
-    );
+    const sends = mockT.send.mock.calls.filter((c) => c[0] === 123 && c[1] !== '[end_turn]');
     expect(sends.length).toBe(0);
   });
 
@@ -386,11 +376,11 @@ describe('BridgeBot', () => {
       kind: 'update',
       update: { sessionUpdate: 'agent_thought', content: { type: 'text', text: 'thinking...' } },
     });
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    const handler = onMessage;
     await handler({ chat: { id: 123 }, text: 'hi' });
     await vi.advanceTimersByTimeAsync(1000);
-    expect(mockBot.sendMessage).toHaveBeenCalledWith(123, 'thinking...', {
-      parse_mode: 'Markdown',
+    expect(mockT.send).toHaveBeenCalledWith(123, 'thinking...', {
+      parseMode: 'Markdown',
     });
   });
 
@@ -414,10 +404,10 @@ describe('BridgeBot', () => {
     });
     // Wait for sendMessage to resolve and permissionPending to be set
     await vi.advanceTimersByTimeAsync(0);
-    expect(mockBot.sendMessage).toHaveBeenCalledWith(
+    expect(mockT.send).toHaveBeenCalledWith(
       123,
       expect.stringContaining('Permission required'),
-      expect.objectContaining({ reply_markup: expect.any(Object) })
+      expect.objectContaining({ keyboard: expect.any(Array) })
     );
     expect(bot.permissionPending).not.toBeNull();
     bot.permissionPending.resolve({ outcome: { outcome: 'selected', optionId: 'opt_allow' } });
@@ -429,7 +419,7 @@ describe('BridgeBot', () => {
     const onCommand = vi.fn(async () => true);
     const { bot, acp } = createBot({ onCommand });
     await bot.start();
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    const handler = onMessage;
     await handler({ chat: { id: 123 }, text: '/cron list' });
     expect(onCommand).toHaveBeenCalledWith('/cron list', 123);
     expect(acp.prompt).not.toHaveBeenCalled();
@@ -439,7 +429,7 @@ describe('BridgeBot', () => {
     const onCommand = vi.fn(async () => false);
     const { bot, acp } = createBot({ onCommand });
     await bot.start();
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    const handler = onMessage;
     await handler({ chat: { id: 123 }, text: '/some-slash-command' });
     await vi.advanceTimersByTimeAsync(1000);
     expect(onCommand).toHaveBeenCalled();
@@ -488,7 +478,7 @@ describe('BridgeBot', () => {
     await bot.enqueuePrompt('overflow', 123, undefined, onComplete, 'http');
     expect(onComplete).toHaveBeenCalledWith('', 'queue full');
     expect(b.queue.length).toBe(100);
-    expect(mockBot.sendMessage).toHaveBeenCalledWith(
+    expect(mockT.send).toHaveBeenCalledWith(
       123,
       '⚠️ Queue is full — try again later.',
       expect.anything()
@@ -502,11 +492,11 @@ describe('BridgeBot', () => {
     const b = bot as any;
     b.busy = true;
     for (let i = 0; i < 100; i++) b.queue.push({ channelId: 123, text: `q${i}` });
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    const handler = onMessage;
     await handler({ chat: { id: 123 }, text: 'one more' });
     expect(b.queue.length).toBe(100);
     expect(acp.prompt).not.toHaveBeenCalled();
-    expect(mockBot.sendMessage).toHaveBeenCalledWith(
+    expect(mockT.send).toHaveBeenCalledWith(
       123,
       '⚠️ Queue is full — try again later.',
       expect.anything()
@@ -518,7 +508,7 @@ describe('BridgeBot', () => {
     try {
       const { bot } = createBot({ logPreviewLength: 30 });
       await bot.start();
-      const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+      const handler = onMessage;
       await handler({ chat: { id: 123 }, message_id: 1, text: 'a'.repeat(100) });
       const line = logSpy.mock.calls.map((c) => String(c[0])).find((l) => l.startsWith('👤'));
       expect(line).toBe(`👤 ${'a'.repeat(30)}…`);
@@ -530,15 +520,15 @@ describe('BridgeBot', () => {
   it('stop() stops polling', async () => {
     const { bot } = createBot();
     bot.stop();
-    expect(mockBot.stopPolling).toHaveBeenCalled();
+    expect(mockT.stop).toHaveBeenCalled();
   });
 
   it('/stop when idle responds nothing to stop', async () => {
     const { bot, acp } = createBot();
     await bot.start();
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    const handler = onMessage;
     await handler({ chat: { id: 123 }, text: '/stop' });
-    expect(mockBot.sendMessage).toHaveBeenCalledWith(123, 'Nothing to stop.');
+    expect(mockT.send).toHaveBeenCalledWith(123, 'Nothing to stop.');
     expect(acp.cancel).not.toHaveBeenCalled();
   });
 
@@ -547,19 +537,19 @@ describe('BridgeBot', () => {
     await bot.start();
     // Start a prompt to make the bot busy
     acp.nextUpdate.mockReturnValue(new Promise(() => {})); // never resolves
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    const handler = onMessage;
     await handler({ chat: { id: 123 }, text: 'long task' });
     await vi.waitFor(() => expect(bot.busy).toBe(true));
     await handler({ chat: { id: 123 }, text: '/stop' });
     expect(acp.cancel).toHaveBeenCalled();
-    expect(mockBot.sendMessage).toHaveBeenCalledWith(123, '⏹ Stopped.');
+    expect(mockT.send).toHaveBeenCalledWith(123, '⏹ Stopped.');
   });
 
   it('/stop clears the queue', async () => {
     const { bot, acp } = createBot();
     await bot.start();
     acp.nextUpdate.mockReturnValue(new Promise(() => {}));
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    const handler = onMessage;
     await handler({ chat: { id: 123 }, text: 'first' });
     await vi.waitFor(() => expect(bot.busy).toBe(true));
     // Queue more items
@@ -575,59 +565,57 @@ describe('BridgeBot', () => {
     await bot.start();
     acp.nextUpdate.mockReturnValue(new Promise(() => {}));
     acp.cancel.mockRejectedValueOnce(new Error('agent unreachable'));
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    const handler = onMessage;
     await handler({ chat: { id: 123 }, text: 'task' });
     await vi.waitFor(() => expect(bot.busy).toBe(true));
     await handler({ chat: { id: 123 }, text: '/stop' });
-    expect(mockBot.sendMessage).toHaveBeenCalledWith(123, 'Stop failed: agent unreachable');
+    expect(mockT.send).toHaveBeenCalledWith(123, 'Stop failed: agent unreachable');
   });
 
   it('/new when idle creates new session', async () => {
     const { bot, acp } = createBot();
     await bot.start();
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    const handler = onMessage;
     await handler({ chat: { id: 123 }, text: '/sessions new' });
     expect(acp.newSession).toHaveBeenCalled();
-    expect(mockBot.sendMessage).toHaveBeenCalledWith(
-      123,
-      '🆕 New session started: `new-session-id`',
-      { parse_mode: 'Markdown' }
-    );
+    expect(mockT.send).toHaveBeenCalledWith(123, '🆕 New session started: `new-session-id`', {
+      parseMode: 'Markdown',
+    });
   });
 
   it('/new when busy refuses with message', async () => {
     const { bot, acp } = createBot();
     await bot.start();
     acp.nextUpdate.mockReturnValue(new Promise(() => {}));
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    const handler = onMessage;
     await handler({ chat: { id: 123 }, text: 'long task' });
     await vi.waitFor(() => expect(bot.busy).toBe(true));
     await handler({ chat: { id: 123 }, text: '/sessions new' });
     expect(acp.newSession).not.toHaveBeenCalled();
-    expect(mockBot.sendMessage).toHaveBeenCalledWith(
+    expect(mockT.send).toHaveBeenCalledWith(
       123,
       'Cannot start new session while busy. Use /stop first.',
-      { parse_mode: 'Markdown' }
+      { parseMode: 'Markdown' }
     );
   });
 
   it('/sessions lists available sessions', async () => {
     const { bot, acp } = createBot();
     await bot.start();
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    const handler = onMessage;
     await handler({ chat: { id: 123 }, text: '/sessions' });
     expect(acp.listSessions).toHaveBeenCalled();
-    expect(mockBot.sendMessage).toHaveBeenCalledWith(
+    expect(mockT.send).toHaveBeenCalledWith(
       123,
       '*Sessions:*\n  1. Session 1\n  2. s2\n\nSwitch with /sessions <n> or /sessions <id>.',
-      { parse_mode: 'Markdown' }
+      { parseMode: 'Markdown' }
     );
   });
 
   it('/session <n> resolves the number against the last /sessions list', async () => {
     const { bot, acp } = createBot();
     await bot.start();
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    const handler = onMessage;
     await handler({ chat: { id: 123 }, text: '/sessions' });
     await handler({ chat: { id: 123 }, text: '/sessions 2' });
     expect(acp.loadSession).toHaveBeenCalledWith('s2');
@@ -636,27 +624,25 @@ describe('BridgeBot', () => {
   it('/session <n> without a prior /sessions asks to list first', async () => {
     const { bot, acp } = createBot();
     await bot.start();
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    const handler = onMessage;
     await handler({ chat: { id: 123 }, text: '/sessions 2' });
     expect(acp.loadSession).not.toHaveBeenCalled();
-    expect(mockBot.sendMessage).toHaveBeenCalledWith(
-      123,
-      'Run /sessions first to get a numbered list.',
-      { parse_mode: 'Markdown' }
-    );
+    expect(mockT.send).toHaveBeenCalledWith(123, 'Run /sessions first to get a numbered list.', {
+      parseMode: 'Markdown',
+    });
   });
 
   it('/session <n> out of range reports the list size', async () => {
     const { bot, acp } = createBot();
     await bot.start();
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    const handler = onMessage;
     await handler({ chat: { id: 123 }, text: '/sessions' });
     await handler({ chat: { id: 123 }, text: '/sessions 99' });
     expect(acp.loadSession).not.toHaveBeenCalled();
-    expect(mockBot.sendMessage).toHaveBeenCalledWith(
+    expect(mockT.send).toHaveBeenCalledWith(
       123,
       'No session #99 — run /sessions to see 2 entries.',
-      { parse_mode: 'Markdown' }
+      { parseMode: 'Markdown' }
     );
   });
 
@@ -664,33 +650,33 @@ describe('BridgeBot', () => {
     const { bot, acp } = createBot();
     await bot.start();
     acp.listSessions.mockRejectedValueOnce(new Error('Agent does not support session/list'));
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    const handler = onMessage;
     await handler({ chat: { id: 123 }, text: '/sessions' });
-    expect(mockBot.sendMessage).toHaveBeenCalledWith(
+    expect(mockT.send).toHaveBeenCalledWith(
       123,
       'Cannot list sessions: Agent does not support session/list',
-      { parse_mode: 'Markdown' }
+      { parseMode: 'Markdown' }
     );
   });
 
   it('/session <id> switches session', async () => {
     const { bot, acp } = createBot();
     await bot.start();
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    const handler = onMessage;
     await handler({ chat: { id: 123 }, text: '/sessions abc-123' });
     expect(acp.loadSession).toHaveBeenCalledWith('abc-123');
-    expect(mockBot.sendMessage).toHaveBeenCalledWith(123, '🔄 Switched to session: `abc-123`', {
-      parse_mode: 'Markdown',
+    expect(mockT.send).toHaveBeenCalledWith(123, '🔄 Switched to session: `abc-123`', {
+      parseMode: 'Markdown',
     });
   });
 
   it('/session without id sends usage', async () => {
     const { bot } = createBot();
     await bot.start();
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    const handler = onMessage;
     await handler({ chat: { id: 123 }, text: '/sessions rm' });
-    expect(mockBot.sendMessage).toHaveBeenCalledWith(123, 'Usage: /sessions rm `<id>`', {
-      parse_mode: 'Markdown',
+    expect(mockT.send).toHaveBeenCalledWith(123, 'Usage: /sessions rm `<id>`', {
+      parseMode: 'Markdown',
     });
   });
 
@@ -698,15 +684,15 @@ describe('BridgeBot', () => {
     const { bot, acp } = createBot();
     await bot.start();
     acp.nextUpdate.mockReturnValue(new Promise(() => {}));
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    const handler = onMessage;
     await handler({ chat: { id: 123 }, text: 'long task' });
     await vi.waitFor(() => expect(bot.busy).toBe(true));
     await handler({ chat: { id: 123 }, text: '/sessions abc-123' });
     expect(acp.loadSession).not.toHaveBeenCalled();
-    expect(mockBot.sendMessage).toHaveBeenCalledWith(
+    expect(mockT.send).toHaveBeenCalledWith(
       123,
       'Cannot switch session while busy. Use /stop first.',
-      { parse_mode: 'Markdown' }
+      { parseMode: 'Markdown' }
     );
   });
 
@@ -714,43 +700,41 @@ describe('BridgeBot', () => {
     const { bot, acp } = createBot();
     await bot.start();
     acp.newSession.mockRejectedValueOnce(new Error('agent crashed'));
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    const handler = onMessage;
     await handler({ chat: { id: 123 }, text: '/sessions new' });
-    expect(mockBot.sendMessage).toHaveBeenCalledWith(
-      123,
-      'Failed to create session: agent crashed',
-      { parse_mode: 'Markdown' }
-    );
+    expect(mockT.send).toHaveBeenCalledWith(123, 'Failed to create session: agent crashed', {
+      parseMode: 'Markdown',
+    });
   });
 
   it('/config mode lists modes as a synthetic option', async () => {
     const { bot } = createBot();
     await bot.start();
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    const handler = onMessage;
     await handler({ chat: { id: 123 }, text: '/config mode' });
-    expect(mockBot.sendMessage).toHaveBeenCalledWith(
+    expect(mockT.send).toHaveBeenCalledWith(
       123,
       '*`mode`* (Mode)\n▶ 1. Default\n  2. Bypass — Auto-approve all tool calls\n\nSet with /config mode <n> or <value>.',
-      { parse_mode: 'Markdown' }
+      { parseMode: 'Markdown' }
     );
   });
 
   it('/config mode <id> switches mode via set_mode', async () => {
     const { bot, acp } = createBot();
     await bot.start();
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    const handler = onMessage;
     await handler({ chat: { id: 123 }, text: '/config mode bypass' });
     expect(acp.setSessionMode).toHaveBeenCalledWith('bypass');
     expect(acp.setConfigOption).not.toHaveBeenCalled();
-    expect(mockBot.sendMessage).toHaveBeenCalledWith(123, '⚙️ `mode` set to: `bypass`', {
-      parse_mode: 'Markdown',
+    expect(mockT.send).toHaveBeenCalledWith(123, '⚙️ `mode` set to: `bypass`', {
+      parseMode: 'Markdown',
     });
   });
 
   it('/config mode <n> switches mode by index', async () => {
     const { bot, acp } = createBot();
     await bot.start();
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    const handler = onMessage;
     await handler({ chat: { id: 123 }, text: '/config mode 2' });
     expect(acp.setSessionMode).toHaveBeenCalledWith('bypass');
   });
@@ -758,12 +742,12 @@ describe('BridgeBot', () => {
   it('/config mode <unknown> sends available values', async () => {
     const { bot } = createBot();
     await bot.start();
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    const handler = onMessage;
     await handler({ chat: { id: 123 }, text: '/config mode unknown' });
-    expect(mockBot.sendMessage).toHaveBeenCalledWith(
+    expect(mockT.send).toHaveBeenCalledWith(
       123,
       expect.stringContaining('Unknown value `unknown`. Available: default, bypass'),
-      { parse_mode: 'Markdown' }
+      { parseMode: 'Markdown' }
     );
   });
 
@@ -771,23 +755,21 @@ describe('BridgeBot', () => {
     const { bot, acp } = createBot();
     acp.modes = null;
     await bot.start();
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    const handler = onMessage;
     await handler({ chat: { id: 123 }, text: '/config mode' });
-    expect(mockBot.sendMessage).toHaveBeenCalledWith(
-      123,
-      expect.stringContaining('Unknown option `mode`'),
-      { parse_mode: 'Markdown' }
-    );
+    expect(mockT.send).toHaveBeenCalledWith(123, expect.stringContaining('Unknown option `mode`'), {
+      parseMode: 'Markdown',
+    });
   });
 
   it('/config mode on error sends error message', async () => {
     const { bot, acp } = createBot();
     await bot.start();
     acp.setSessionMode.mockRejectedValueOnce(new Error('agent rejected'));
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    const handler = onMessage;
     await handler({ chat: { id: 123 }, text: '/config mode bypass' });
-    expect(mockBot.sendMessage).toHaveBeenCalledWith(123, 'Failed to set option: agent rejected', {
-      parse_mode: 'Markdown',
+    expect(mockT.send).toHaveBeenCalledWith(123, 'Failed to set option: agent rejected', {
+      parseMode: 'Markdown',
     });
   });
 
@@ -804,7 +786,7 @@ describe('BridgeBot', () => {
       },
     ];
     await bot.start();
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    const handler = onMessage;
     await handler({ chat: { id: 123 }, text: '/config mode default' });
     // real configOption path — set_config_option, not set_mode
     expect(acp.setConfigOption).toHaveBeenCalledWith('mode', 'default');
@@ -814,37 +796,35 @@ describe('BridgeBot', () => {
   it('/config lists all config options with current values', async () => {
     const { bot } = createBot();
     await bot.start();
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    const handler = onMessage;
     await handler({ chat: { id: 123 }, text: '/config' });
-    expect(mockBot.sendMessage).toHaveBeenCalledWith(
-      123,
-      expect.stringContaining('*Config options:*'),
-      { parse_mode: 'Markdown' }
-    );
-    expect(mockBot.sendMessage).toHaveBeenCalledWith(123, expect.stringContaining('`model`'), {
-      parse_mode: 'Markdown',
+    expect(mockT.send).toHaveBeenCalledWith(123, expect.stringContaining('*Config options:*'), {
+      parseMode: 'Markdown',
     });
-    expect(mockBot.sendMessage).toHaveBeenCalledWith(123, expect.stringContaining('`model-a`'), {
-      parse_mode: 'Markdown',
+    expect(mockT.send).toHaveBeenCalledWith(123, expect.stringContaining('`model`'), {
+      parseMode: 'Markdown',
+    });
+    expect(mockT.send).toHaveBeenCalledWith(123, expect.stringContaining('`model-a`'), {
+      parseMode: 'Markdown',
     });
   });
 
   it('/config <id> lists the option values numbered with current marker', async () => {
     const { bot } = createBot();
     await bot.start();
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    const handler = onMessage;
     await handler({ chat: { id: 123 }, text: '/config model' });
-    expect(mockBot.sendMessage).toHaveBeenCalledWith(
+    expect(mockT.send).toHaveBeenCalledWith(
       123,
       '*`model`* (Model)\n▶ 1. Model A\n  2. Model B — Fast\n\nSet with /config model <n> or <value>.',
-      { parse_mode: 'Markdown' }
+      { parseMode: 'Markdown' }
     );
   });
 
   it('/config <id> <n> sets the option by list index', async () => {
     const { bot, acp } = createBot();
     await bot.start();
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    const handler = onMessage;
     await handler({ chat: { id: 123 }, text: '/config model 2' });
     expect(acp.setConfigOption).toHaveBeenCalledWith('model', 'model-b');
   });
@@ -852,7 +832,7 @@ describe('BridgeBot', () => {
   it('/config model <n> sets the model by list index', async () => {
     const { bot, acp } = createBot();
     await bot.start();
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    const handler = onMessage;
     await handler({ chat: { id: 123 }, text: '/config model 1' });
     expect(acp.setConfigOption).toHaveBeenCalledWith('model', 'model-a');
   });
@@ -860,31 +840,31 @@ describe('BridgeBot', () => {
   it('/config <id> <n> out of range reports the list size', async () => {
     const { bot, acp } = createBot();
     await bot.start();
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    const handler = onMessage;
     await handler({ chat: { id: 123 }, text: '/config model 9' });
     expect(acp.setConfigOption).not.toHaveBeenCalled();
-    expect(mockBot.sendMessage).toHaveBeenCalledWith(
+    expect(mockT.send).toHaveBeenCalledWith(
       123,
       'No option #9 — run /config model to see 2 entries.',
-      { parse_mode: 'Markdown' }
+      { parseMode: 'Markdown' }
     );
   });
 
   it('/config <id> <value> sets the option', async () => {
     const { bot, acp } = createBot();
     await bot.start();
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    const handler = onMessage;
     await handler({ chat: { id: 123 }, text: '/config model model-b' });
     expect(acp.setConfigOption).toHaveBeenCalledWith('model', 'model-b');
-    expect(mockBot.sendMessage).toHaveBeenCalledWith(123, '⚙️ `model` set to: `model-b`', {
-      parse_mode: 'Markdown',
+    expect(mockT.send).toHaveBeenCalledWith(123, '⚙️ `model` set to: `model-b`', {
+      parseMode: 'Markdown',
     });
   });
 
   it('/config model <value> sets the model', async () => {
     const { bot, acp } = createBot();
     await bot.start();
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    const handler = onMessage;
     await handler({ chat: { id: 123 }, text: '/config model model-b' });
     expect(acp.setConfigOption).toHaveBeenCalledWith('model', 'model-b');
   });
@@ -892,44 +872,42 @@ describe('BridgeBot', () => {
   it('/config model without value lists model options', async () => {
     const { bot } = createBot();
     await bot.start();
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    const handler = onMessage;
     await handler({ chat: { id: 123 }, text: '/config model' });
-    expect(mockBot.sendMessage).toHaveBeenCalledWith(
-      123,
-      expect.stringContaining('2. Model B — Fast'),
-      { parse_mode: 'Markdown' }
-    );
+    expect(mockT.send).toHaveBeenCalledWith(123, expect.stringContaining('2. Model B — Fast'), {
+      parseMode: 'Markdown',
+    });
   });
 
   it('/config <unknown> sends available option ids', async () => {
     const { bot } = createBot();
     await bot.start();
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    const handler = onMessage;
     await handler({ chat: { id: 123 }, text: '/config nope' });
-    expect(mockBot.sendMessage).toHaveBeenCalledWith(
+    expect(mockT.send).toHaveBeenCalledWith(
       123,
       expect.stringContaining('Unknown option `nope`. Available: model, verbose, mode'),
-      { parse_mode: 'Markdown' }
+      { parseMode: 'Markdown' }
     );
   });
 
   it('/config <id> <unknown value> sends available values', async () => {
     const { bot, acp } = createBot();
     await bot.start();
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    const handler = onMessage;
     await handler({ chat: { id: 123 }, text: '/config model nope' });
     expect(acp.setConfigOption).not.toHaveBeenCalled();
-    expect(mockBot.sendMessage).toHaveBeenCalledWith(
+    expect(mockT.send).toHaveBeenCalledWith(
       123,
       expect.stringContaining('Unknown value `nope`. Available: model-a, model-b'),
-      { parse_mode: 'Markdown' }
+      { parseMode: 'Markdown' }
     );
   });
 
   it('/config <boolean> true sets a boolean option', async () => {
     const { bot, acp } = createBot();
     await bot.start();
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    const handler = onMessage;
     await handler({ chat: { id: 123 }, text: '/config verbose true' });
     expect(acp.setConfigOption).toHaveBeenCalledWith('verbose', 'true');
   });
@@ -937,13 +915,13 @@ describe('BridgeBot', () => {
   it('/config <boolean> with non-boolean value sends hint', async () => {
     const { bot, acp } = createBot();
     await bot.start();
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    const handler = onMessage;
     await handler({ chat: { id: 123 }, text: '/config verbose maybe' });
     expect(acp.setConfigOption).not.toHaveBeenCalled();
-    expect(mockBot.sendMessage).toHaveBeenCalledWith(
+    expect(mockT.send).toHaveBeenCalledWith(
       123,
       'Option `verbose` is boolean. Use: true or false',
-      { parse_mode: 'Markdown' }
+      { parseMode: 'Markdown' }
     );
   });
 
@@ -952,23 +930,21 @@ describe('BridgeBot', () => {
     acp.configOptions = null;
     acp.modes = null;
     await bot.start();
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    const handler = onMessage;
     await handler({ chat: { id: 123 }, text: '/config' });
-    expect(mockBot.sendMessage).toHaveBeenCalledWith(
-      123,
-      'No config options reported by the agent.',
-      { parse_mode: 'Markdown' }
-    );
+    expect(mockT.send).toHaveBeenCalledWith(123, 'No config options reported by the agent.', {
+      parseMode: 'Markdown',
+    });
   });
 
   it('/config on error sends error message', async () => {
     const { bot, acp } = createBot();
     await bot.start();
     acp.setConfigOption.mockRejectedValueOnce(new Error('agent rejected'));
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    const handler = onMessage;
     await handler({ chat: { id: 123 }, text: '/config model model-b' });
-    expect(mockBot.sendMessage).toHaveBeenCalledWith(123, 'Failed to set option: agent rejected', {
-      parse_mode: 'Markdown',
+    expect(mockT.send).toHaveBeenCalledWith(123, 'Failed to set option: agent rejected', {
+      parseMode: 'Markdown',
     });
   });
 
@@ -982,7 +958,7 @@ describe('BridgeBot', () => {
         configOptions: [{ id: 'model', name: 'Model', type: 'select', currentValue: 'model-b' }],
       },
     });
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    const handler = onMessage;
     await handler({ chat: { id: 123 }, text: 'work' });
     await vi.waitFor(() => expect(acp.configOptions?.[0]?.currentValue).toBe('model-b'));
   });
@@ -990,14 +966,14 @@ describe('BridgeBot', () => {
   it('/help shows only bridge commands, not agent-advertised ones', async () => {
     const { bot } = createBot();
     await bot.start();
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    const handler = onMessage;
     await handler({ chat: { id: 123 }, text: '/help' });
-    expect(mockBot.sendMessage).toHaveBeenCalledWith(
+    expect(mockT.send).toHaveBeenCalledWith(
       123,
       expect.stringContaining('/jobs add `[as <name>] <when> <prompt>`'),
-      { parse_mode: 'Markdown' }
+      { parseMode: 'Markdown' }
     );
-    const text = mockBot.sendMessage.mock.calls[0][1];
+    const text = mockT.send.mock.calls[0][1];
     expect(text).toContain('*Commands:*');
     expect(text).not.toContain('Agent commands');
     expect(text).not.toContain('/compact');
@@ -1014,7 +990,7 @@ describe('BridgeBot', () => {
         availableCommands: [{ name: 'newcmd', description: 'A new command' }],
       },
     });
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    const handler = onMessage;
     await handler({ chat: { id: 123 }, text: 'work' });
     await vi.waitFor(() => expect(acp.availableCommands?.[0]?.name).toBe('newcmd'));
   });
@@ -1024,21 +1000,21 @@ describe('BridgeBot', () => {
   it('sends typing action while processing a prompt', async () => {
     const { bot } = createBot();
     await bot.start();
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    const handler = onMessage;
     await handler({ chat: { id: 123 }, text: 'work' });
-    await vi.waitFor(() => expect(mockBot.sendChatAction).toHaveBeenCalledWith(123, 'typing'));
+    await vi.waitFor(() => expect(mockT.typing).toHaveBeenCalledWith(123));
   });
 
   it('keeps typing while busy (interval resend)', async () => {
     const { bot, acp } = createBot();
     await bot.start();
     acp.nextUpdate.mockReturnValue(new Promise(() => {})); // never stops
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    const handler = onMessage;
     await handler({ chat: { id: 123 }, text: 'long task' });
     await vi.waitFor(() => expect(bot.busy).toBe(true));
-    expect(mockBot.sendChatAction).toHaveBeenCalledTimes(1);
+    expect(mockT.typing).toHaveBeenCalledTimes(1);
     await vi.advanceTimersByTimeAsync(4500);
-    expect(mockBot.sendChatAction).toHaveBeenCalledTimes(2);
+    expect(mockT.typing).toHaveBeenCalledTimes(2);
   });
 
   // --- Agent exit / reconnect ---
@@ -1047,13 +1023,11 @@ describe('BridgeBot', () => {
     const { bot } = createBot();
     await bot.start();
     await bot.notifyAgentExit(1);
-    expect(mockBot.sendMessage).toHaveBeenCalledWith(
+    expect(mockT.send).toHaveBeenCalledWith(
       123,
       expect.stringContaining('connection lost'),
       expect.objectContaining({
-        reply_markup: {
-          inline_keyboard: [[{ text: '🔄 Reconnect', callback_data: 'reconnect' }]],
-        },
+        keyboard: [[{ text: '🔄 Reconnect', callback_data: 'reconnect' }]],
       })
     );
   });
@@ -1061,7 +1035,7 @@ describe('BridgeBot', () => {
   it('reconnect button triggers acp.restart and confirms', async () => {
     const { bot, acp } = createBot();
     await bot.start();
-    const cbHandler = mockBot.on.mock.calls.find((c) => c[0] === 'callback_query')[1];
+    const cbHandler = onCallback;
     await cbHandler({
       id: 'q1',
       data: 'reconnect',
@@ -1069,9 +1043,11 @@ describe('BridgeBot', () => {
       message: { chat: { id: 123, type: 'private' }, message_id: 42 },
     });
     expect(acp.restart).toHaveBeenCalled();
-    expect(mockBot.editMessageText).toHaveBeenCalledWith(
+    expect(mockT.edit).toHaveBeenCalledWith(
+      123,
+      42,
       expect.stringContaining('Agent reconnected'),
-      expect.objectContaining({ chat_id: 123, message_id: 42 })
+      expect.objectContaining({ parseMode: 'Markdown' })
     );
   });
 
@@ -1081,7 +1057,7 @@ describe('BridgeBot', () => {
     const resolve = vi.fn();
     // biome-ignore lint/suspicious/noExplicitAny: protected member under test
     (bot as any).permissionPending = { resolve, messageId: 42 };
-    const cbHandler = mockBot.on.mock.calls.find((c) => c[0] === 'callback_query')[1];
+    const cbHandler = onCallback;
     await cbHandler({
       id: 'q1',
       data: 'perm_allow_opt1',
@@ -1089,10 +1065,7 @@ describe('BridgeBot', () => {
       message: { chat: { id: 123, type: 'group' }, message_id: 42 },
     });
     expect(resolve).not.toHaveBeenCalled();
-    expect(mockBot.answerCallbackQuery).toHaveBeenCalledWith(
-      'q1',
-      expect.objectContaining({ show_alert: true })
-    );
+    expect(mockT.answerCallback).toHaveBeenCalledWith('q1', '⛔ Not authorized', true);
   });
 
   it('denies group callbacks when allowedUserIds is empty', async () => {
@@ -1101,7 +1074,7 @@ describe('BridgeBot', () => {
     const resolve = vi.fn();
     // biome-ignore lint/suspicious/noExplicitAny: protected member under test
     (bot as any).permissionPending = { resolve, messageId: 42 };
-    const cbHandler = mockBot.on.mock.calls.find((c) => c[0] === 'callback_query')[1];
+    const cbHandler = onCallback;
     await cbHandler({
       id: 'q1',
       data: 'perm_deny_opt1',
@@ -1117,7 +1090,7 @@ describe('BridgeBot', () => {
     const resolve = vi.fn();
     // biome-ignore lint/suspicious/noExplicitAny: protected member under test
     (bot as any).permissionPending = { resolve, messageId: 42 };
-    const cbHandler = mockBot.on.mock.calls.find((c) => c[0] === 'callback_query')[1];
+    const cbHandler = onCallback;
     await cbHandler({
       id: 'q1',
       data: 'perm_allow_opt1',
@@ -1135,7 +1108,7 @@ describe('BridgeBot', () => {
     const resolve = vi.fn();
     // biome-ignore lint/suspicious/noExplicitAny: protected member under test
     (bot as any).permissionPending = { resolve, messageId: 42 };
-    const cbHandler = mockBot.on.mock.calls.find((c) => c[0] === 'callback_query')[1];
+    const cbHandler = onCallback;
     await cbHandler({
       id: 'q1',
       data: 'perm_allow_opt1',
@@ -1151,7 +1124,7 @@ describe('BridgeBot', () => {
     const resolve = vi.fn();
     // biome-ignore lint/suspicious/noExplicitAny: protected member under test
     (bot as any).permissionPending = { resolve, messageId: 42 };
-    const cbHandler = mockBot.on.mock.calls.find((c) => c[0] === 'callback_query')[1];
+    const cbHandler = onCallback;
     await cbHandler({
       id: 'q1',
       data: 'perm_allow_opt1',
@@ -1159,9 +1132,11 @@ describe('BridgeBot', () => {
       message: { chat: { id: 123, type: 'private' }, message_id: 99 },
     });
     expect(resolve).not.toHaveBeenCalled();
-    expect(mockBot.answerCallbackQuery).toHaveBeenCalledWith('q1', {
-      text: '⌛ Permission request expired',
-    });
+    expect(mockT.answerCallback).toHaveBeenCalledWith(
+      'q1',
+      '⌛ Permission request expired',
+      undefined
+    );
     // biome-ignore lint/suspicious/noExplicitAny: protected member under test
     expect((bot as any).permissionPending).not.toBeNull();
   });
@@ -1170,16 +1145,17 @@ describe('BridgeBot', () => {
     const { bot, acp } = createBot();
     await bot.start();
     acp.restart.mockRejectedValueOnce(new Error('spawn failed'));
-    const cbHandler = mockBot.on.mock.calls.find((c) => c[0] === 'callback_query')[1];
+    const cbHandler = onCallback;
     await cbHandler({
       id: 'q1',
       data: 'reconnect',
       from: { id: 555 },
       message: { chat: { id: 123, type: 'private' }, message_id: 42 },
     });
-    expect(mockBot.editMessageText).toHaveBeenCalledWith(
-      expect.stringContaining('Reconnect failed: spawn failed'),
-      expect.objectContaining({ chat_id: 123, message_id: 42 })
+    expect(mockT.edit).toHaveBeenCalledWith(
+      123,
+      42,
+      expect.stringContaining('Reconnect failed: spawn failed')
     );
   });
 
@@ -1198,10 +1174,10 @@ describe('BridgeBot', () => {
         kind: 'read',
       },
     });
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    const handler = onMessage;
     await handler({ chat: { id: 123 }, text: 'hi' });
     await vi.advanceTimersByTimeAsync(1000);
-    const calls = mockBot.sendMessage.mock.calls.filter((c) => c[0] === 123);
+    const calls = mockT.send.mock.calls.filter((c) => c[0] === 123);
     const text = calls.map((c) => c[1]).join('');
     expect(text).toContain('Read file');
     expect(text).toContain('in_progress');
@@ -1219,12 +1195,10 @@ describe('BridgeBot', () => {
         status: 'in_progress',
       },
     });
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    const handler = onMessage;
     await handler({ chat: { id: 123 }, text: 'hi' });
     await vi.advanceTimersByTimeAsync(1000);
-    const calls = mockBot.sendMessage.mock.calls.filter(
-      (c) => c[0] === 123 && typeof c[1] === 'string'
-    );
+    const calls = mockT.send.mock.calls.filter((c) => c[0] === 123 && typeof c[1] === 'string');
     const text = calls.map((c) => c[1]).join('');
     expect(text).not.toContain('Read file');
   });
@@ -1249,10 +1223,10 @@ describe('BridgeBot', () => {
         status: 'completed',
       },
     });
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    const handler = onMessage;
     await handler({ chat: { id: 123 }, text: 'hi' });
     await vi.advanceTimersByTimeAsync(1000);
-    const calls = mockBot.sendMessage.mock.calls.filter((c) => c[0] === 123);
+    const calls = mockT.send.mock.calls.filter((c) => c[0] === 123);
     const text = calls.map((c) => c[1]).join('');
     expect(text).toContain('Run tests');
     expect(text).toContain('completed');
@@ -1273,10 +1247,10 @@ describe('BridgeBot', () => {
         ],
       },
     });
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    const handler = onMessage;
     await handler({ chat: { id: 123 }, text: 'hi' });
     await vi.advanceTimersByTimeAsync(1000);
-    const calls = mockBot.sendMessage.mock.calls.filter((c) => c[0] === 123);
+    const calls = mockT.send.mock.calls.filter((c) => c[0] === 123);
     const text = calls.map((c) => c[1]).join('');
     expect(text).toContain('Read file');
     expect(text).toContain('Write tests');
@@ -1292,12 +1266,10 @@ describe('BridgeBot', () => {
         entries: [{ content: 'Read file', status: 'pending' }],
       },
     });
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    const handler = onMessage;
     await handler({ chat: { id: 123 }, text: 'hi' });
     await vi.advanceTimersByTimeAsync(1000);
-    const calls = mockBot.sendMessage.mock.calls.filter(
-      (c) => c[0] === 123 && typeof c[1] === 'string'
-    );
+    const calls = mockT.send.mock.calls.filter((c) => c[0] === 123 && typeof c[1] === 'string');
     const text = calls.map((c) => c[1]).join('');
     expect(text).not.toContain('Read file');
   });
@@ -1315,7 +1287,7 @@ describe('BridgeBot', () => {
         modeId: 'bypass',
       },
     });
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    const handler = onMessage;
     await handler({ chat: { id: 123 }, text: 'hi' });
     await vi.advanceTimersByTimeAsync(1000);
     expect(acp.modes?.currentModeId).toBe('bypass');
@@ -1326,33 +1298,33 @@ describe('BridgeBot', () => {
   it('/sessions rm <id> deletes a session', async () => {
     const { bot, acp } = createBot();
     await bot.start();
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    const handler = onMessage;
     await handler({ chat: { id: 123 }, text: '/sessions rm other-session' });
     expect(acp.deleteSession).toHaveBeenCalledWith('other-session');
-    expect(mockBot.sendMessage).toHaveBeenCalledWith(123, '🗑 Deleted session: `other-session`', {
-      parse_mode: 'Markdown',
+    expect(mockT.send).toHaveBeenCalledWith(123, '🗑 Deleted session: `other-session`', {
+      parseMode: 'Markdown',
     });
   });
 
   it('/sessions rm without arg shows usage', async () => {
     const { bot } = createBot();
     await bot.start();
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    const handler = onMessage;
     await handler({ chat: { id: 123 }, text: '/sessions rm' });
-    expect(mockBot.sendMessage).toHaveBeenCalledWith(123, 'Usage: /sessions rm `<id>`', {
-      parse_mode: 'Markdown',
+    expect(mockT.send).toHaveBeenCalledWith(123, 'Usage: /sessions rm `<id>`', {
+      parseMode: 'Markdown',
     });
   });
 
   it('/sessions rm active session is rejected', async () => {
     const { bot } = createBot();
     await bot.start();
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    const handler = onMessage;
     await handler({ chat: { id: 123 }, text: '/sessions rm test-session-id' });
-    expect(mockBot.sendMessage).toHaveBeenCalledWith(
+    expect(mockT.send).toHaveBeenCalledWith(
       123,
       'Cannot delete the active session. Use /sessions new first.',
-      { parse_mode: 'Markdown' }
+      { parseMode: 'Markdown' }
     );
   });
 
@@ -1360,13 +1332,11 @@ describe('BridgeBot', () => {
     const { bot, acp } = createBot();
     await bot.start();
     acp.deleteSession.mockRejectedValueOnce(new Error('agent rejected'));
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    const handler = onMessage;
     await handler({ chat: { id: 123 }, text: '/sessions rm other-session' });
-    expect(mockBot.sendMessage).toHaveBeenCalledWith(
-      123,
-      'Failed to delete session: agent rejected',
-      { parse_mode: 'Markdown' }
-    );
+    expect(mockT.send).toHaveBeenCalledWith(123, 'Failed to delete session: agent rejected', {
+      parseMode: 'Markdown',
+    });
   });
 });
 
@@ -1384,7 +1354,7 @@ describe('echoInjectedPrompts', () => {
     await bot.start();
     bot.enqueuePrompt('summarize today', 123, undefined, undefined, 'job');
     await vi.advanceTimersByTimeAsync(1000);
-    expect(mockBot.sendMessage).toHaveBeenCalledWith(123, '⏰ [job] summarize today');
+    expect(mockT.send).toHaveBeenCalledWith(123, '⏰ [job] summarize today');
     expect(acp.prompt).toHaveBeenCalledWith('summarize today');
   });
 
@@ -1393,7 +1363,7 @@ describe('echoInjectedPrompts', () => {
     await bot.start();
     bot.enqueuePrompt('what is the weather', 123, undefined, undefined, 'http');
     await vi.advanceTimersByTimeAsync(1000);
-    expect(mockBot.sendMessage).toHaveBeenCalledWith(123, '🌐 [http] what is the weather');
+    expect(mockT.send).toHaveBeenCalledWith(123, '🌐 [http] what is the weather');
   });
 
   it('echoes a2a-sourced prompt with a2a label', async () => {
@@ -1401,7 +1371,7 @@ describe('echoInjectedPrompts', () => {
     await bot.start();
     bot.enqueuePrompt('review the latest PRs', 123, undefined, undefined, 'a2a');
     await vi.advanceTimersByTimeAsync(1000);
-    expect(mockBot.sendMessage).toHaveBeenCalledWith(123, '🔁 [a2a] review the latest PRs');
+    expect(mockT.send).toHaveBeenCalledWith(123, '🔁 [a2a] review the latest PRs');
   });
 
   it('does not echo when no source is provided (direct user message)', async () => {
@@ -1410,7 +1380,7 @@ describe('echoInjectedPrompts', () => {
     bot.enqueuePrompt('test prompt', 123);
     await vi.advanceTimersByTimeAsync(1000);
     // No echo message should be sent — only the agent response
-    const calls = mockBot.sendMessage.mock.calls.filter(
+    const calls = mockT.send.mock.calls.filter(
       (c) => c[1] !== 'Hello back' && c[1] !== 'test prompt'
     );
     expect(calls.some((c) => c[1]?.includes('[job]') || c[1]?.includes('[http]'))).toBe(false);
@@ -1422,7 +1392,7 @@ describe('echoInjectedPrompts', () => {
     await bot.start();
     bot.enqueuePrompt('summarize today', 123, undefined, undefined, 'job');
     await vi.advanceTimersByTimeAsync(1000);
-    const echoCalls = mockBot.sendMessage.mock.calls.filter(
+    const echoCalls = mockT.send.mock.calls.filter(
       (c) => typeof c[1] === 'string' && c[1].includes('[job]')
     );
     expect(echoCalls).toHaveLength(0);
@@ -1435,7 +1405,7 @@ describe('echoInjectedPrompts', () => {
     const longPrompt = 'a'.repeat(250);
     bot.enqueuePrompt(longPrompt, 123, undefined, undefined, 'job');
     await vi.advanceTimersByTimeAsync(1000);
-    const echoCall = mockBot.sendMessage.mock.calls.find(
+    const echoCall = mockT.send.mock.calls.find(
       (c) => typeof c[1] === 'string' && c[1].includes('[job]')
     );
     expect(echoCall).toBeDefined();
@@ -1448,7 +1418,7 @@ describe('echoInjectedPrompts', () => {
     await bot.start();
     bot.enqueuePrompt('test', 123, undefined, undefined, 'job');
     await vi.advanceTimersByTimeAsync(1000);
-    const echoCall = mockBot.sendMessage.mock.calls.find(
+    const echoCall = mockT.send.mock.calls.find(
       (c) => typeof c[1] === 'string' && c[1].includes('[job]')
     );
     expect(echoCall).toBeDefined();
@@ -1467,7 +1437,7 @@ describe('queued reaction', () => {
   it('adds 😴 reaction to user message while bot is busy', async () => {
     const { bot, acp } = createBot();
     await bot.start();
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    const handler = onMessage;
 
     // Keep the first prompt blocked so the bot stays busy
     let release: ((v: MockAcpUpdate) => void) | undefined;
@@ -1480,9 +1450,7 @@ describe('queued reaction', () => {
     await handler({ chat: { id: 123 }, message_id: 1, text: 'first prompt' });
     await handler({ chat: { id: 123 }, message_id: 2, text: 'second prompt' });
 
-    expect(mockBot.setMessageReaction).toHaveBeenCalledWith(123, 2, {
-      reaction: [{ type: 'emoji', emoji: '😴' }],
-    });
+    expect(mockT.react).toHaveBeenCalledWith(123, 2, '😴');
     release?.({ kind: 'stop', stopReason: 'end_turn' });
     await vi.advanceTimersByTimeAsync(1000);
   });
@@ -1490,7 +1458,7 @@ describe('queued reaction', () => {
   it('clears the reaction when the queued item starts processing', async () => {
     const { bot, acp } = createBot();
     await bot.start();
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    const handler = onMessage;
 
     let release: ((v: MockAcpUpdate) => void) | undefined;
     acp.nextUpdate.mockImplementationOnce(
@@ -1505,18 +1473,16 @@ describe('queued reaction', () => {
     release?.({ kind: 'stop', stopReason: 'end_turn' });
     await vi.advanceTimersByTimeAsync(1000);
 
-    expect(mockBot.setMessageReaction).toHaveBeenCalledWith(123, 2, {
-      reaction: [],
-    });
+    expect(mockT.react).toHaveBeenCalledWith(123, 2, '😴', true);
   });
 
   it('does not react when bot is not busy', async () => {
     const { bot } = createBot();
     await bot.start();
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    const handler = onMessage;
     await handler({ chat: { id: 123 }, message_id: 1, text: 'hello' });
     await vi.advanceTimersByTimeAsync(1000);
-    expect(mockBot.setMessageReaction).not.toHaveBeenCalled();
+    expect(mockT.react).not.toHaveBeenCalled();
   });
 });
 
@@ -1532,7 +1498,7 @@ describe('reply-to context', () => {
   it('prepends replied-to message text as context', async () => {
     const { bot, acp } = createBot();
     await bot.start();
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    const handler = onMessage;
     await handler({
       chat: { id: 123 },
       message_id: 2,
@@ -1548,7 +1514,7 @@ describe('reply-to context', () => {
   it('omits author when replied message has no username', async () => {
     const { bot, acp } = createBot();
     await bot.start();
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    const handler = onMessage;
     await handler({
       chat: { id: 123 },
       message_id: 2,
@@ -1562,7 +1528,7 @@ describe('reply-to context', () => {
   it('ignores replies to messages with no text or caption', async () => {
     const { bot, acp } = createBot();
     await bot.start();
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    const handler = onMessage;
     await handler({
       chat: { id: 123 },
       message_id: 2,
@@ -1576,7 +1542,7 @@ describe('reply-to context', () => {
   it('truncates long quoted text at 300 chars', async () => {
     const { bot, acp } = createBot();
     await bot.start();
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    const handler = onMessage;
     await handler({
       chat: { id: 123 },
       message_id: 2,
@@ -1611,14 +1577,14 @@ describe('/queue and /status', () => {
   it('/queue lists pending prompts', async () => {
     const { bot, acp } = createBot();
     await bot.start();
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    const handler = onMessage;
     const unblock = blockAgent(acp);
     await handler({ chat: { id: 123 }, message_id: 1, text: 'busy prompt' });
     await handler({ chat: { id: 123 }, message_id: 2, text: 'queued one' });
     await handler({ chat: { id: 123 }, message_id: 3, text: 'queued two' });
 
     await handler({ chat: { id: 123 }, message_id: 4, text: '/queue' });
-    const call = mockBot.sendMessage.mock.calls.find(
+    const call = mockT.send.mock.calls.find(
       (c) => typeof c[1] === 'string' && c[1].includes('Queued prompts')
     );
     expect(call).toBeDefined();
@@ -1631,30 +1597,28 @@ describe('/queue and /status', () => {
   it('/queue on empty queue reports empty', async () => {
     const { bot } = createBot();
     await bot.start();
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    const handler = onMessage;
     await handler({ chat: { id: 123 }, message_id: 1, text: '/queue' });
-    expect(mockBot.sendMessage).toHaveBeenCalledWith(123, 'Queue is empty.', {
-      parse_mode: 'Markdown',
+    expect(mockT.send).toHaveBeenCalledWith(123, 'Queue is empty.', {
+      parseMode: 'Markdown',
     });
   });
 
   it('/queue cancel removes the item at position', async () => {
     const { bot, acp } = createBot();
     await bot.start();
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    const handler = onMessage;
     const unblock = blockAgent(acp);
     await handler({ chat: { id: 123 }, message_id: 1, text: 'busy prompt' });
     await handler({ chat: { id: 123 }, message_id: 2, text: 'first queued' });
     await handler({ chat: { id: 123 }, message_id: 3, text: 'second queued' });
 
     await handler({ chat: { id: 123 }, message_id: 4, text: '/queue cancel 1' });
-    expect(mockBot.sendMessage).toHaveBeenCalledWith(
-      123,
-      '🗑 Cancelled queued prompt 1: first queued',
-      { parse_mode: 'Markdown' }
-    );
+    expect(mockT.send).toHaveBeenCalledWith(123, '🗑 Cancelled queued prompt 1: first queued', {
+      parseMode: 'Markdown',
+    });
     // Cleared the queued reaction on the removed item
-    expect(mockBot.setMessageReaction).toHaveBeenCalledWith(123, 2, { reaction: [] });
+    expect(mockT.react).toHaveBeenCalledWith(123, 2, '😴', true);
     unblock();
     await vi.advanceTimersByTimeAsync(1000);
   });
@@ -1662,25 +1626,25 @@ describe('/queue and /status', () => {
   it('/queue rm with invalid index shows usage', async () => {
     const { bot } = createBot();
     await bot.start();
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    const handler = onMessage;
     await handler({ chat: { id: 123 }, message_id: 1, text: '/queue cancel 9' });
-    expect(mockBot.sendMessage).toHaveBeenCalledWith(123, 'Usage: /queue rm `<position>`', {
-      parse_mode: 'Markdown',
+    expect(mockT.send).toHaveBeenCalledWith(123, 'Usage: /queue rm `<position>`', {
+      parseMode: 'Markdown',
     });
   });
 
   it('/queue clear removes all pending prompts', async () => {
     const { bot, acp } = createBot();
     await bot.start();
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    const handler = onMessage;
     const unblock = blockAgent(acp);
     await handler({ chat: { id: 123 }, message_id: 1, text: 'busy prompt' });
     await handler({ chat: { id: 123 }, message_id: 2, text: 'one' });
     await handler({ chat: { id: 123 }, message_id: 3, text: 'two' });
 
     await handler({ chat: { id: 123 }, message_id: 4, text: '/queue clear' });
-    expect(mockBot.sendMessage).toHaveBeenCalledWith(123, '🗑 Cleared 2 queued prompt(s).', {
-      parse_mode: 'Markdown',
+    expect(mockT.send).toHaveBeenCalledWith(123, '🗑 Cleared 2 queued prompt(s).', {
+      parseMode: 'Markdown',
     });
     unblock();
     await vi.advanceTimersByTimeAsync(1000);
@@ -1691,9 +1655,9 @@ describe('/queue and /status', () => {
   it('/status reports agent state, session, queue and uptime', async () => {
     const { bot } = createBot();
     await bot.start();
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    const handler = onMessage;
     await handler({ chat: { id: 123 }, message_id: 1, text: '/status' });
-    const call = mockBot.sendMessage.mock.calls.find(
+    const call = mockT.send.mock.calls.find(
       (c) => typeof c[1] === 'string' && c[1].includes('agent:')
     );
     expect(call).toBeDefined();
@@ -1711,9 +1675,9 @@ describe('/queue and /status', () => {
       networkSummary: () => '2 approved · 1 pending',
     });
     await bot.start();
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    const handler = onMessage;
     await handler({ chat: { id: 123 }, message_id: 1, text: '/status' });
-    const call = mockBot.sendMessage.mock.calls.find(
+    const call = mockT.send.mock.calls.find(
       (c) => typeof c[1] === 'string' && c[1].includes('agent:')
     );
     expect(call[1]).toContain('⏰ 2 job(s) (1 once · 1 manual) — next "standup" in 3h');
@@ -1724,9 +1688,9 @@ describe('/queue and /status', () => {
     const { bot, acp } = createBot();
     acp.sessionId = 's1';
     await bot.start();
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    const handler = onMessage;
     await handler({ chat: { id: 123 }, message_id: 1, text: '/status' });
-    const call = mockBot.sendMessage.mock.calls.find(
+    const call = mockT.send.mock.calls.find(
       (c) => typeof c[1] === 'string' && c[1].includes('session:')
     );
     expect(call[1]).toContain('`s1` — "Session 1"');
@@ -1736,9 +1700,9 @@ describe('/queue and /status', () => {
     const { bot, acp } = createBot();
     acp.listSessions.mockRejectedValue(new Error('Agent does not support session/list'));
     await bot.start();
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    const handler = onMessage;
     await handler({ chat: { id: 123 }, message_id: 1, text: '/status' });
-    const call = mockBot.sendMessage.mock.calls.find(
+    const call = mockT.send.mock.calls.find(
       (c) => typeof c[1] === 'string' && c[1].includes('session:')
     );
     expect(call[1]).toContain('`test-session-id`');
@@ -1749,7 +1713,7 @@ describe('/queue and /status', () => {
     const { bot } = createBot();
     await bot.start();
     await bot.sendMessage(123, 'x'.repeat(5000));
-    const calls = mockBot.sendMessage.mock.calls.filter((c) => c[0] === 123);
+    const calls = mockT.send.mock.calls.filter((c) => c[0] === 123);
     expect(calls.length).toBe(2);
     expect((calls[0][1] as string).length).toBe(4096);
     expect((calls[1][1] as string).length).toBe(904);
@@ -1760,7 +1724,7 @@ describe('/queue and /status', () => {
     await bot.start();
     const text = `${'a'.repeat(4000)}\n\n${'b'.repeat(4000)}`;
     await bot.sendMessage(123, text);
-    const calls = mockBot.sendMessage.mock.calls.filter((c) => c[0] === 123);
+    const calls = mockT.send.mock.calls.filter((c) => c[0] === 123);
     expect(calls.length).toBe(2);
     expect((calls[0][1] as string).length).toBe(4000);
     expect((calls[1][1] as string).startsWith('\n\n')).toBe(true);
@@ -1771,7 +1735,7 @@ describe('/queue and /status', () => {
     await bot.start();
     const text = `${'a'.repeat(3000)}\n${'b'.repeat(3000)}`;
     await bot.sendMessage(123, text);
-    const calls = mockBot.sendMessage.mock.calls.filter((c) => c[0] === 123);
+    const calls = mockT.send.mock.calls.filter((c) => c[0] === 123);
     expect(calls.length).toBe(2);
     expect((calls[0][1] as string).length).toBe(3000);
   });
@@ -1781,7 +1745,7 @@ describe('/queue and /status', () => {
     await bot.start();
     const text = `${'a'.repeat(3000)} ${'b'.repeat(3000)}`;
     await bot.sendMessage(123, text);
-    const calls = mockBot.sendMessage.mock.calls.filter((c) => c[0] === 123);
+    const calls = mockT.send.mock.calls.filter((c) => c[0] === 123);
     expect(calls.length).toBe(2);
     expect((calls[0][1] as string).length).toBe(3000);
   });
@@ -1789,26 +1753,25 @@ describe('/queue and /status', () => {
   it('sendMessage threads continuation chunks as replies to the first', async () => {
     const { bot } = createBot();
     await bot.start();
-    mockBot.sendMessage
-      .mockResolvedValueOnce({ message_id: 101 })
-      .mockResolvedValueOnce({ message_id: 102 });
+    mockT.send
+      .mockResolvedValueOnce([null, { messageId: 101 }])
+      .mockResolvedValueOnce([null, { messageId: 102 }]);
     await bot.sendMessage(123, 'x'.repeat(5000));
-    const calls = mockBot.sendMessage.mock.calls.filter((c) => c[0] === 123);
+    const calls = mockT.send.mock.calls.filter((c) => c[0] === 123);
     expect(calls.length).toBe(2);
     const firstOpts = calls[0][2] as Record<string, unknown>;
     const secondOpts = calls[1][2] as Record<string, unknown>;
-    expect(firstOpts.reply_to_message_id).toBeUndefined();
-    expect(secondOpts.reply_to_message_id).toBe(101);
-    expect(secondOpts.allow_sending_without_reply).toBe(true);
+    expect(firstOpts.replyToId).toBeUndefined();
+    expect(secondOpts.replyToId).toBe(101);
   });
 
   it('reports message handler errors without rejecting', async () => {
     const { bot } = createBot();
     await bot.start();
-    mockBot.sendMessage.mockRejectedValueOnce(new Error('boom'));
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
+    mockT.send.mockResolvedValueOnce([{ kind: 'api', message: 'boom' }, null]);
+    const handler = onMessage;
     await handler({ chat: { id: 123 }, message_id: 1, text: '/config model' });
-    const report = mockBot.sendMessage.mock.calls.find(
+    const report = mockT.send.mock.calls.find(
       (c) => typeof c[1] === 'string' && c[1].includes('⚠️')
     );
     expect(report).toBeDefined();

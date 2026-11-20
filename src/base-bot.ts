@@ -118,6 +118,11 @@ export abstract class BaseBot implements PlatformBot {
   protected webhooks: WebhookEmitter | null = null;
   /** Most recent prompt-processing failure — surfaced by /status. */
   private lastError: { message: string; at: number } | null;
+  /** Transport health for /status — subclasses with a transport override it. */
+  transportHealth?(): {
+    ok: boolean;
+    lastError?: { kind: string; message: string; at: number };
+  };
 
   protected abstract readonly maxLen: number;
 
@@ -583,6 +588,14 @@ export abstract class BaseBot implements PlatformBot {
       `🆔 session: ${session}`,
       `📋 queue: ${this.queue.length} pending${jobs ? ` · ⏰ ${jobs}` : ''}`,
     ];
+    const health = this.transportHealth?.();
+    if (health) {
+      const icon = health.ok ? '✅' : '⚠️';
+      const detail = health.lastError
+        ? ` (last: ${health.lastError.kind} — ${health.lastError.message.slice(0, 80)}, ${this._formatSessionAge(new Date(health.lastError.at).toISOString())})`
+        : '';
+      lines.push(`${icon} transport: ${health.ok ? 'ok' : 'degraded'}${detail}`);
+    }
     if (this.lastError) {
       const ago = this._formatSessionAge(new Date(this.lastError.at).toISOString());
       lines.push(`⚠️ last error: ${this.lastError.message.slice(0, 120)} (${ago})`);

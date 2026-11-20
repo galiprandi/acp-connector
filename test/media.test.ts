@@ -5,35 +5,9 @@ import type { AcpClient } from '../src/acp-client';
 
 type MockFn = ReturnType<typeof vi.fn>;
 
-interface MockBot {
-  on: MockFn;
-  sendMessage: MockFn;
-  editMessageText: MockFn;
-  answerCallbackQuery: MockFn;
-  stopPolling: MockFn;
-  getFileLink: MockFn;
-}
+import { createMockTransport, tgMessage } from './helpers/mock-transport';
 
-// Mock node-telegram-bot-api
-const mockBot: MockBot = {
-  on: vi.fn(),
-  sendMessage: vi.fn(async () => ({ message_id: 1 })),
-  editMessageText: vi.fn(async () => ({})),
-  answerCallbackQuery: vi.fn(async () => ({})),
-  stopPolling: vi.fn(),
-  getFileLink: vi.fn(async () => 'https://example.com/file.jpg'),
-};
-
-vi.mock('node-telegram-bot-api', () => ({
-  default: class MockTelegramBot {
-    on = mockBot.on;
-    sendMessage = mockBot.sendMessage;
-    editMessageText = mockBot.editMessageText;
-    answerCallbackQuery = mockBot.answerCallbackQuery;
-    stopPolling = mockBot.stopPolling;
-    getFileLink = mockBot.getFileLink;
-  },
-}));
+const mockT = createMockTransport();
 
 // Mock fetch for downloads
 const mockFetch: MockFn = vi.fn(async () => ({
@@ -89,7 +63,7 @@ function createBot(opts: BotOverrides = {}) {
   });
   const bot = new BridgeBot({
     acp: acp as unknown as AcpClient,
-    telegramToken: 'test-token',
+    transport: mockT,
     allowedChatIds: [123],
     agentCmd: 'acp-agent serve',
     mediaHandler,
@@ -285,8 +259,7 @@ describe('BridgeBot media handling', () => {
   it('downloads and processes photo messages', async () => {
     const { bot, acp } = createBot();
     await bot.start();
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
-    await handler({
+    await tgMessage(mockT, {
       chat: { id: 123 },
       photo: [{ file_id: 'photo1', file_unique_id: 'u1' }],
       caption: 'check this out',
@@ -302,8 +275,7 @@ describe('BridgeBot media handling', () => {
   it('downloads and processes document messages', async () => {
     const { bot, acp } = createBot();
     await bot.start();
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
-    await handler({
+    await tgMessage(mockT, {
       chat: { id: 123 },
       document: { file_id: 'doc1', file_name: 'report.pdf', mime_type: 'application/pdf' },
     });
@@ -322,14 +294,13 @@ describe('BridgeBot media handling', () => {
     });
     const bot = new BridgeBot({
       acp: acp as unknown as AcpClient,
-      telegramToken: 'test-token',
+      transport: mockT,
       allowedChatIds: [123],
       agentCmd: 'acp-agent serve',
       mediaHandler,
     });
     await bot.start();
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
-    await handler({
+    await tgMessage(mockT, {
       chat: { id: 123 },
       photo: [{ file_id: 'photo1', file_unique_id: 'u1' }],
     });
@@ -342,14 +313,13 @@ describe('BridgeBot media handling', () => {
   it('sends error message on download failure', async () => {
     const { bot, acp } = createBot();
     await bot.start();
-    mockBot.getFileLink.mockRejectedValueOnce(new Error('network error'));
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
-    await handler({
+    mockT.fileUrl.mockResolvedValueOnce([{ kind: 'network', message: 'network error' }, null]);
+    await tgMessage(mockT, {
       chat: { id: 123 },
       photo: [{ file_id: 'photo1', file_unique_id: 'u1' }],
     });
     await vi.waitFor(() => {
-      expect(mockBot.sendMessage).toHaveBeenCalledWith(
+      expect(mockT.send).toHaveBeenCalledWith(
         123,
         expect.stringContaining('Error downloading media')
       );
@@ -361,25 +331,23 @@ describe('BridgeBot media handling', () => {
     const acp = createMockAcp();
     const bot = new BridgeBot({
       acp: acp as unknown as AcpClient,
-      telegramToken: 'test-token',
+      transport: mockT,
       allowedChatIds: [123],
       agentCmd: 'acp-agent serve',
     });
     await bot.start();
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
-    await handler({
+    await tgMessage(mockT, {
       chat: { id: 123 },
       photo: [{ file_id: 'photo1', file_unique_id: 'u1' }],
     });
-    expect(mockBot.sendMessage).toHaveBeenCalledWith(123, 'Media no soportado');
+    expect(mockT.send).toHaveBeenCalledWith(123, 'Media no soportado');
     expect(acp.prompt).not.toHaveBeenCalled();
   });
 
   it('handles sticker messages', async () => {
     const { bot, acp } = createBot();
     await bot.start();
-    const handler = mockBot.on.mock.calls.find((c) => c[0] === 'message')[1];
-    await handler({
+    await tgMessage(mockT, {
       chat: { id: 123 },
       sticker: { file_id: 'sticker1' },
     });
