@@ -5,7 +5,7 @@ All notable changes to acp-connector will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.21.0] - 2026-11-20
 
 ### Changed
 - **Transport layer**: platform I/O now goes through an explicit `PlatformTransport` contract (`src/transport/`) shared by Telegram, Discord and a loopback reference implementation. Expected platform failures return error-first `Result<T>` tuples classified as `network`/`rate_limited`/`api`/`fatal` — the caller decides retry/propagate — while bugs still throw. Transient failures get bounded exponential-backoff retries that honor `retry_after`
