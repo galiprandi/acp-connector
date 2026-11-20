@@ -63,17 +63,10 @@ Mandatory flows for any session-related change: `session/new` (fresh),
 `session/load`/`session/resume` (existing id), `session/prompt`, plus the
 touched feature.
 
-## 4. Docs sync (same commit, no exceptions)
-
-Every feature/behavior/command/API change updates in the SAME commit:
-`README.md`, `AGENTS.md`, `acp-connector.example.jsonc`, `CHANGELOG.md`,
-and operator skills (`.devin/skills/`). Pre-commit regenerates
-`BEHAVIOR.md` automatically.
-
 ## Release order
 
 1. `pnpm test && pnpm lint && pnpm typecheck` — green
 2. `pnpm test:matrix` — green (or documented skips)
 3. Targeted smoke for uncovered surface
-4. Docs synced, conventional commit, `chore(release): vX.Y.Z` + tag + push
+4. `CHANGELOG.md` updated, conventional commit, `chore(release): vX.Y.Z` + tag + push
 5. GitHub release → publish workflow → `npm view acp-connector version`

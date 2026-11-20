@@ -26,8 +26,6 @@ Thin bridge connecting messaging platforms to any ACP-compatible coding agent vi
 
 All commits MUST follow [Conventional Commits](https://www.conventionalcommits.org/):
 
-**Docs sync is mandatory**: every feature/behavior/command/API change MUST update `README.md`, `AGENTS.md`, `acp-connector.example.jsonc`, `CHANGELOG.md` **and the operator skills** (`.devin/skills/` and any `~/skills/acp-connector*` references) in the same commit — no exceptions, no follow-ups.
-
 **All test text MUST be in English** — test descriptions (`describe`/`it`), string literals, assertions, and comments. User-facing bot messages must also be in English so tests can match them cleanly.
 
 ```
