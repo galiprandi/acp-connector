@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Crash on Telegram network blips**: a floating `callback_query` handler plus fire-and-forget `answerCallbackQuery` calls could reject during connectivity failures and kill the process via `unhandledRejection`. Callback errors are now caught and logged, and a top-level `unhandledRejection` handler keeps the bridge alive (logs the stack instead of crashing)
+- **AggregateError storms on broken IPv6**: DNS resolution now prefers IPv4 (`setDefaultResultOrder('ipv4first')`) — on hosts with half-configured IPv6 the default order produced repeated `EFATAL: AggregateError` polling failures against `api.telegram.org`
+
 ## [0.20.0] - 2026-11-18
 
 ### Added

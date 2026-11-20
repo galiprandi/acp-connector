@@ -152,7 +152,11 @@ export class BridgeBot extends BaseBot {
         }
       })
     );
-    this.bot.on('callback_query', (query) => this._onCallbackQuery(query));
+    this.bot.on('callback_query', (query) =>
+      this._onCallbackQuery(query).catch((err) =>
+        log.error('Callback query error:', errorMessage(err))
+      )
+    );
     this.bot.on('polling_error', (err) => log.error('TG polling error:', err.message));
   }
 
