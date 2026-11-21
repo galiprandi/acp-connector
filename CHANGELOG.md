@@ -5,6 +5,11 @@ All notable changes to acp-connector will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.21.1] - 2026-11-20
+
+### Fixed
+- **Typing indicator gaps**: `sendChatAction`/`sendTyping` now also runs during the pre-processing window — media download and voice transcription happened before the prompt was enqueued, leaving chats with zero feedback for seconds to minutes. A transient pinger covers the gap; the main loop takes over when processing starts. Typing failures are now logged (debug) and feed transport `/status` health instead of being silently discarded
+
 ## [0.21.0] - 2026-11-20
 
 ### Changed
