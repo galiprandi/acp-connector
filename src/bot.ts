@@ -168,6 +168,7 @@ export class BridgeBot extends BaseBot {
   }
 
   stop(): void {
+    this._stopTypingLoop();
     this.transport.stop();
   }
 
@@ -363,13 +364,14 @@ export class BridgeBot extends BaseBot {
       return;
     }
 
-    const [linkErr, link] = await this.transport.fileUrl(media.fileId);
-    if (linkErr || !link) {
-      log.error('Media file link failed:', linkErr?.message);
-      await this.transport.send(chatId, `Error downloading media: ${linkErr?.message}`);
-      return;
-    }
+    const stopTyping = this._startTransientTyping(chatId);
     try {
+      const [linkErr, link] = await this.transport.fileUrl(media.fileId);
+      if (linkErr || !link) {
+        log.error('Media file link failed:', linkErr?.message);
+        await this.transport.send(chatId, `Error downloading media: ${linkErr?.message}`);
+        return;
+      }
       const blocks = await mediaHandler.processMedia(
         () => fetchBuffer(link),
         media.mimeType,
@@ -388,6 +390,8 @@ export class BridgeBot extends BaseBot {
     } catch (err) {
       log.error('Media download failed:', errorMessage(err));
       await this.transport.send(chatId, `Error downloading media: ${errorMessage(err)}`);
+    } finally {
+      stopTyping();
     }
   }
 
@@ -402,6 +406,7 @@ export class BridgeBot extends BaseBot {
     const messageId = msg.messageId;
     const mediaHandler = this.mediaHandler;
     if (!mediaHandler || !this.transport.fileUrl) return;
+    const stopTyping = this._startTransientTyping(chatId);
     await this._addTranscribingReaction(chatId, messageId).catch(() => {});
     try {
       const [linkErr, link] = await this.transport.fileUrl(fileId);
@@ -425,6 +430,7 @@ export class BridgeBot extends BaseBot {
       log.error('Voice transcription failed:', errorMessage(err));
       await this.transport.send(chatId, '🎙️ Transcription failed — please resend the voice note.');
     } finally {
+      stopTyping();
       await this._clearTranscribingReaction(chatId, messageId).catch(() => {});
     }
   }
@@ -586,10 +592,11 @@ export class BridgeBot extends BaseBot {
     }
   }
 
-  protected _sendTypingIndicator(): void {
-    const chatId = this._currentChannel() as number;
-    if (!chatId || !this.transport.typing) return;
-    void this.transport.typing(chatId);
+  protected _sendTypingTo(chatId: string | number): void {
+    if (!this.transport.typing) return;
+    void this.transport.typing(chatId).then(([e]) => {
+      if (e) log.debug(`typing indicator failed (${e.kind}): ${e.message}`);
+    });
   }
 
   async notifyAgentExit(code: number | null): Promise<void> {

@@ -984,6 +984,7 @@ export abstract class BaseBot implements PlatformBot {
    * Discord's sendTyping after ~10s — re-send every 4s while busy.
    */
   protected _startTypingLoop(): void {
+    this._stopTypingLoop();
     this._sendTypingIndicator();
     this.typingTimer = setInterval(() => {
       this._sendTypingIndicator();
@@ -998,8 +999,28 @@ export abstract class BaseBot implements PlatformBot {
     }
   }
 
-  /** Platform-specific typing action. No-op default for platforms without it. */
-  protected _sendTypingIndicator(): void {}
+  /**
+   * Typing feedback for the gap between message receipt and queue processing
+   * (media download, voice transcription) where the busy-loop is not running
+   * yet. Sends immediately, repeats every 4s; the returned disposer stops it —
+   * callers must invoke it once the item is enqueued (the main loop takes over)
+   * or processing fails.
+   */
+  protected _startTransientTyping(channelId: string | number): () => void {
+    this._sendTypingTo(channelId);
+    const timer = setInterval(() => this._sendTypingTo(channelId), 4000);
+    timer.unref?.();
+    return () => clearInterval(timer);
+  }
+
+  /** Typing action for the currently processing channel. */
+  protected _sendTypingIndicator(): void {
+    const channelId = this._currentChannel();
+    if (channelId != null) this._sendTypingTo(channelId);
+  }
+
+  /** Platform-specific typing action for an explicit channel. No-op default. */
+  protected _sendTypingTo(_channelId: string | number): void {}
 
   // biome-ignore lint/suspicious/noExplicitAny: SDK update types are complex and dynamic
   protected _handleUpdate(update: any): void {

@@ -1017,6 +1017,59 @@ describe('BridgeBot', () => {
     expect(mockT.typing).toHaveBeenCalledTimes(2);
   });
 
+  it('shows typing during media download before the prompt is enqueued', async () => {
+    let resolveMedia: (blocks: unknown) => void = () => {};
+    const mediaHandler = {
+      canTranscribe: false,
+      processMedia: vi.fn(
+        () =>
+          new Promise((res) => {
+            resolveMedia = res;
+          })
+      ),
+      processVoiceNote: vi.fn(),
+    };
+    const { bot } = createBot({ mediaHandler: mediaHandler as never });
+    await bot.start();
+    const pending = onMessage({ chat: { id: 123 }, message_id: 9, photo: [{ file_id: 'f1' }] });
+    // Media processing is still pending — transient typing must already fire.
+    await vi.waitFor(() => expect(mockT.typing).toHaveBeenCalledWith(123));
+    const callsBeforeResolve = mockT.typing.mock.calls.length;
+    // Repeat every 4s while media is being processed.
+    await vi.waitFor(() => expect(mediaHandler.processMedia).toHaveBeenCalled());
+    await vi.advanceTimersByTimeAsync(4500);
+    expect(mockT.typing.mock.calls.length).toBeGreaterThan(callsBeforeResolve);
+    resolveMedia([{ type: 'text', text: 'image' }]);
+    await vi.advanceTimersByTimeAsync(10);
+    await pending;
+  });
+
+  it('shows typing during voice transcription before the prompt is enqueued', async () => {
+    let resolveVoice: (blocks: unknown) => void = () => {};
+    const mediaHandler = {
+      canTranscribe: true,
+      processMedia: vi.fn(),
+      processVoiceNote: vi.fn(
+        () =>
+          new Promise((res) => {
+            resolveVoice = res;
+          })
+      ),
+    };
+    const { bot } = createBot({ mediaHandler: mediaHandler as never });
+    await bot.start();
+    const pending = onMessage({
+      chat: { id: 123 },
+      message_id: 10,
+      voice: { file_id: 'v1', mime_type: 'audio/ogg' },
+    });
+    await vi.waitFor(() => expect(mockT.typing).toHaveBeenCalledWith(123));
+    await vi.waitFor(() => expect(mediaHandler.processVoiceNote).toHaveBeenCalled());
+    resolveVoice([{ type: 'text', text: 'transcript' }]);
+    await vi.advanceTimersByTimeAsync(10);
+    await pending;
+  });
+
   // --- Agent exit / reconnect ---
 
   it('notifyAgentExit sends a reconnect button to allowed chats', async () => {

@@ -116,6 +116,7 @@ export class DiscordBot extends BaseBot {
   }
 
   stop(): void {
+    this._stopTypingLoop();
     this.transport.stop();
   }
 
@@ -283,6 +284,7 @@ export class DiscordBot extends BaseBot {
       return;
     }
 
+    const stopTyping = this._startTransientTyping(channelId);
     try {
       const allBlocks: ContentBlock[] = [];
       for (const [, attachment] of raw.attachments) {
@@ -308,6 +310,8 @@ export class DiscordBot extends BaseBot {
     } catch (err) {
       log.error('Discord media download failed:', errorMessage(err));
       await this.transport.send(channelId, `Error downloading media: ${errorMessage(err)}`);
+    } finally {
+      stopTyping();
     }
   }
 
@@ -320,6 +324,7 @@ export class DiscordBot extends BaseBot {
     const mediaHandler = this.mediaHandler;
     if (!mediaHandler) return;
     const messageId = msg.messageId;
+    const stopTyping = this._startTransientTyping(channelId);
     await this._addTranscribingReaction(channelId, messageId);
     try {
       const allBlocks: ContentBlock[] = [];
@@ -349,6 +354,7 @@ export class DiscordBot extends BaseBot {
         '🎙️ Transcription failed — please resend the voice message.'
       );
     } finally {
+      stopTyping();
       await this._clearTranscribingReaction(channelId, messageId);
     }
   }
@@ -521,10 +527,11 @@ export class DiscordBot extends BaseBot {
     }
   }
 
-  protected _sendTypingIndicator(): void {
-    const channelId = this._currentChannel();
-    if (!channelId || !this.transport.typing) return;
-    void this.transport.typing(channelId);
+  protected _sendTypingTo(channelId: string | number): void {
+    if (!this.transport.typing) return;
+    void this.transport.typing(channelId).then(([e]) => {
+      if (e) log.debug(`typing indicator failed (${e.kind}): ${e.message}`);
+    });
   }
 
   async notifyAgentExit(code: number | null): Promise<void> {
